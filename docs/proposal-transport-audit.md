@@ -81,6 +81,15 @@ must survive an eventual encoding; it is not a declared wire format.
 
 ## Serialization finding
 
+Additional first-party source check: `base/content/base.zip!base/serialize.lua`
+129-156 does contain generic userdata introspection via metatable/member access.
+This qualifies the earlier declaration-only search: there is a diagnostic
+serializer, not an identified lossless Proposal wire codec. It can emit
+`[truncated]`, fallback `tostring(userdata)` or `<function>` markers, and supplies
+no inverse constructor. Its recursive introspection is not used by this mod.
+The explicit bounded copied-field route remains necessary unless a complete
+supported round-trip contract is established.
+
 The installed declarations expose these general serialize/deserialize operations:
 `app.saveUserdata(directory, fileName, table)` and
 `app.loadUserdata(...) : table`, at `api/tealdef/app.d.tl:137-157`. They are

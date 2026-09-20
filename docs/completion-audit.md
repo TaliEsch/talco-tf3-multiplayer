@@ -2,6 +2,33 @@
 
 ## Current status — 20 September 2026
 
+### Native extraction candidate — executable Lua fixture qualification
+
+Implemented `experimental/native-road-stop-capture.lua`, a passive fixed-field
+Proposal-to-JSON candidate matching the offline road-stop schema. Root review
+caught and repaired matrix append semantics, absent-component handling, null
+encoding, map value types, missing-enum equality, array bounds and exception
+redaction before registration. The candidate is still unregistered: no current
+game callback, mod package, save or world state was changed.
+
+Added pinned Fengari 0.1.5 as a development-only dependency with lockfile and
+licence notice; installed with lifecycle scripts disabled. Lua tests now execute
+the actual module with declared-shape fixtures and round-trip through the real
+JS codec. They cover matrices, reference maps, optional components, JSON escaping,
+unsupported variants, nonfinite data, throwing native-access mocks, 64-record
+and 256-KiB bounds. These are not TF3-native binding/permission tests.
+
+The independent diagnostic userdata decoder and checker mode accept bounded
+hex JSON without evaluating Lua or enlarging the gameplay IPC allowance. They
+explicitly leave freshness/reconstruction/execution unverified. Native writer
+wiring and engine reconstruction are still outstanding.
+
+Verification: full `npm run check` passed 654/654 (35.7 seconds). Review-bundle
+script syntax passed; its source list now includes lockfile, experimental code
+and tools required to reproduce tests. No bundle was built, mod staged, game
+launched or construction attempted. Next batch wires the reviewed capture into
+the observer and performs live extraction qualification; Phase 2 remains open.
+
 ### Offline road-stop representation — implemented, not engine connected
 
 Added a bounded, exact-field copied-proposal parser/canonicalizer and read-only

@@ -35,7 +35,9 @@ permission and the game EULA was not present. See [feasibility](docs/feasibility
 - Node.js 24 or newer (tested with 24.1.0)
 - A locally installed, supported TF3 build for `host`, `join`, or `hash-game`
 
-There are no npm dependencies and no install step.
+The launcher/helper have no npm runtime dependencies. Development tests use a
+pinned Lua VM; run `npm ci --ignore-scripts` before `npm run check`. This tests Lua
+logic against fixtures, not TF3's native bindings or restricted GUI contexts.
 
 ## Verify and test
 

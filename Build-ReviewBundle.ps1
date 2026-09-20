@@ -43,6 +43,7 @@ $topLevelFiles = @(
     'LICENSE',
     'NOTICE',
     'package.json',
+    'package-lock.json',
     'README.md',
     'REVIEW_CHECKLIST.md',
     'SECURITY.md',
@@ -51,7 +52,7 @@ $topLevelFiles = @(
     'TF3MP-Launcher.ps1',
     'THIRD_PARTY_NOTICES.md'
 )
-$directories = @('docs', 'launcher', 'mod', 'src', 'test')
+$directories = @('docs', 'experimental', 'launcher', 'mod', 'src', 'test', 'tools')
 $selected = @($topLevelFiles + $directories | ForEach-Object { Join-Path $projectRoot $_ })
 foreach ($path in $selected) {
     if (-not (Test-Path -LiteralPath $path)) { throw "Required bundle input is missing: $path" }

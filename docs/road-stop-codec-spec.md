@@ -27,6 +27,21 @@ by engine-side reconstruction qualification against the same normalized data.
 Keep the direct Proposal constructor route open; no SimpleProposal conversion is
 assumed. Admission before native spending is still a separate required gate.
 
+The extraction candidate now exists at `experimental/native-road-stop-capture.lua`.
+It copies fixed declared fields, maps enums by explicit constant equality, reads
+matrix columns through the documented 1..4 accessor, and returns bounded JSON
+or a fixed unsupported-field label. It is not registered in the mod. Executable
+Lua fixture tests round-trip its output through the JS canonicalizer; they do
+not establish TF3 enum bindings, GUI permission to read matrix columns, native
+data completeness, capture freshness or engine reconstruction.
+
+`src/road-stop-capture-envelope.mjs` defines the separate diagnostic userdata
+envelope (revision 7, stage/sequence, hex-encoded JSON). The checker accepts it
+with `--userdata`. This parser never evaluates Lua; arbitrary fields, duplicate
+keys, executable trailing text and invalid UTF-8 are rejected. The gameplay IPC
+parser retains its original 4096-byte limit. No native envelope writer is wired
+yet, and metadata alone never establishes capture freshness or execution rights.
+
 Revision 6 observed nine normal-builder events: each selected proposal exposed `proposal.proposal.addedSegments = 1`, `removedSegments = 1`, and `edgeObjectsToAdd = 1`; `addedNodes`, `removedNodes`, `proposal.toAdd`, `proposal.toRemove`, and apply `result` had count zero. It also read edge-object owner `3141`, `ProposalData.costs = 67500`, and `ProposalData.errorState.critical = false`. See `C:/Users/olihf/Downloads/Temp/tf3-multiplayer-prototype/docs/completion-audit.md:5-20` and the bounded collector at `C:/Users/olihf/Downloads/Temp/tf3-multiplayer-prototype/mod/content/tf3mp_proposal_facts.lua:44-104`.
 
 Those are selected facts, **not** proof that the three non-empty records have the same contents between runs, nor that every empty list is semantically irrelevant. Replacement requires both the removed existing road and the added road; the count says nothing about IDs, components, geometry, old/new maps, edge-object placement/model, terrain, or independently required payer context. `ProposalEventData` provides only a live `Proposal`, `ProposalData`, and result entity list; it does not include a `Context` (`E:/Steam/steamapps/common/Transport Fever 3/api/tealdef/api/type.d.tl:2801-2806`).

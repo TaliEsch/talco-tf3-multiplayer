@@ -45,8 +45,22 @@ for(const [name,bytes] of [
 });
 
 test('offline capture checker requires exactly one input path',async()=>{
-  for(const args of [[],['one','two']])await assert.rejects(run(process.execPath,[script,...args]),error=>{
+  for(const args of [[],['one','two'],['--userdata'],['--unknown','file'],['--userdata','file','extra']])await assert.rejects(run(process.execPath,[script,...args]),error=>{
     assert.equal(error.code,1);assert.equal(error.stdout,'');
     assert.match(error.stderr,/^Usage: node tools\/check-road-stop-capture\.mjs/);return true;
   });
+});
+
+test('userdata checker decodes only diagnostic envelope and does not certify freshness',async()=>{
+  const root=await mkdtemp(path.join(tmpdir(),'tf3mp-capture-envelope-'));
+  const filename=path.join(root,'capture.lua');
+  try{
+    const json=JSON.stringify(roadStopCaptureFixture()),hex=Buffer.from(json).toString('hex');
+    await writeFile(filename,`function data() return {schemaVersion=1,observerRevision=7,kind="native_road_stop_capture",stage="apply",sequence=2,captureHex="${hex}",} end`);
+    const {stdout,stderr}=await run(process.execPath,[script,'--userdata',filename]);
+    assert.equal(stderr,'');
+    assert.deepEqual(JSON.parse(stdout),{schemaVersion:1,code:'OFFLINE_CAPTURE_VALID',digest:parseRoadStopCapture(json).digest,
+      observerRevision:7,stage:'apply',sequence:2,freshnessVerified:false,addedSegments:1,removedSegments:1,edgeObjects:1,
+      nativeCaptureVerified:false,reconstructionVerified:false,executionAuthorized:false});
+  }finally{await rm(root,{recursive:true,force:true});}
 });
