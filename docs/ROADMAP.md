@@ -16,8 +16,9 @@ replay button or automatic construction in this build.
 
 The offline replay artifact now also binds the stop model's resource name and
 numeric ID. This prevents a same-ID/different-resource match from passing the
-offline identity check; the name still needs capture-time native evidence and
-reload-time resolution. The read-only baseline preflight is experimental, not a
+offline identity check. Source now captures the name through the protected native
+event callback and carries it in a schema-2 diagnostic envelope; this read still
+needs native permission qualification and reload-time resolution. The read-only baseline preflight is experimental, not a
 claim that the entire loaded save is identical. Replay uses the existing durable
 company transaction boundary; these preparation changes do not enable execution.
 

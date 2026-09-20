@@ -86,10 +86,13 @@ local record Tf3MpProposalFacts
 end
 local proposalFacts = ug_require "tf3mp_status_1::/tf3mp_proposal_facts.lua" as Tf3MpProposalFacts
 local record Tf3MpRoadCapture
-  collect : function(any, any) : table
+  collect : function(any, any, any) : table
 end
 local roadCapture = ug_require "tf3mp_status_1::/tf3mp_road_capture.lua" as Tf3MpRoadCapture
 local roadCaptureTypes = api.type
+local function roadCaptureModelName(modelId : integer) : string
+  return api.res.modelRep.getName(modelId)
+end
 
 local record Tf3MpGuiState
   status : string
@@ -156,13 +159,14 @@ local function observeNativePlacement(guiState : GameScriptState<Tf3MpGuiState>,
       if (isApply and current.roadCaptureApply == nil) or (not isApply and current.roadCaptureCreate == nil) then
         local captureOk, captureValue = pcall(function() : table
           local slots = param as table
-          return roadCapture.collect(slots[1], roadCaptureTypes)
+          return roadCapture.collect(slots[1], roadCaptureTypes, roadCaptureModelName)
         end)
         local result : table = { code = "unsupported", field = "callback" }
         if captureOk and type(captureValue) == "table" then
           local value = captureValue as table
-          if value.code == "captured" and type(value.json) == "string" and #value.json > 0 and #value.json <= 262144 then
-            result = { code = "captured", json = value.json, sequence = current.placementSequence }
+          if value.code == "captured" and type(value.json) == "string" and #value.json > 0 and #value.json <= 262144
+            and type(value.modelResourceName) == "string" and #value.modelResourceName > 0 and #value.modelResourceName <= 1024 then
+            result = { code = "captured", json = value.json, modelResourceName = value.modelResourceName, sequence = current.placementSequence }
           elseif value.code == "unsupported" and type(value.field) == "string" and #value.field <= 64 and value.field:match("^[A-Za-z0-9]+$") then
             result = { code = "unsupported", field = value.field }
           end

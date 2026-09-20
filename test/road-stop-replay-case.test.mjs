@@ -4,12 +4,14 @@ import {roadStopCaptureFixture} from './fixtures/road-stop-capture.mjs';
 import {createRoadStopReplayCase,parseRoadStopReplayCase,checkRoadStopReplayIdentity,checkRoadStopReplayResource,ROAD_STOP_REPLAY_CASE_MAX_BYTES} from '../src/road-stop-replay-case.mjs';
 const identity={saveSha256:'a'.repeat(64),gameSha256:'b'.repeat(64),modManifestSha256:'c'.repeat(64)};
 const modelResource={modelId:7,resourceName:'models/station/road_stop.mdl'};
-function envelope(stage='apply',capture=roadStopCaptureFixture()){
-  return `function data() return {schemaVersion=1,observerRevision=7,kind="native_road_stop_capture",stage="${stage}",sequence=2,captureHex="${Buffer.from(JSON.stringify(capture)).toString('hex')}",} end`;
+function envelope(stage='apply',capture=roadStopCaptureFixture(),version=2,name=modelResource.resourceName){
+  const metadata=version===2?`,modelNameHex="${Buffer.from(name).toString('hex')}"`:'';
+  return `function data() return {schemaVersion=${version},observerRevision=7,kind="native_road_stop_capture",stage="${stage}",sequence=2,captureHex="${Buffer.from(JSON.stringify(capture)).toString('hex')}"${metadata},} end`;
 }
-const make=(overrides={})=>createRoadStopReplayCase({applyEnvelope:envelope(),checkpoint:identity,companyEntity:10,modelResource,...overrides});
+const make=(overrides={})=>createRoadStopReplayCase({applyEnvelope:envelope(),checkpoint:identity,companyEntity:10,...overrides});
 test('replay artifact binds apply capture, original company, model resource and pre-placement checkpoint without granting execution',()=>{
   const result=make();
+  assert.equal(make({modelResource}).digest,result.digest);
   assert.deepEqual(parseRoadStopReplayCase(result.canonical),result);
   assert.equal(result.executionAuthorized,false);assert.equal(result.loadedCheckpointVerified,false);
   assert.deepEqual(checkRoadStopReplayIdentity(result.canonical,identity),{caseDigest:result.digest,identityMatches:true,executionAuthorized:false,loadedCheckpointVerified:false});
@@ -17,6 +19,7 @@ test('replay artifact binds apply capture, original company, model resource and 
 });
 test('preview/cancel, malformed capture and a different stop company cannot become replay cases',()=>{
   assert.throws(()=>make({applyEnvelope:envelope('create')}));
+  assert.throws(()=>make({applyEnvelope:envelope('apply',roadStopCaptureFixture(),1)}));
   assert.throws(()=>make({companyEntity:11}));
   for(const value of [0,-1,1.5,2147483648,'10'])assert.throws(()=>make({companyEntity:value}));
   assert.throws(()=>make({applyEnvelope:'function data() os.execute("bad") end'}));
@@ -40,10 +43,11 @@ test('resource identity is required, exact and cannot infer a name from a numeri
   const result=make();
   assert.throws(()=>make({modelResource:undefined}));
   assert.throws(()=>make({modelResource:{modelId:8,resourceName:modelResource.resourceName}}));
+  assert.throws(()=>make({modelResource:{modelId:7,resourceName:'models/station/other_stop.mdl'}}));
   assert.throws(()=>checkRoadStopReplayResource(result.canonical,{modelId:7,resourceName:'models/station/other_stop.mdl'}),/RESOURCE_MISMATCH/);
   assert.throws(()=>checkRoadStopReplayResource(result.canonical,{modelId:8,resourceName:modelResource.resourceName}),/RESOURCE_MISMATCH/);
   for(const resourceName of ['/models/road_stop.mdl','models/../road_stop.mdl','models\\road_stop.mdl','models/road_stop.lua','models/road\0stop.mdl',`${'a'.repeat(1021)}.mdl`])
-    assert.throws(()=>make({modelResource:{modelId:7,resourceName}}));
+    assert.throws(()=>make({applyEnvelope:envelope('apply',roadStopCaptureFixture(),2,resourceName)}));
   for(const bad of [{modelId:'7',resourceName:modelResource.resourceName},{modelId:7.5,resourceName:modelResource.resourceName},{modelId:-1,resourceName:modelResource.resourceName},{modelId:2147483648,resourceName:modelResource.resourceName},{modelId:7,resourceName:modelResource.resourceName,extra:true}])
     assert.throws(()=>make({modelResource:bad}));
 });

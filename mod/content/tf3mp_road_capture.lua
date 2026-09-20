@@ -129,7 +129,7 @@ local function encode(v, pieces)
     if isArray then add(pieces, "["); for x = 1, n do if x > 1 then add(pieces, ",") end; encode(v[x], pieces) end; add(pieces, "]") else add(pieces, "{"); local keys = {}; for k in pairs(v) do keys[#keys + 1] = k end; table.sort(keys); for x = 1, #keys do if x > 1 then add(pieces, ",") end; add(pieces, json_string(keys[x])); add(pieces, ":"); encode(v[keys[x]], pieces) end; add(pieces, "}") end
   else bad("jsonType") end
 end
-local function capture(proposal, enums)
+local function capture(proposal, enums, resolveModelName)
   if not proposal or not enums then bad("proposal") end
   local s = proposal.proposal
   if s == nil then bad("street") end
@@ -151,11 +151,22 @@ local function capture(proposal, enums)
     toRemove = entity_list(proposal.toRemove, "toRemove"), old2new = map(proposal.old2new, "old2new", int), toAdd = {},
     terrain = { baseHeightMod = { x0 = int(terrain.x0, "terrain"), y0 = int(terrain.y0, "terrain"), width = 0, height = 0 } }
   } }
-  local pieces = { bytes = 0 }; encode(copied, pieces); local output = table.concat(pieces); return output
+  local pieces = { bytes = 0 }; encode(copied, pieces); local output = table.concat(pieces)
+  local resourceName = nil
+  if resolveModelName ~= nil then
+    if type(resolveModelName) ~= "function" then bad("modelResource") end
+    resourceName = text(resolveModelName(copiedObject.modelInstance.modelId), "modelResource")
+    if #resourceName == 0 or resourceName:sub(-4) ~= ".mdl" or resourceName:sub(1,1) == "/"
+      or resourceName:find("//",1,true) or resourceName:find("\\",1,true) then bad("modelResource") end
+    for part in resourceName:gmatch("[^/]+") do
+      if not part:match("^[A-Za-z0-9][A-Za-z0-9_.%-]*$") then bad("modelResource") end
+    end
+  end
+  return output, resourceName
 end
 
-function M.collect(proposal, apiTypes)
-  local ok, result = pcall(function()
+function M.collect(proposal, apiTypes, resolveModelName)
+  local ok, result, resourceName = pcall(function()
     -- Type.enum contains the enum groups; Mat4f is directly under Type.
     -- Missing/undeclared runtime groups fail as unsupported, never guessed.
     if type(apiTypes) ~= "table" or type(apiTypes.enum) ~= "table" then bad("enumNamespace") end
@@ -166,9 +177,9 @@ function M.collect(proposal, apiTypes)
       BaseEdgeType = groups.BaseEdgeType, RoadType = groups.RoadType,
       EdgeObjectType = groups.EdgeObjectType, TransportMode = groups.TransportMode,
       PrecedencePreference = precedenceGroup, Mat4f = apiTypes.Mat4f,
-    })
+    }, resolveModelName)
   end)
-  if ok then return { code = "captured", json = result } end
+  if ok then return { code = "captured", json = result, modelResourceName = resourceName } end
   -- A foreign error value can itself have throwing field access. Never inspect
   -- it outside protection, format it, or export its text.
   local recognized, field = pcall(function()

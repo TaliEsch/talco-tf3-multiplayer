@@ -5,8 +5,8 @@ import {canonicalJson,sha256Canonical} from './canonical.mjs';
 // Offline experiment artifact, NOT gameplay admission. The checkpoint identity
 // must be recorded before placement; a matching file hash cannot prove that the
 // game actually loaded it, or that its current simulation state is unchanged.
-// The capture-time caller supplies modelResource evidence explicitly; this is
-// not yet wired to a native capture source and does not qualify a real model.
+// The v2 capture envelope carries copied model-resource metadata. It remains
+// offline evidence only and does not qualify that model or any real execution.
 export const ROAD_STOP_REPLAY_CASE_MAX_BYTES=384*1024;
 const fail=()=>{throw new TypeError('INVALID_ROAD_STOP_REPLAY_CASE');};
 const hash=value=>typeof value==='string'&&/^[a-f0-9]{64}$/.test(value);
@@ -46,9 +46,16 @@ function finish(value){
   if(Buffer.byteLength(canonical,'utf8')>ROAD_STOP_REPLAY_CASE_MAX_BYTES)fail();
   return {case:normalized,digest,canonical,executionAuthorized:false,loadedCheckpointVerified:false};
 }
-export function createRoadStopReplayCase({applyEnvelope,checkpoint:identity,companyEntity,modelResource:resource}){
+export function createRoadStopReplayCase(input){
+  const {applyEnvelope,checkpoint:identity,companyEntity}=input??{};
   const parsed=parseRoadStopCaptureEnvelope(applyEnvelope);
   if(parsed.stage!=='apply')fail(); // preview/cancel is not the committed source action
+  if(!parsed.modelResource)fail(); // v1 remains diagnostic-only and cannot form a replay case
+  const resource=modelResource(parsed.modelResource);
+  if(Object.hasOwn(input,'modelResource')){
+    const supplied=modelResource(input.modelResource);
+    if(supplied.modelId!==resource.modelId||supplied.resourceName!==resource.resourceName)fail();
+  }
   return finish({schemaVersion:2,kind:'road_stop_reload_replay',checkpoint:identity,
     companyEntity,modelResource:resource,captureDigest:parsed.digest,capture:parsed.capture});
 }

@@ -6,6 +6,8 @@ import {roadStopCaptureFixture} from './fixtures/road-stop-capture.mjs';
 const json=JSON.stringify(roadStopCaptureFixture());
 const hex=Buffer.from(json).toString('hex');
 const source=`function data()\nreturn {schemaVersion=1,observerRevision=7,kind="native_road_stop_capture",stage="create",sequence=1,captureHex="${hex}",}\nend`;
+const modelName='models/station/road_stop.mdl';
+const v2Source=(name=modelName)=>`function data() return {schemaVersion=2,observerRevision=7,kind="native_road_stop_capture",stage="apply",sequence=2,captureHex="${hex}",modelNameHex="${Buffer.from(name).toString('hex')}",} end`;
 
 test('diagnostic envelope preserves complete canonical capture without granting authority',()=>{
   const result=parse(source),expected=parseRoadStopCapture(json);
@@ -13,6 +15,17 @@ test('diagnostic envelope preserves complete canonical capture without granting 
     freshnessVerified:false,reconstructionVerified:false,executionAuthorized:false});
   assert.equal(parse(source.replace('stage="create"','stage="apply"')).stage,'apply');
   assert.equal(parse(source.replace('schemaVersion=1,','').replace('sequence=1,','sequence=1,schemaVersion=1,')).digest,expected.digest);
+});
+
+test('v2 diagnostic envelope carries a strict copied model resource identity',()=>{
+  const result=parse(v2Source());
+  assert.deepEqual(result.modelResource,{modelId:7,resourceName:modelName});
+  assert.equal(result.executionAuthorized,false);
+  for(const value of [v2Source('').replace('modelNameHex=""','modelNameHex=""'),
+    v2Source().replace('modelNameHex="','modelNameHex="g'),v2Source('models/../road_stop.mdl'),
+    v2Source('/models/road_stop.mdl'),v2Source('models\\road_stop.mdl'),
+    v2Source(`${'a'.repeat(1021)}.mdl`),v2Source().replace('return {','return {extra=1,'),
+    v2Source().replace('modelNameHex=','otherNameHex=')])assert.throws(()=>parse(value),/^TypeError: INVALID_ROAD_STOP_CAPTURE_ENVELOPE$/);
 });
 
 test('diagnostic envelope rejects executable Lua, duplicate fields and unsupported metadata',()=>{

@@ -39,9 +39,9 @@ test("native placement observer rev7 uses protected bounded inspection, capture 
     'return proposalFacts.collect(slots[1], slots[2], slots[3])',
     'type(captured) == "string" and #captured <= 1024',
     'if (isApply and current.roadCaptureApply == nil) or (not isApply and current.roadCaptureCreate == nil) then',
-    'return roadCapture.collect(slots[1], roadCaptureTypes)',
+    'return roadCapture.collect(slots[1], roadCaptureTypes, roadCaptureModelName)',
     'type(value.json) == "string" and #value.json > 0 and #value.json <= 262144',
-    'result = { code = "captured", json = value.json, sequence = current.placementSequence }',
+    'result = { code = "captured", json = value.json, modelResourceName = value.modelResourceName, sequence = current.placementSequence }',
   ]) assert.ok(source.includes(marker), marker);
   for (const marker of [
     'local placementRouteChecked = false',

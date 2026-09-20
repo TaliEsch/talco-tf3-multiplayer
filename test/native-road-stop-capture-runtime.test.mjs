@@ -4,6 +4,7 @@ import {readFile} from 'node:fs/promises';
 import fengari from 'fengari';
 import {roadStopCaptureFixture} from './fixtures/road-stop-capture.mjs';
 import {parseRoadStopCapture} from '../src/road-stop-capture.mjs';
+import {createRoadStopReplayCase} from '../src/road-stop-replay-case.mjs';
 const {lua,lauxlib,lualib,to_luastring}=fengari;
 const source=await readFile(new URL('../mod/content/tf3mp_road_capture.lua',import.meta.url),'utf8');
 
@@ -52,7 +53,7 @@ for _,segments in ipairs({street.addedSegments,street.removedSegments}) do
   end
 end
 ${mutation}
-local result=adapter.collect(proposal,{enum=enums,Mat4f=enums.Mat4f})
+local result=adapter.collect(proposal,{enum=enums,Mat4f=enums.Mat4f},resolveModelName)
 ${resultExpression}
 `;
   const L=lauxlib.luaL_newstate();lualib.luaL_openlibs(L);
@@ -69,6 +70,28 @@ test('Lua capture round-trips all declared fixture fields through the real JS co
   const fixture=roadStopCaptureFixture(),result=run('',fixture);
   assert.equal(result.code,'captured',result.value);
   assert.deepEqual(parseRoadStopCapture(result.value),parseRoadStopCapture(JSON.stringify(fixture)));
+});
+
+test('Lua capture resolves the exact model during capture and copies only its bounded resource name',()=>{
+  const expression='return result.code,result.modelResourceName or result.field';
+  assert.deepEqual(run('resolveModelName=function(id) assert(id==7);return "station/road_stop.mdl" end',undefined,expression),
+    {code:'captured',value:'station/road_stop.mdl'});
+  for(const name of ['', '/stop.mdl','../stop.mdl','station/../stop.mdl','station//stop.mdl','station/stop.lua','station\\stop.mdl']){
+    assert.deepEqual(run(`resolveModelName=function()return ${literal(name)} end`,undefined,expression),{code:'unsupported',value:'modelResource'});
+  }
+  assert.deepEqual(run('resolveModelName=function()return string.rep("x",1025)..".mdl" end',undefined,expression),{code:'unsupported',value:'modelResource'});
+  const denied=run('resolveModelName=function() error("private native message") end',undefined,expression);
+  assert.equal(denied.code,'unsupported');assert.equal(denied.value,'proposal');
+});
+
+test('actual Lua resource capture flows through the v2 userdata envelope into a bound offline replay case',()=>{
+  const result=run('resolveModelName=function(id) assert(id==7);return "station/road_stop.mdl" end',undefined,
+    'return result.json,adapter.toHex(result.modelResourceName)');
+  const applyEnvelope=`function data() return {schemaVersion=2,observerRevision=7,kind="native_road_stop_capture",stage="apply",sequence=2,captureHex="${Buffer.from(result.code).toString('hex')}",modelNameHex="${result.value}",} end`;
+  const replay=createRoadStopReplayCase({applyEnvelope,companyEntity:10,
+    checkpoint:{saveSha256:'a'.repeat(64),gameSha256:'b'.repeat(64),modManifestSha256:'c'.repeat(64)}});
+  assert.deepEqual(replay.case.modelResource,{modelId:7,resourceName:'station/road_stop.mdl'});
+  assert.equal(replay.executionAuthorized,false);
 });
 
 test('Lua diagnostic hex encoding preserves bytes and bounds input',()=>{

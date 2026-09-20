@@ -2,6 +2,26 @@
 
 ## Current status — 20 September 2026
 
+### Resource identity connected to passive native capture
+
+Source now resolves the proposed stop's exact model ID through the public
+`api.res.modelRep.getName` accessor during protected capture. Only a bounded,
+validated copied name leaves the callback; lookup errors produce unsupported
+capture without retaining native objects or altering the native action. The
+regular GUI publisher carries its hex encoding in diagnostic envelope schema 2.
+The helper derives replay identity from that captured metadata, not a manually
+supplied name. Legacy schema-1 captures remain readable diagnostics but cannot
+become replay cases, even if a caller supplies a matching-looking name.
+
+An integration fixture executes the real Lua collector and then parses its
+encoded result into the offline replay artifact. This verifies plumbing, not TF3
+callback permissions or replay. Reload-time native resource resolution and the
+confirmed command/receipt adapter remain outstanding. No staging or game launch.
+
+Source review: 19 content files; manifest
+`b5cd3915e78d267bf3e66a8a1fd4773e4de3b9800bcc3f3a099f4bcc25cf074e`.
+Final `npm run check`: 689/689 passed. These checks remain synthetic evidence.
+
 ### Reload/replay baseline and transaction preparation
 
 Added an experimental read-only road preflight: compare recorded removed road

@@ -58,7 +58,7 @@ export async function validateReviewPackage(root) {
   const gameScript = await readFile(path.join(absoluteRoot, "content", "tf3mp_status.script.tl"), "utf8");
   const factsSource = await readFile(path.join(absoluteRoot, 'content', 'tf3mp_proposal_facts.lua'), 'utf8');
   const captureSource = await readFile(path.join(absoluteRoot, 'content', 'tf3mp_road_capture.lua'), 'utf8');
-  if (createHash('sha256').update(captureSource.replace(/\r\n/g, '\n')).digest('hex') !== '550f9c5be09ea2f441e4a2622dcda93babd88c39358cc11726e925cc731d0539') {
+  if (createHash('sha256').update(captureSource.replace(/\r\n/g, '\n')).digest('hex') !== 'e7f7faf92e1374e96ac774f420dca93c509e22d60fec6001f80659dbd20df6d5') {
     throw new Error('road capture collector differs from reviewed passive source');
   }
   if (createHash('sha256').update(factsSource.replace(/\r\n/g, '\n')).digest('hex') !== '55d015ccc1c478f4ea8018b91fbb4aa040c0fd4e01bf735b6a1c1a4cdc9115ce') {
@@ -143,9 +143,9 @@ export async function validateReviewPackage(root) {
     'return proposalFacts.collect(slots[1], slots[2], slots[3])',
     'type(captured) == "string" and #captured <= 1024',
     'if (isApply and current.roadCaptureApply == nil) or (not isApply and current.roadCaptureCreate == nil) then',
-    'return roadCapture.collect(slots[1], roadCaptureTypes)',
+    'return roadCapture.collect(slots[1], roadCaptureTypes, roadCaptureModelName)',
     'type(value.json) == "string" and #value.json > 0 and #value.json <= 262144',
-    'result = { code = "captured", json = value.json, sequence = current.placementSequence }',
+    'result = { code = "captured", json = value.json, modelResourceName = value.modelResourceName, sequence = current.placementSequence }',
     'local tick, update = -1, -1', 'local entry = "{\\"event\\":\\"native_placement_observed\\"',
     'local queue = current.placementLogQueue or {}', 'if #queue < 16 then queue[#queue + 1] = entry end',
     'current.placementLogQueue = queue', '\\"payloadType\\":\\"', '\\"shapeInspected\\":',
@@ -271,7 +271,8 @@ export async function validateReviewPackage(root) {
     'local value : any = current.roadCaptureCreate', 'if stage == "apply" then value = current.roadCaptureApply end',
     '#captured.json <= 262144', 'captured.sequence <= 16', '#hex > 524288',
     'app.saveUserdata("tf3mp_status_1", "road_capture_" .. stage, {',
-    'schemaVersion = 1, observerRevision = 7, kind = "native_road_stop_capture"']) {
+    '#captured.modelResourceName <= 1024', '#modelNameHex > 2048',
+    'schemaVersion = 2, observerRevision = 7, kind = "native_road_stop_capture"']) {
     if (!captureExchange.includes(marker)) throw new Error('road capture publication must remain bounded and protected');
   }
   const bindingStart = gameScript.indexOf('name == "tf3mp_bind_session"');

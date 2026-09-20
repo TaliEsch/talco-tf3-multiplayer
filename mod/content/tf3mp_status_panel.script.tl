@@ -120,12 +120,15 @@ local function exchangeRoadCapture() : nil
       captureReported[stage] = true
       local captured = value as table
       if captured.code == "captured" and type(captured.json) == "string" and #captured.json > 0 and #captured.json <= 262144
-        and type(captured.sequence) == "number" and captured.sequence % 1 == 0 and captured.sequence >= 1 and captured.sequence <= 16 then
+        and type(captured.sequence) == "number" and captured.sequence % 1 == 0 and captured.sequence >= 1 and captured.sequence <= 16
+        and type(captured.modelResourceName) == "string" and #captured.modelResourceName > 0 and #captured.modelResourceName <= 1024 then
         local hex = roadCapture.toHex(captured.json)
         if type(hex) ~= "string" or #hex > 524288 then return nil end
+        local modelNameHex = roadCapture.toHex(captured.modelResourceName)
+        if type(modelNameHex) ~= "string" or #modelNameHex > 2048 then return nil end
         app.saveUserdata("tf3mp_status_1", "road_capture_" .. stage, {
-          schemaVersion = 1, observerRevision = 7, kind = "native_road_stop_capture",
-          stage = stage, sequence = captured.sequence, captureHex = hex,
+          schemaVersion = 2, observerRevision = 7, kind = "native_road_stop_capture",
+          stage = stage, sequence = captured.sequence, captureHex = hex, modelNameHex = modelNameHex,
         })
         log.message("{\"event\":\"native_road_capture_saved\",\"stage\":\"" .. stage .. "\",\"observerRevision\":7,\"gameplayVerified\":false}")
       else
