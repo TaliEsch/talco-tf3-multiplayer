@@ -23,7 +23,7 @@ local copied=${literal(fixture)}
 local proposal=copied.proposal
 proposal.proposal=proposal.street; proposal.street=nil
 local enums={}
-for _, name in ipairs({'BaseEdgeType','RoadType','EdgeObjectType','PrecedencePreference','TransportMode'}) do
+for _, name in ipairs({'BaseEdgeType','RoadType','EdgeObjectType','PrecedencePreference','TransportMode','TrafficLightPreference'}) do
   enums[name]=setmetatable({}, {__index=function(t,k) local v={}; rawset(t,k,v); return v end})
 end
 enums.Mat4f={cols=function(v,col)
@@ -32,6 +32,9 @@ end}
 local function vec(v) return {x=v[1],y=v[2],z=v[3]} end
 local function map(entries) local out={}; for _,entry in ipairs(entries) do out[entry[1]]=entry[2] end;return out end
 local street=proposal.proposal
+for _,config in ipairs(street.nodeConfigsToAdd) do
+  config.comp.trafficLightPreference=enums.TrafficLightPreference[config.comp.trafficLightPreference]
+end
 street.new2oldEdgeObjects=map(street.new2oldEdgeObjects)
 street.old2newEdgeObjects=map(street.old2newEdgeObjects)
 proposal.old2new=map(proposal.old2new)
@@ -70,6 +73,19 @@ test('Lua capture round-trips all declared fixture fields through the real JS co
   const fixture=roadStopCaptureFixture(),result=run('',fixture);
   assert.equal(result.code,'captured',result.value);
   assert.deepEqual(parseRoadStopCapture(result.value),parseRoadStopCapture(JSON.stringify(fixture)));
+});
+
+test('Lua capture preserves complete node lane and traffic-light configuration',()=>{
+  const fixture=roadStopCaptureFixture();
+  fixture.proposal.street.nodeConfigsToAdd=[{entity:31,comp:{
+    laneConnections:[{segment0:22,lane0:0,segment1:-3,lane1:1,withRoad:true,withTram:false}],
+    crosswalks:[22],trafficLightPreference:'AUTO',
+    trafficLightConfig:{states:[{lockedLanes:[0,1],duration:12,minDuration:3,canSkip:true}],trafficLightType:1},
+    doubleSlipSwitch:false,userModifiedLaneConnections:true,userModifiedTrafficLightStates:false}}];
+  fixture.proposal.street.nodeConfigsToRemove=[31];
+  const result=run('',fixture);
+  assert.equal(result.code,'captured',result.value);
+  assert.deepEqual(parseRoadStopCapture(result.value).capture,parseRoadStopCapture(JSON.stringify(fixture)).capture);
 });
 
 test('Lua capture resolves the exact model during capture and copies only its bounded resource name',()=>{
@@ -118,7 +134,7 @@ test('Lua capture rejects missing enums, malformed arrays, unsupported edits and
     ['street.addedSegments[1].comp.roadType=enums.RoadType.TRACK','roadType'],
     ['enums.PrecedencePreference=nil','precedence'],
     ['proposal.terrain.baseHeightMod.width=1','terrain'],
-    ['street.nodeConfigsToRemove={5}','nodeConfigs'],
+    ['street.nodeConfigsToRemove={"bad"}','nodeConfigsRemoveShape'],
     ['proposal.toAdd={{}}','toAdd'],
   ])assert.deepEqual(run(mutation),{code:'unsupported',value:field});
 });

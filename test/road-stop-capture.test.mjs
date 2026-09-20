@@ -6,6 +6,7 @@ const matrix = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 4, 5, 6, 1];
 const lane = { speed: 20, width: 3, height: 0, forward: true, transportModes: [["BUS", true], ["CAR", false]], offset: 0 };
 const edge = { type: "NORMAL", typeIndex: 0, objects: [[4, "STOP_LEFT"]], laneConfigs: [lane], roadDevelopmentLocked: false, node0: 1, node1: 2, position0: [0, 0, 0], position1: [10, 0, 0], tangent0: [1, 0, 0], tangent1: [1, 0, 0], laneConfig: [lane], edgeDecorations: [[8, true]], distance: 10, roadType: "STREET", roadTemplate: "street/standard", roadStyle: "standard" };
 const segment = { entity: -3, comp: edge, type: 0, streetEdge: { precedenceNode0: "AUTO", precedenceNode1: "YES" }, emissionEmitter: { position: [1, 2, 3], radius: 0, noisePower: 1, pollutionPower: 2 }, playerOwned: { player: 10 } };
+const nodeConfig = { entity: -5, comp: { laneConnections: [{ segment0: -3, lane0: 0, segment1: 22, lane1: 1, withRoad: true, withTram: false }], crosswalks: [44], trafficLightPreference: "AUTO", trafficLightConfig: { states: [{ lockedLanes: [0, 1], duration: 15, minDuration: 5, canSkip: false }], trafficLightType: 2 }, doubleSlipSwitch: false, userModifiedLaneConnections: true, userModifiedTrafficLightStates: false } };
 const fixture = () => structuredClone({ schemaVersion: 1, builderId: "streetTerminalBuilder", proposal: { street: { addedNodes: [{ entity: -1, comp: { position: [0, 0, 0] } }], removedNodes: [], addedSegments: [segment], removedSegments: [{ ...segment, entity: 22, emissionEmitter: null, playerOwned: null }], edgeObjectsToAdd: [{ resultEntity: -4, category: 0, modelInstance: { modelId: 7, transf0: matrix, transf: matrix, transformator: -1 }, playerEntity: 10, left: true }], new2oldEdgeObjects: [[9, [5, 3]], [2, []]], old2newEdgeObjects: [[9, [3]]], nodeConfigsToAdd: [], nodeConfigsToRemove: [] }, toRemove: [22], old2new: [[22, -3]], toAdd: [], terrain: { baseHeightMod: { x0: -10, y0: 7, width: 0, height: 0 } } } });
 const decode = value => parseRoadStopCapture(JSON.stringify(value));
 const changed = (mutate) => { const value = fixture(); mutate(value); return value; };
@@ -28,6 +29,24 @@ test("numeric native precedence codes are copied without assigning symbolic mean
   assert.deepEqual(first.capture.proposal.street.addedSegments[0].streetEdge, { precedenceNode0: { nativeCode: -7 }, precedenceNode1: { nativeCode: 42 } });
   assert.equal(first.digest, second.digest);
 });
+test("public BaseNodeConfig records round-trip and contribute to the digest", () => {
+  const value = fixture(); value.proposal.street.nodeConfigsToAdd = [nodeConfig]; value.proposal.street.nodeConfigsToRemove = [43];
+  const first = decode(value), second = decode(JSON.parse(JSON.stringify(value)));
+  assert.deepEqual(first.capture.proposal.street.nodeConfigsToAdd, [nodeConfig]);
+  assert.deepEqual(first.capture.proposal.street.nodeConfigsToRemove, [43]);
+  assert.equal(first.digest, second.digest);
+  value.proposal.street.nodeConfigsToAdd[0].comp.trafficLightConfig.states[0].canSkip = true;
+  assert.notEqual(first.digest, decode(value).digest);
+});
+test("BaseNodeConfig strictly rejects malformed fields and nonpositive removals", () => {
+  for (const mutate of [
+    v => { v.proposal.street.nodeConfigsToAdd = [{ ...nodeConfig, comp: { ...nodeConfig.comp, laneConnections: [{ ...nodeConfig.comp.laneConnections[0], extra: true }] } }]; },
+    v => { v.proposal.street.nodeConfigsToAdd = [{ ...nodeConfig, comp: { ...nodeConfig.comp, laneConnections: [{ ...nodeConfig.comp.laneConnections[0], lane0: -1 }] } }]; },
+    v => { v.proposal.street.nodeConfigsToAdd = [{ ...nodeConfig, comp: { ...nodeConfig.comp, trafficLightPreference: "MAYBE" } }]; },
+    v => { v.proposal.street.nodeConfigsToAdd = [{ ...nodeConfig, comp: { ...nodeConfig.comp, trafficLightConfig: { ...nodeConfig.comp.trafficLightConfig, states: [{ ...nodeConfig.comp.trafficLightConfig.states[0], duration: "15" }] } } }]; },
+    v => { v.proposal.street.nodeConfigsToRemove = [0]; },
+  ]) assert.throws(() => decode(changed(mutate)), /ROAD_STOP_CODEC_UNSUPPORTED/);
+});
 test("native precedence union rejects malformed or non-int32 codes", () => {
   for (const code of ["1", 1.5, 2147483648, -2147483649]) {
     assert.throws(() => decode(changed(value => { value.proposal.street.addedSegments[0].streetEdge.precedenceNode0 = { nativeCode: code }; })), /ROAD_STOP_CODEC_UNSUPPORTED/);
@@ -45,7 +64,7 @@ test("rejects duplicate maps, oversized records, wrong version, and unsupported 
   assert.throws(() => decode(duplicate), /duplicate/);
   const many = fixture(); many.proposal.street.addedNodes = Array.from({ length: 65 }, () => ({ entity: 1, comp: { position: [0, 0, 0] } }));
   assert.throws(() => decode(many), /bounded/);
-  for (const mutate of [v => { v.schemaVersion = 2; }, v => { v.builderId = "other"; }, v => { v.proposal.street.addedSegments[0].type = 1; }, v => { v.proposal.street.nodeConfigsToRemove = [1]; }, v => { v.proposal.terrain.baseHeightMod.width = 1; }, v => { v.proposal.street.addedSegments = []; }, v => { v.proposal.street.edgeObjectsToAdd[0].modelInstance.modelId = -1; }]) assert.throws(() => decode(changed(mutate)), /ROAD_STOP_CODEC_UNSUPPORTED/);
+  for (const mutate of [v => { v.schemaVersion = 2; }, v => { v.builderId = "other"; }, v => { v.proposal.street.addedSegments[0].type = 1; }, v => { v.proposal.street.nodeConfigsToRemove = [1.5]; }, v => { v.proposal.terrain.baseHeightMod.width = 1; }, v => { v.proposal.street.addedSegments = []; }, v => { v.proposal.street.edgeObjectsToAdd[0].modelInstance.modelId = -1; }]) assert.throws(() => decode(changed(mutate)), /ROAD_STOP_CODEC_UNSUPPORTED/);
 });
 test("JSON input is bounded before parsing", () => {
   assert.throws(() => parseRoadStopCapture(" ".repeat(ROAD_STOP_CAPTURE_MAX_BYTES + 1)), /256 KiB/);

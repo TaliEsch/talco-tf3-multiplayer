@@ -160,6 +160,39 @@ local function edgeObject(types, v)
   -- these are their documented record fields, intentionally structural.
   return {resultEntity=int(v.resultEntity), category=0, modelInstance={modelId=id, transf0=mat4(types, model.transf0), transf=mat4(types, model.transf), transformator=int(model.transformator)}, playerEntity=owner(v.playerEntity), left=bool(v.left)}
 end
+local function trafficLightState(types, v)
+  if type(v) ~= "table" then fail() end
+  local out = call0(types.TrafficLightState)
+  out.lockedLanes = list(v.lockedLanes, int)
+  out.duration, out.minDuration, out.canSkip = number(v.duration), number(v.minDuration), bool(v.canSkip)
+  return out
+end
+local function nodeConfig(types, enums, v)
+  if type(v) ~= "table" or type(v.comp) ~= "table" then fail() end
+  -- BaseNodeLaneConnectionAndEntity is the public Proposal wrapper.  Its comp
+  -- is intentionally initialized by that native constructor; BaseNodeConfig
+  -- has no fallback structural reconstruction path here.
+  local out = call0(types.BaseNodeLaneConnectionAndEntity)
+  if type(out.comp) ~= "table" and type(out.comp) ~= "userdata" then fail() end
+  local source, comp = v.comp, out.comp
+  out.entity = int(v.entity)
+  comp.laneConnections = list(source.laneConnections, function(connection)
+    if type(connection) ~= "table" then fail() end
+    return {segment0=int(connection.segment0), lane0=int(connection.lane0), segment1=int(connection.segment1), lane1=int(connection.lane1), withRoad=bool(connection.withRoad), withTram=bool(connection.withTram)}
+  end)
+  comp.crosswalks = list(source.crosswalks, int)
+  comp.trafficLightPreference = named(enums, "TrafficLightPreference", source.trafficLightPreference, {YES=true,NO=true,AUTO=true})
+  if type(source.trafficLightConfig) ~= "table" then fail() end
+  local lights = call0(types.TrafficLightConfig)
+  lights.states = list(source.trafficLightConfig.states, function(state) return trafficLightState(types, state) end)
+  lights.trafficLightType = int(source.trafficLightConfig.trafficLightType)
+  comp.trafficLightConfig = lights
+  comp.doubleSlipSwitch = bool(source.doubleSlipSwitch)
+  comp.userModifiedLaneConnections = bool(source.userModifiedLaneConnections)
+  comp.userModifiedTrafficLightStates = bool(source.userModifiedTrafficLightStates)
+  out.comp = comp
+  return out
+end
 
 local function rebuild(capture, types, components)
   -- Unregistered: this is data preparation only, never an execution path.
@@ -168,7 +201,7 @@ local function rebuild(capture, types, components)
   local enums, proposalData = types.enum, capture.proposal
   if type(proposalData) ~= "table" or type(proposalData.street) ~= "table" then fail() end
   local s = proposalData.street
-  if not array(proposalData.toAdd) or #proposalData.toAdd ~= 0 or not array(s.nodeConfigsToAdd) or #s.nodeConfigsToAdd ~= 0 or not array(s.nodeConfigsToRemove) or #s.nodeConfigsToRemove ~= 0 then fail() end
+  if not array(proposalData.toAdd) or #proposalData.toAdd ~= 0 then fail() end
   local terrain = proposalData.terrain and proposalData.terrain.baseHeightMod
   if type(terrain) ~= "table" or int(terrain.width) ~= 0 or int(terrain.height) ~= 0 then fail() end
   local proposal = call0(types.Proposal)
@@ -180,7 +213,8 @@ local function rebuild(capture, types, components)
     edgeObjectsToAdd=list(s.edgeObjectsToAdd, function(v) return edgeObject(types, v) end),
     new2oldEdgeObjects=map(s.new2oldEdgeObjects, function(v) return list(v, int) end),
     old2newEdgeObjects=map(s.old2newEdgeObjects, function(v) return list(v, int) end),
-    nodeConfigsToAdd={}, nodeConfigsToRemove={}
+    nodeConfigsToAdd=list(s.nodeConfigsToAdd, function(v) return nodeConfig(types, enums, v) end),
+    nodeConfigsToRemove=list(s.nodeConfigsToRemove, owner)
   }
   if #proposal.proposal.addedSegments == 0 or #proposal.proposal.removedSegments == 0 or #proposal.proposal.edgeObjectsToAdd ~= 1 then fail() end
   proposal.toRemove = list(proposalData.toRemove, int)

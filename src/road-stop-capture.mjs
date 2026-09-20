@@ -55,6 +55,7 @@ const BASE_EDGE_TYPES = new Set(["NORMAL", "BRIDGE", "TUNNEL"]);
 const ROAD_TYPES = new Set(["STREET", "TRACK"]);
 const EDGE_OBJECT_TYPES = new Set(["STOP_LEFT", "STOP_RIGHT", "SIGNAL"]);
 const PRECEDENCE = new Set(["YES", "NO", "AUTO"]);
+const TRAFFIC_LIGHT_PREFERENCES = new Set(["YES", "NO", "AUTO"]);
 const TRANSPORT_MODES = new Set(["PERSON", "CARGO", "CAR", "BUS", "TRUCK", "TRAM", "ELECTRIC_TRAM", "TRAIN", "ELECTRIC_TRAIN", "AIRCRAFT", "SHIP", "SMALL_AIRCRAFT", "SMALL_SHIP", "HELICOPTER", "TRAM_TRACK", "ELECTRIC_TRAM_TRACK"]);
 
 // Native PrecedencePreference values are not always exposed symbolically by
@@ -114,6 +115,33 @@ function edgeObject(value, name) {
   if (modelId < 0) fail(`${name}.modelInstance.modelId must be nonnegative`);
   return { resultEntity: int32(value.resultEntity, `${name}.resultEntity`), category: 0, modelInstance: { modelId, transf0: mat4(value.modelInstance.transf0, `${name}.modelInstance.transf0`), transf: mat4(value.modelInstance.transf, `${name}.modelInstance.transf`), transformator: int32(value.modelInstance.transformator, `${name}.modelInstance.transformator`) }, playerEntity: owner(value.playerEntity, `${name}.playerEntity`), left: bool(value.left, `${name}.left`) };
 }
+function laneConnection(value, name) {
+  own(value, ["segment0", "lane0", "segment1", "lane1", "withRoad", "withTram"], name);
+  const lane0 = int32(value.lane0, `${name}.lane0`), lane1 = int32(value.lane1, `${name}.lane1`);
+  if (lane0 < 0 || lane1 < 0) fail(`${name} lane indices must be nonnegative`);
+  return { segment0: int32(value.segment0, `${name}.segment0`), lane0,
+    segment1: int32(value.segment1, `${name}.segment1`), lane1,
+    withRoad: bool(value.withRoad, `${name}.withRoad`), withTram: bool(value.withTram, `${name}.withTram`) };
+}
+function trafficLightState(value, name) {
+  own(value, ["lockedLanes", "duration", "minDuration", "canSkip"], name);
+  return { lockedLanes: list(value.lockedLanes, `${name}.lockedLanes`, int32), duration: number(value.duration, `${name}.duration`),
+    minDuration: number(value.minDuration, `${name}.minDuration`), canSkip: bool(value.canSkip, `${name}.canSkip`) };
+}
+function nodeConfig(value, name) {
+  own(value, ["entity", "comp"], name);
+  own(value.comp, ["laneConnections", "crosswalks", "trafficLightPreference", "trafficLightConfig", "doubleSlipSwitch", "userModifiedLaneConnections", "userModifiedTrafficLightStates"], `${name}.comp`);
+  const comp = value.comp;
+  own(comp.trafficLightConfig, ["states", "trafficLightType"], `${name}.comp.trafficLightConfig`);
+  return { entity: int32(value.entity, `${name}.entity`), comp: {
+    laneConnections: list(comp.laneConnections, `${name}.comp.laneConnections`, laneConnection),
+    crosswalks: list(comp.crosswalks, `${name}.comp.crosswalks`, int32),
+    trafficLightPreference: enumValue(TRAFFIC_LIGHT_PREFERENCES, comp.trafficLightPreference, `${name}.comp.trafficLightPreference`),
+    trafficLightConfig: { states: list(comp.trafficLightConfig.states, `${name}.comp.trafficLightConfig.states`, trafficLightState), trafficLightType: int32(comp.trafficLightConfig.trafficLightType, `${name}.comp.trafficLightConfig.trafficLightType`) },
+    doubleSlipSwitch: bool(comp.doubleSlipSwitch, `${name}.comp.doubleSlipSwitch`),
+    userModifiedLaneConnections: bool(comp.userModifiedLaneConnections, `${name}.comp.userModifiedLaneConnections`),
+    userModifiedTrafficLightStates: bool(comp.userModifiedTrafficLightStates, `${name}.comp.userModifiedTrafficLightStates`) } };
+}
 function entityMap(value, name, oneValue) {
   const entries = list(value, name, (entry, entryName) => {
     if (!Array.isArray(entry) || entry.length !== 2) fail(`${entryName} must be a key/value pair`);
@@ -125,14 +153,13 @@ function entityMap(value, name, oneValue) {
 }
 function street(value) {
   own(value, ["addedNodes", "removedNodes", "addedSegments", "removedSegments", "edgeObjectsToAdd", "new2oldEdgeObjects", "old2newEdgeObjects", "nodeConfigsToAdd", "nodeConfigsToRemove"], "proposal.street");
-  const nodeConfigsToAdd = list(value.nodeConfigsToAdd, "proposal.street.nodeConfigsToAdd", entry => entry);
-  const nodeConfigsToRemove = list(value.nodeConfigsToRemove, "proposal.street.nodeConfigsToRemove", entry => entry);
-  if (nodeConfigsToAdd.length || nodeConfigsToRemove.length) fail("node configurations are unsupported pending schema qualification");
+  const nodeConfigsToAdd = list(value.nodeConfigsToAdd, "proposal.street.nodeConfigsToAdd", nodeConfig);
+  const nodeConfigsToRemove = list(value.nodeConfigsToRemove, "proposal.street.nodeConfigsToRemove", owner);
   const addedSegments = list(value.addedSegments, "proposal.street.addedSegments", segment);
   const removedSegments = list(value.removedSegments, "proposal.street.removedSegments", segment);
   const edgeObjectsToAdd = list(value.edgeObjectsToAdd, "proposal.street.edgeObjectsToAdd", edgeObject);
   if (!addedSegments.length || !removedSegments.length || edgeObjectsToAdd.length !== 1) fail("capture is outside the supported offline curb-stop schema");
-  return { addedNodes: list(value.addedNodes, "proposal.street.addedNodes", node), removedNodes: list(value.removedNodes, "proposal.street.removedNodes", node), addedSegments, removedSegments, edgeObjectsToAdd, new2oldEdgeObjects: entityMap(value.new2oldEdgeObjects, "proposal.street.new2oldEdgeObjects", (v, n) => list(v, n, int32)), old2newEdgeObjects: entityMap(value.old2newEdgeObjects, "proposal.street.old2newEdgeObjects", (v, n) => list(v, n, int32)), nodeConfigsToAdd: [], nodeConfigsToRemove: [] };
+  return { addedNodes: list(value.addedNodes, "proposal.street.addedNodes", node), removedNodes: list(value.removedNodes, "proposal.street.removedNodes", node), addedSegments, removedSegments, edgeObjectsToAdd, new2oldEdgeObjects: entityMap(value.new2oldEdgeObjects, "proposal.street.new2oldEdgeObjects", (v, n) => list(v, n, int32)), old2newEdgeObjects: entityMap(value.old2newEdgeObjects, "proposal.street.old2newEdgeObjects", (v, n) => list(v, n, int32)), nodeConfigsToAdd, nodeConfigsToRemove };
 }
 function terrain(value) {
   own(value, ["baseHeightMod"], "proposal.terrain"); own(value.baseHeightMod, ["x0", "y0", "width", "height"], "proposal.terrain.baseHeightMod");

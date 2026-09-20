@@ -24,6 +24,13 @@ test('world entity zero is valid for the live speed read, not a company or road 
   assert.equal(run('actual[0]=actual[99];actual[99]=nil;api.engine.util.getWorld=function()return 0 end')[0],'unregistered_preflight_checked');
   assert.equal(run('capture.proposal.street.removedSegments[1].entity=0')[0],'unregistered_preflight_rejected');
 });
+
+test('node configuration edits stay on existing captured road endpoints',()=>{
+  const setup='local n=capture.proposal.street.removedSegments[1].comp.node0;actual[n]={BASE_NODE={},BASE_NODE_CONFIG={}};api.type.ComponentType.BASE_NODE_CONFIG="BASE_NODE_CONFIG";capture.proposal.street.nodeConfigsToAdd={{entity=n,comp={}}};capture.proposal.street.nodeConfigsToRemove={n};';
+  assert.equal(run(setup)[0],'unregistered_preflight_checked');
+  for(const change of ['capture.proposal.street.nodeConfigsToAdd[1].entity=987','capture.proposal.street.nodeConfigsToRemove={987}','actual[n].BASE_NODE_CONFIG=nil','table.insert(capture.proposal.street.nodeConfigsToRemove,n)'])
+    assert.equal(run(setup+change)[0],'unregistered_preflight_rejected');
+});
 test('preflight rejects absent references, wrong company, unpaused state, changed edge/resource data, street fields, and throwing optional getters',()=>{
  for(const change of ['actual[22]=nil','capture.proposal.street.edgeObjectsToAdd[1].playerEntity=9','actual[10]=nil','actual[99].GAME_SPEED.speedup=1','capture.proposal.street.removedSegments[1].comp.distance=11','actual[22].BASE_EDGE.roadTemplate="changed"','actual[22].BASE_EDGE_STREET.precedenceNode0=1','capture.proposal.street.removedSegments[1].streetEdge.precedenceNode0="AUTO"','table.insert(capture.proposal.street.removedSegments,capture.proposal.street.removedSegments[1])','capture.proposal.street.removedNodes={{entity=30,comp={position={0,0,0}}}};actual[30]={BASE_NODE={position={x=1,y=0,z=0}}}'])assert.deepEqual(run(change),['unregistered_preflight_rejected','none','none']);
  assert.deepEqual(run('api.engine.getComponent=function(e,k)if k=="EMISSION_EMITTER"then error("private native text")end;return actual[e] and actual[e][k]end'),['unregistered_preflight_unknown','none','none']);

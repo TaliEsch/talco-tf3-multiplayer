@@ -107,6 +107,26 @@ local function verify(capture, api, targetCompany)
     if not equalVec(node.position, copied.comp.position) then fail() end
     proof.removedNodes[i] = copied.entity
   end
+  -- Node configuration changes must remain on the captured road's endpoints.
+  -- Never use this narrow stop replay to edit an unrelated crossing.
+  if not array(street.nodeConfigsToAdd) or not array(street.nodeConfigsToRemove) then fail() end
+  local endpoints, additions, removals = {}, {}, {}
+  for _, segment in ipairs(street.removedSegments) do
+    endpoints[segment.comp.node0], endpoints[segment.comp.node1] = true, true
+  end
+  for _, config in ipairs(street.nodeConfigsToAdd) do
+    if type(config) ~= "table" or not integer(config.entity) or config.entity <= 0
+      or not endpoints[config.entity] or additions[config.entity] then fail() end
+    additions[config.entity] = true
+    component(api, config.entity, "BASE_NODE")
+  end
+  for _, entity in ipairs(street.nodeConfigsToRemove) do
+    if not integer(entity) or entity <= 0 or not endpoints[entity] or removals[entity]
+      or seenNodes[entity] then fail() end
+    removals[entity] = true
+    component(api, entity, "BASE_NODE")
+    component(api, entity, "BASE_NODE_CONFIG")
+  end
   -- The copied model id/resource identity and a future construction's semantics
   -- cannot be proved from a baseline removed edge.  This is only a read check.
   return {code="unregistered_preflight_checked", proof=proof, limitations={"symbolic_precedence_capture_unqualified_without_native_codes","new_stop_model_resource_unverified","no_execution_authorization"}}

@@ -2,6 +2,31 @@
 
 ## Current status — 20 September 2026
 
+### Public node-configuration capture and replay repair
+
+The live apply event reached the observer but produced
+`native_road_capture_unsupported` / `nodeConfigs`; no capture artifact was saved.
+The previous collector rejected all nonempty configuration vectors and used one
+error for shape failures too. The repaired path copies the public BaseNodeConfig
+schema, strictly parses its bounded fields, and reconstructs through public
+BaseNodeLaneConnectionAndEntity, TrafficLightConfig and TrafficLightState types.
+No configuration is discarded or replaced by an empty default. Missing fields
+now identify the configuration subfield/shape. Replay additionally requires these
+changes to refer to existing captured road endpoints, with duplicate/unrelated
+and absent removal references rejected before submission.
+
+Root reviewed the delegated codec/rebuilder, corrected native userdata acceptance
+and component write-back, and executed the actual Lua modules offline. These
+checks prove copied field preservation, not native setter behavior or game replay.
+No automatic launch, native patching, funding, retry or safety-latch reset occurred.
+The next manual step remains the same checkpoint/capture/reload/replay procedure.
+
+Full existing suite with relevant schema regression extensions: 712/712 passed.
+Review and staging source/copy match (26 files):
+`122a5f5ed5543874a21b17ac7f5399514ae4cca8a7752057511dffcaa2635cef`.
+TF3 was closed; previous mod/cache backup:
+`tf3mp_backup_12d8bf7146fd46c7a3dadc9e22a671b7`. Launcher unchanged.
+
 ### Replay launcher receipt repair
 
 The 20:00 live recording reached `RECORDING_STARTED`, but the diagnostic logger

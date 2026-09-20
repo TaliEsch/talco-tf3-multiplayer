@@ -22,7 +22,7 @@ local function prepare(capture, modelResource, targetCompany, api, rebuild, pref
     if not ok then if optional then return nil end; fail() end
     return value
   end
-  local types = {Proposal=typeField("Proposal"), Context=typeField("Context"), NodeAndEntity=typeField("NodeAndEntity"), SegmentAndEntity=typeField("SegmentAndEntity"), Vec3f=typeField("Vec3f"), Vec4f=typeField("Vec4f"), Mat4f=typeField("Mat4f"), GridVec2f=typeField("GridVec2f", true), enum=typeField("enum"), qualifiedPrecedenceValues={}}
+  local types = {Proposal=typeField("Proposal"), Context=typeField("Context"), NodeAndEntity=typeField("NodeAndEntity"), SegmentAndEntity=typeField("SegmentAndEntity"), BaseNodeLaneConnectionAndEntity=typeField("BaseNodeLaneConnectionAndEntity", true), TrafficLightConfig=typeField("TrafficLightConfig", true), TrafficLightState=typeField("TrafficLightState", true), Vec3f=typeField("Vec3f"), Vec4f=typeField("Vec4f"), Mat4f=typeField("Mat4f"), GridVec2f=typeField("GridVec2f", true), enum=typeField("enum"), qualifiedPrecedenceValues={}}
   local seenPrecedence = {}
   for _, segment in ipairs(proof.proof.removedSegments) do
     if type(segment) ~= "table" then fail() end

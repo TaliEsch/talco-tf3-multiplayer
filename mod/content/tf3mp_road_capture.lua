@@ -113,6 +113,27 @@ local function segment(v, enums)
   return { entity = int(v.entity, "segmentEntity"), comp = edge(v.comp, enums), type = 0, streetEdge = { precedenceNode0 = precedence(v.streetEdge.precedenceNode0, enums), precedenceNode1 = precedence(v.streetEdge.precedenceNode1, enums) }, emissionEmitter = emission, playerOwned = owned }
 end
 local function node(v) return { entity = int(v.entity, "nodeEntity"), comp = { position = vec3(v.comp.position, "nodePosition") } } end
+local function nodeConfig(v, enums)
+  local c = v.comp
+  local lanes, lights = {}, {}
+  local connections = array(c.laneConnections, "nodeConfigLanes")
+  for i = 1, #connections do
+    local q = connections[i]
+    lanes[i] = { segment0=int(q.segment0,"nodeConfigLanes"), lane0=int(q.lane0,"nodeConfigLanes"), segment1=int(q.segment1,"nodeConfigLanes"), lane1=int(q.lane1,"nodeConfigLanes"), withRoad=bool(q.withRoad,"nodeConfigLanes"), withTram=bool(q.withTram,"nodeConfigLanes") }
+  end
+  local states = array(c.trafficLightConfig.states, "nodeConfigLights")
+  for i = 1, #states do
+    local q = states[i]
+    lights[i] = { lockedLanes=entity_list(q.lockedLanes,"nodeConfigLights"), duration=finite(q.duration,"nodeConfigLights"), minDuration=finite(q.minDuration,"nodeConfigLights"), canSkip=bool(q.canSkip,"nodeConfigLights") }
+  end
+  return { entity=int(v.entity,"nodeConfigEntity"), comp={laneConnections=lanes,
+    crosswalks=entity_list(c.crosswalks,"nodeConfigCrosswalks"),
+    trafficLightPreference=enum(c.trafficLightPreference,enums.TrafficLightPreference,"nodeConfigPreference","YES","NO","AUTO"),
+    trafficLightConfig={states=lights,trafficLightType=int(c.trafficLightConfig.trafficLightType,"nodeConfigLights")},
+    doubleSlipSwitch=bool(c.doubleSlipSwitch,"nodeConfigFlags"),
+    userModifiedLaneConnections=bool(c.userModifiedLaneConnections,"nodeConfigFlags"),
+    userModifiedTrafficLightStates=bool(c.userModifiedTrafficLightStates,"nodeConfigFlags") } }
+end
 local function json_string(v)
   local out = { '"' }; for x = 1, #v do local b = string.byte(v, x); if b == 34 then out[#out + 1] = '\\"' elseif b == 92 then out[#out + 1] = "\\\\" elseif b == 8 then out[#out + 1] = "\\b" elseif b == 12 then out[#out + 1] = "\\f" elseif b == 10 then out[#out + 1] = "\\n" elseif b == 13 then out[#out + 1] = "\\r" elseif b == 9 then out[#out + 1] = "\\t" elseif b < 32 then out[#out + 1] = string.format("\\u%04x", b) else out[#out + 1] = string.char(b) end end; out[#out + 1] = '"'; return table.concat(out)
 end
@@ -134,7 +155,8 @@ local function capture(proposal, enums, resolveModelName)
   local s = proposal.proposal
   if s == nil then bad("street") end
   local toAdd = array(proposal.toAdd, "toAdd"); if #toAdd ~= 0 then bad("toAdd") end
-  local ncAdd, ncRemove = array(s.nodeConfigsToAdd, "nodeConfigs"), array(s.nodeConfigsToRemove, "nodeConfigs"); if #ncAdd ~= 0 or #ncRemove ~= 0 then bad("nodeConfigs") end
+  local ncAdd, ncRemove = array(s.nodeConfigsToAdd, "nodeConfigsAddShape"), entity_list(s.nodeConfigsToRemove, "nodeConfigsRemoveShape")
+  local copiedConfigs = {}; for i = 1, #ncAdd do copiedConfigs[i] = nodeConfig(ncAdd[i], enums) end
   local terrain = proposal.terrain and proposal.terrain.baseHeightMod; if not terrain or int(terrain.width, "terrain") ~= 0 or int(terrain.height, "terrain") ~= 0 then bad("terrain") end
   local function segments(a, field) a = array(a, field); local o = {}; for x = 1, #a do o[x] = segment(a[x], enums) end; return o end
   local function nodes(a, field) a = array(a, field); local o = {}; for x = 1, #a do o[x] = node(a[x]) end; return o end
@@ -147,7 +169,7 @@ local function capture(proposal, enums, resolveModelName)
       addedSegments = add, removedSegments = remove, edgeObjectsToAdd = { copiedObject },
       new2oldEdgeObjects = map(s.new2oldEdgeObjects, "new2oldEdgeObjects", entity_list),
       old2newEdgeObjects = map(s.old2newEdgeObjects, "old2newEdgeObjects", entity_list),
-      nodeConfigsToAdd = {}, nodeConfigsToRemove = {} },
+      nodeConfigsToAdd = copiedConfigs, nodeConfigsToRemove = ncRemove },
     toRemove = entity_list(proposal.toRemove, "toRemove"), old2new = map(proposal.old2new, "old2new", int), toAdd = {},
     terrain = { baseHeightMod = { x0 = int(terrain.x0, "terrain"), y0 = int(terrain.y0, "terrain"), width = 0, height = 0 } }
   } }
@@ -176,7 +198,7 @@ function M.collect(proposal, apiTypes, resolveModelName)
     return capture(proposal, {
       BaseEdgeType = groups.BaseEdgeType, RoadType = groups.RoadType,
       EdgeObjectType = groups.EdgeObjectType, TransportMode = groups.TransportMode,
-      PrecedencePreference = precedenceGroup, Mat4f = apiTypes.Mat4f,
+      PrecedencePreference = precedenceGroup, TrafficLightPreference = groups.TrafficLightPreference, Mat4f = apiTypes.Mat4f,
     }, resolveModelName)
   end)
   if ok then return { code = "captured", json = result, modelResourceName = resourceName } end

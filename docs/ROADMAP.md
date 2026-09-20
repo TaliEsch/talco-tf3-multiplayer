@@ -15,6 +15,13 @@ native field access and reconstruction still require game evidence. The guided
 local replay workflow is implemented in Debug, with explicit confirmation only;
 see [the bounded procedure](road-stop-replay-test.md). It is not Phase 2 completion.
 
+The first live full capture rejected `nodeConfigs` before exporting an artifact.
+The public node-configuration schema is now preserved across capture, strict
+parsing and native reconstruction, including lane connections, crosswalks and
+traffic-light settings. Local replay confines these edits to existing captured
+road endpoints. Offline checks do not establish native replay success; restart
+from the untouched checkpoint with the repaired staged mod for that same gate.
+
 The local replay adapter now composes baseline checking, model resolution,
 native command preparation, one-shot submission and observed stop ownership/debit.
 It is now registered behind the local company-test bridge, with a helper request

@@ -29,6 +29,24 @@ return result.code,encoded.code,encoded.json or encoded.field
     lua.lua_sethook(L,()=>lauxlib.luaL_error(L,to_luastring('TEST_INSTRUCTION_LIMIT')),lua.LUA_MASKCOUNT,10_000_000);
     assert.equal(lauxlib.luaL_loadstring(L,to_luastring(script)),lua.LUA_OK,lua.lua_tojsstring(L,-1));assert.equal(lua.lua_pcall(L,0,3,0),lua.LUA_OK,lua.lua_tojsstring(L,-1));return [lua.lua_tojsstring(L,-3),lua.lua_tojsstring(L,-2),lua.lua_tojsstring(L,-1)];}finally{lua.lua_close(L);}
 }
+function inspectNodeConfig(mutation=''){
+  const script=`
+local rebuilder=(function() ${rebuild} end)()
+local copied=${literal(roadStopCaptureFixture())}
+copied.proposal.street.nodeConfigsToAdd={{entity=-9,comp={laneConnections={{segment0=22,lane0=0,segment1=-3,lane1=1,withRoad=true,withTram=false}},crosswalks={22},trafficLightPreference='YES',trafficLightConfig={states={{lockedLanes={0,1},duration=12,minDuration=3,canSkip=false}},trafficLightType=4},doubleSlipSwitch=true,userModifiedLaneConnections=false,userModifiedTrafficLightStates=true}}}
+copied.proposal.street.nodeConfigsToRemove={22}
+local function ctor(init) return {new=function() return init and init() or {} end} end
+local types={Proposal=ctor(),NodeAndEntity=ctor(),SegmentAndEntity=ctor(),BaseNodeLaneConnectionAndEntity=ctor(function()return{comp={}}end),TrafficLightConfig=ctor(),TrafficLightState=ctor(),Vec3f={new=function(x,y,z)return{x=x,y=y,z=z}end},Vec4f={new=function(x,y,z,w)return{x=x,y=y,z=z,w=w}end},Mat4f={new=function(a,b,c,d)return{a,b,c,d}end},GridVec2f={new=function(x0,y0,w,h)return{x0=x0,y0=y0,width=w,height=h}end},enum={}}
+local components={BaseNode=ctor(),BaseEdge=ctor(),BaseEdgeStreet=ctor(),EmissionEmitter=ctor(),PlayerOwned=ctor()}
+for _,name in ipairs({'BaseEdgeType','RoadType','EdgeObjectType','PrecedencePreference','TrafficLightPreference','TransportMode'}) do types.enum[name]=setmetatable({}, {__index=function(t,k)local x={name=k};rawset(t,k,x);return x end}) end
+${mutation}
+local result=rebuilder.rebuild(copied,types,components)
+local config=result.proposal.proposal.nodeConfigsToAdd[1]
+local comp=config.comp;local light=comp.trafficLightConfig;local state=light.states[1];local lane=comp.laneConnections[1]
+return result.code,table.concat({config.entity,comp.trafficLightPreference.name,lane.segment0,lane.lane0,lane.segment1,lane.lane1,tostring(lane.withRoad),tostring(lane.withTram),comp.crosswalks[1],state.lockedLanes[1],state.lockedLanes[2],state.duration,state.minDuration,tostring(state.canSkip),light.trafficLightType,tostring(comp.doubleSlipSwitch),tostring(comp.userModifiedLaneConnections),tostring(comp.userModifiedTrafficLightStates),result.proposal.proposal.nodeConfigsToRemove[1]},':')
+`;
+  const L=lauxlib.luaL_newstate();lualib.luaL_openlibs(L);try{assert.equal(lauxlib.luaL_loadstring(L,to_luastring(script)),lua.LUA_OK,lua.lua_tojsstring(L,-1));assert.equal(lua.lua_pcall(L,0,2,0),lua.LUA_OK,lua.lua_tojsstring(L,-1));return[lua.lua_tojsstring(L,-2),lua.lua_tojsstring(L,-1)];}finally{lua.lua_close(L);}
+}
 test('experimental rebuilder uses public constructors and re-captures the full copied proposal',()=>{
   const [code,captureCode,json]=execute();assert.equal(code,'unregistered');assert.equal(captureCode,'captured',json);
   assert.deepEqual(parseRoadStopCapture(json).capture,parseRoadStopCapture(JSON.stringify(roadStopCaptureFixture())).capture);
@@ -67,11 +85,26 @@ types.GridVec2f=nil;components={}
   assert.throws(()=>execute('types.Proposal.new=function() return {terrain={baseHeightMod={width=1,height=1}}} end'),/ROAD_STOP_REBUILD_UNQUALIFIED/);
 });
 
+test('rebuild uses public node-config and traffic-light constructors',()=>{
+  const [code,details]=inspectNodeConfig();
+  assert.equal(code,'unregistered');
+  assert.equal(details,'-9:YES:22:0:-3:1:true:false:22:0:1:12:3:false:4:true:false:true:22');
+});
+
+test('node configuration rejects missing native constructors and malformed bounded fields',()=>{
+  for(const mutation of [
+    'types.BaseNodeLaneConnectionAndEntity=nil', 'types.TrafficLightConfig=nil', 'types.TrafficLightState=nil',
+    'types.BaseNodeLaneConnectionAndEntity.new=function()return{}end', 'types.enum.TrafficLightPreference=nil',
+    'copied.proposal.street.nodeConfigsToRemove={0}', 'copied.proposal.street.nodeConfigsToAdd[1].comp.trafficLightConfig.states[1].duration=0/0',
+    'copied.proposal.street.nodeConfigsToAdd[1].comp.crosswalks[3]=22',
+  ]) assert.throws(()=>inspectNodeConfig(mutation),/ROAD_STOP_REBUILD_UNQUALIFIED/);
+});
+
 test('rebuild rejects holes, oversized collections, unsupported edits and missing enums',()=>{
   for(const mutation of [
     'copied.proposal.street.addedSegments[3]=copied.proposal.street.addedSegments[1]',
     'for i=2,65 do copied.proposal.street.addedSegments[i]=copied.proposal.street.addedSegments[1] end',
-    'copied.proposal.toAdd={{}}', 'copied.proposal.street.nodeConfigsToAdd={{}}',
+    'copied.proposal.toAdd={{}}', 'copied.proposal.street.nodeConfigsToRemove={0}',
     'types.enum.RoadType={}', 'copied.proposal.street.edgeObjectsToAdd[1].modelInstance.transf[1]=0/0',
   ])assert.throws(()=>execute(mutation),/ROAD_STOP_REBUILD_UNQUALIFIED/);
 });
