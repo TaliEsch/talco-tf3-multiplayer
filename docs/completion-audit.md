@@ -2,6 +2,36 @@
 
 ## Current status — 20 September 2026
 
+### Live aggregate report: absent laneConfig and stop model
+
+The user's 20:51 report on manifest `6b1f4dceb7e0529aa89d7122717685f983e77621843216eff446f115ac5cb599`
+identified `laneConfig` absent on both added/removed segment components and
+`modelInstance` absent on the stop. The aggregate diagnostic UI worked in-game;
+this is not replay success. Both create and apply observations contained the issue.
+
+Capture/strict parsing now preserve singular laneConfig absence as null; native
+reconstruction requires matching absence and never writes that unavailable setter.
+Plural laneConfigs remains required and is preserved. Root's round-trip test also
+rejects a mismatching constructor and missing plural lanes.
+
+Installed `api/tealdef/api/type.d.tl:2492` declares direct Proposal.EdgeObject.modelInstance;
+`base/content/mission.zip::mission/guide_system/guides/guide_timer.tl` checks it for
+nil before reading modelId. Root inspected both. No alternate nesting or public
+ModelInstance constructor was established. SimpleStreetProposal.EdgeObject.new
+is public (:2762), but requires edgeEntity/param/oneWay/model/name and a compatible
+new edge; those values have not been established for this observation.
+When modelInstance is absent, diagnostics now report only the kinds of those five
+declared alternative fields. Missing model still rejects capture/replay. No guessed
+model, dropped stop, execution retry or target-company success is introduced.
+The prior structural reconstruction remains experimental, not native-qualified.
+
+Root verification: 718/718 checks passed; mod review passed. Staged with TF3
+closed at 21:02 UTC, source/copy manifest
+`4de45b3efbf6539ca6b8f389a260857a3e8557eb3ea4c8e944c4b0ec3b85c454`.
+Previous copy preserved as `tf3mp_backup_cddbebcc96d749cd8df8009013175abe`.
+No launcher-source change or game launch. Native verification of the repair and
+alternative field diagnostics is pending; Phase 2 is not complete.
+
 ### Consolidated capture compatibility diagnostics
 
 The live 20:32 preview/apply progressed beyond node flags but failed `lanes`.

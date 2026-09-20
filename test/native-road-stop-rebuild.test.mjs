@@ -51,6 +51,19 @@ test('experimental rebuilder uses public constructors and re-captures the full c
   const [code,captureCode,json]=execute();assert.equal(code,'unregistered');assert.equal(captureCode,'captured',json);
   assert.deepEqual(parseRoadStopCapture(json).capture,parseRoadStopCapture(JSON.stringify(roadStopCaptureFixture())).capture);
 });
+test('observed absent singular laneConfig round-trips without defaulting or dropping plural lanes',()=>{
+  const mutation='copied.proposal.street.addedSegments[1].comp.laneConfig=nil;copied.proposal.street.removedSegments[1].comp.laneConfig=nil';
+  const [code,captureCode,json]=execute(mutation);
+  assert.equal(code,'unregistered');assert.equal(captureCode,'captured',json);
+  const parsed=parseRoadStopCapture(json).capture;
+  for(const list of [parsed.proposal.street.addedSegments,parsed.proposal.street.removedSegments]){
+    assert.equal(list[0].comp.laneConfig,null);
+    assert.ok(Array.isArray(list[0].comp.laneConfigs));
+  }
+  assert.throws(()=>execute(mutation+';types.SegmentAndEntity.new=function()return{comp={laneConfig={}}}end'),/ROAD_STOP_REBUILD_UNQUALIFIED/);
+  assert.throws(()=>execute('copied.proposal.street.addedSegments[1].comp.laneConfigs=nil'),/ROAD_STOP_REBUILD_UNQUALIFIED/);
+});
+
 test('experimental rebuilder fails with one fixed unqualified code when capability or schema is absent',()=>{
   for(const mutation of ['types.Vec4f=nil','components.BaseEdge=nil','types.enum.PrecedencePreference=nil','types.enum.BaseEdgeType=nil','copied.proposal.street.addedSegments[1].type=1','copied.proposal.terrain.baseHeightMod.width=1']){
     assert.throws(()=>execute(mutation),/ROAD_STOP_REBUILD_UNQUALIFIED/);

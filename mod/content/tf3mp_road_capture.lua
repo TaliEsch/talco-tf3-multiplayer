@@ -94,10 +94,15 @@ local function edge(v, enums)
   if enum(v.roadType, enums.RoadType, "roadType", "STREET", "TRACK") ~= "STREET" then bad("roadType") end
   local objects = array(v.objects, "objects"); local copiedObjects = {}
   for x = 1, #objects do local q = array(objects[x], "objects"); if #q ~= 2 then bad("objects") end; copiedObjects[x] = { int(q[1], "objects"), enum(q[2], enums.EdgeObjectType, "objects", "STOP_LEFT", "STOP_RIGHT", "SIGNAL") } end
-  local function lanes(a) a = array(a, "lanes"); local o = {}; for x = 1, #a do o[x] = lane(a[x], enums) end; return o end
+  local function lanes(a, optional)
+    -- Live native proposals omit singular laneConfig; plural laneConfigs remains
+    -- required. Preserve absence explicitly, never substitute an empty vector.
+    if optional and a == nil then return NULL end
+    a = array(a, "lanes"); local o = {}; for x = 1, #a do o[x] = lane(a[x], enums) end; return o
+  end
   local decorations = array(v.edgeDecorations, "decorations"); local copiedDecorations = {}
   for x = 1, #decorations do local q = array(decorations[x], "decorations"); if #q ~= 2 then bad("decorations") end; copiedDecorations[x] = { int(q[1], "decorations"), bool(q[2], "decorations") } end
-  return { type = enum(v.type, enums.BaseEdgeType, "edgeType", "NORMAL", "BRIDGE", "TUNNEL"), typeIndex = int(v.typeIndex, "typeIndex"), objects = copiedObjects, laneConfigs = lanes(v.laneConfigs), roadDevelopmentLocked = bool(v.roadDevelopmentLocked, "roadDevelopmentLocked"), node0 = int(v.node0, "node0"), node1 = int(v.node1, "node1"), position0 = vec3(v.position0, "position0"), position1 = vec3(v.position1, "position1"), tangent0 = vec3(v.tangent0, "tangent0"), tangent1 = vec3(v.tangent1, "tangent1"), laneConfig = lanes(v.laneConfig), edgeDecorations = copiedDecorations, distance = finite(v.distance, "distance"), roadType = enum(v.roadType, enums.RoadType, "roadType", "STREET", "TRACK"), roadTemplate = text(v.roadTemplate, "roadTemplate"), roadStyle = text(v.roadStyle, "roadStyle") }
+  return { type = enum(v.type, enums.BaseEdgeType, "edgeType", "NORMAL", "BRIDGE", "TUNNEL"), typeIndex = int(v.typeIndex, "typeIndex"), objects = copiedObjects, laneConfigs = lanes(v.laneConfigs), roadDevelopmentLocked = bool(v.roadDevelopmentLocked, "roadDevelopmentLocked"), node0 = int(v.node0, "node0"), node1 = int(v.node1, "node1"), position0 = vec3(v.position0, "position0"), position1 = vec3(v.position1, "position1"), tangent0 = vec3(v.tangent0, "tangent0"), tangent1 = vec3(v.tangent1, "tangent1"), laneConfig = lanes(v.laneConfig, true), edgeDecorations = copiedDecorations, distance = finite(v.distance, "distance"), roadType = enum(v.roadType, enums.RoadType, "roadType", "STREET", "TRACK"), roadTemplate = text(v.roadTemplate, "roadTemplate"), roadStyle = text(v.roadStyle, "roadStyle") }
 end
 local function precedence(v, enums)
   -- Copy an observed primitive code without guessing YES/NO/AUTO meanings.
@@ -281,7 +286,7 @@ local function inspectShape(proposal, apiTypes)
   local function edgeShape(v,p) record(v,p,{
     {"type",enumValue},{"typeIndex",integer},{"objects",pairsOf(integer,enumValue)},
     {"laneConfigs",vector(laneShape)},{"roadDevelopmentLocked",boolean},{"node0",integer},{"node1",integer},
-    {"position0",vec},{"position1",vec},{"tangent0",vec},{"tangent1",vec},{"laneConfig",vector(laneShape)},
+    {"position0",vec},{"position1",vec},{"tangent0",vec},{"tangent1",vec},{"laneConfig",function(x,q) if x ~= nil then vector(laneShape)(x,q) end end},
     {"edgeDecorations",pairsOf(integer,boolean)},{"distance",number},{"roadType",enumValue},{"roadTemplate",stringValue},{"roadStyle",stringValue}}) end
   local function segmentShape(v,p) record(v,p,{{"entity",integer},{"type",integer},{"comp",edgeShape},
     {"streetEdge",function(x,q) record(x,q,{{"precedenceNode0",enumValue},{"precedenceNode1",enumValue}}) end},
@@ -306,7 +311,17 @@ local function inspectShape(proposal, apiTypes)
       {"addedSegments",vector(segmentShape)},{"removedSegments",vector(segmentShape)},
       {"nodeConfigsToAdd",vector(configShape)},{"nodeConfigsToRemove",vector(integer)},
       {"edgeObjectsToAdd",vector(function(x,q) record(x,q,{{"resultEntity",integer},{"category",integer},{"playerEntity",integer},{"left",boolean},
-        {"modelInstance",function(y,r) record(y,r,{{"modelId",integer},{"transf0",matrixShape},{"transf",matrixShape},{"transformator",integer}}) end}}) end)},
+        {"modelInstance",function(y,r)
+          record(y,r,{{"modelId",integer},{"transf0",matrixShape},{"transf",matrixShape},{"transformator",integer}})
+          if y == nil then
+            -- Public SimpleStreetProposal.EdgeObject is a different record from
+            -- Proposal.EdgeObject. Inspect only those declared alternative field
+            -- kinds; never infer a model, copy values, or authorize conversion.
+            for _,name in ipairs({"edgeEntity","param","oneWay","model","name"}) do
+              access(x,name,q .. "Simple" .. name,function(value,path) issue(path,kind(value)) end)
+            end
+          end
+        end}}) end)},
       {"new2oldEdgeObjects",nativeMap(vector(integer))},{"old2newEdgeObjects",nativeMap(vector(integer))}}) end},
     {"toAdd",vector(function()end)},{"toRemove",vector(integer)},{"old2new",nativeMap(integer)},
     {"terrain",function(v,p) record(v,p,{{"baseHeightMod",function(x,q) record(x,q,{{"x0",integer},{"y0",integer},{"width",integer},{"height",integer}}) end}}) end}})

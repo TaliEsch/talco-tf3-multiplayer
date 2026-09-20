@@ -91,7 +91,7 @@ function baseEdge(value, name) {
   return { type: enumValue(BASE_EDGE_TYPES, value.type, `${name}.type`), typeIndex: int32(value.typeIndex, `${name}.typeIndex`), objects,
     laneConfigs: list(value.laneConfigs, `${name}.laneConfigs`, laneConfig), roadDevelopmentLocked: bool(value.roadDevelopmentLocked, `${name}.roadDevelopmentLocked`),
     node0: int32(value.node0, `${name}.node0`), node1: int32(value.node1, `${name}.node1`), position0: vec3(value.position0, `${name}.position0`), position1: vec3(value.position1, `${name}.position1`), tangent0: vec3(value.tangent0, `${name}.tangent0`), tangent1: vec3(value.tangent1, `${name}.tangent1`),
-    laneConfig: list(value.laneConfig, `${name}.laneConfig`, laneConfig), edgeDecorations, distance: number(value.distance, `${name}.distance`), roadType: enumValue(ROAD_TYPES, value.roadType, `${name}.roadType`), roadTemplate: text(value.roadTemplate, `${name}.roadTemplate`), roadStyle: text(value.roadStyle, `${name}.roadStyle`) };
+    laneConfig: value.laneConfig === null ? null : list(value.laneConfig, `${name}.laneConfig`, laneConfig), edgeDecorations, distance: number(value.distance, `${name}.distance`), roadType: enumValue(ROAD_TYPES, value.roadType, `${name}.roadType`), roadTemplate: text(value.roadTemplate, `${name}.roadTemplate`), roadStyle: text(value.roadStyle, `${name}.roadStyle`) };
 }
 
 function node(value, name) {

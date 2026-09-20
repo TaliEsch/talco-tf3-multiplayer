@@ -70,7 +70,7 @@ export async function validateReviewPackage(root) {
     if(!gameScript.includes(`state:subscribeToEvent("${event}")`))throw new Error('missing service observation subscription');
   const factsSource = await readFile(path.join(absoluteRoot, 'content', 'tf3mp_proposal_facts.lua'), 'utf8');
   const captureSource = await readFile(path.join(absoluteRoot, 'content', 'tf3mp_road_capture.lua'), 'utf8');
-  if (createHash('sha256').update(captureSource.replace(/\r\n/g, '\n')).digest('hex') !== '13f844018fad9d76990f98d032b3033270c7b20b045cb87880b9c0e3d5bef732') {
+  if (createHash('sha256').update(captureSource.replace(/\r\n/g, '\n')).digest('hex') !== 'f3bdcc1354883bd9dd7a545470245f286d3c2f7d9246c6540991b0296c3709c0') {
     throw new Error('road capture collector differs from reviewed passive source');
   }
   for (const [file, digest] of [
@@ -78,7 +78,7 @@ export async function validateReviewPackage(root) {
     ['tf3mp_road_replay_execute.lua', 'a48ac29fc0e51953e4a2c8fcbf41b91c9655f68fe6ab7266c220bb7ee7a48d27'],
     ['tf3mp_road_replay_preflight.lua', '6cd8abc6468c03f176a31b7a4b2229b5c3cc69a095ac5505a4f30510da77027a'],
     ['tf3mp_road_replay_prepare.lua', '3ed89e661e47b8c7474ba4ed561b72b976b54fe79cebd1eb9e0af6f7708a251c'],
-    ['tf3mp_road_replay_rebuild.lua', '5fa0c14163a6602895ae2e7c5fa55a36d3f7c4eedd44415a5ea281be37c20946'],
+    ['tf3mp_road_replay_rebuild.lua', 'f6de6ff3edff7f05199bf34dfeb699bbb81147e26d4f9257e0f81110a24ae028'],
     ['tf3mp_road_replay_result.lua', 'fc924f467feb4c3e651df4379b1fff2c9e31ab67ac97c4040ee4ff4c764d9137'],
   ]) {
     const source = await readFile(path.join(absoluteRoot, 'content', file), 'utf8');

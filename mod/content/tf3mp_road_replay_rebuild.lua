@@ -112,7 +112,12 @@ local function edge(types, components, enums, v, initialized)
   out.node0, out.node1 = int(v.node0), int(v.node1)
   out.position0, out.position1 = vec3(types, v.position0), vec3(types, v.position1)
   out.tangent0, out.tangent1 = vec3(types, v.tangent0), vec3(types, v.tangent1)
-  out.laneConfig = list(v.laneConfig, function(x) return lane(enums, x) end)
+  if v.laneConfig == nil then
+    -- Match observed absence without assigning an unavailable native property.
+    if out.laneConfig ~= nil then fail() end
+  else
+    out.laneConfig = list(v.laneConfig, function(x) return lane(enums, x) end)
+  end
   out.edgeDecorations = list(v.edgeDecorations, function(pair)
     if not array(pair) or #pair ~= 2 then fail() end; return {int(pair[1]), bool(pair[2])}
   end)

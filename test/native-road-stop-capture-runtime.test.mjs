@@ -108,13 +108,17 @@ test('node flag mismatch reports all three bounded representations without coerc
 test('preflight reports independent mismatches together and bounds hostile diagnostics',()=>{
   const result=run(`
 street.addedSegments[1].comp.laneConfigs=nil
-street.addedSegments[1].comp.laneConfig=nil
+street.addedSegments[1].comp.laneConfig=false
 street.removedSegments[1].comp.roadStyle=42
 street.edgeObjectsToAdd[1].modelInstance.transformator="private"
 `,undefined,'return result.code,result.issues');
   assert.equal(result.code,'unsupported');
-  for(const field of ['roadaddedSegments1complaneConfigsNil','roadaddedSegments1complaneConfigNil','roadremovedSegments1comproadStyleNumber','roadedgeObjectsToAdd1modelInstancetransformatorString'])assert.ok(result.value.includes(field),result.value);
+  for(const field of ['roadaddedSegments1complaneConfigsNil','roadaddedSegments1complaneConfigBoolean','roadremovedSegments1comproadStyleNumber','roadedgeObjectsToAdd1modelInstancetransformatorString'])assert.ok(result.value.includes(field),result.value);
   assert.ok(!result.value.includes('private'));
+  const alternate=run('street.edgeObjectsToAdd[1].modelInstance=nil;street.edgeObjectsToAdd[1].model="private/model.mdl";street.edgeObjectsToAdd[1].param=0.5',undefined,'return result.code,result.issues');
+  assert.equal(alternate.code,'unsupported');
+  for(const field of ['modelInstanceNil','SimpleedgeEntityNil','SimpleparamNumber','SimpleoneWayNil','SimplemodelString','SimplenameNil'])assert.ok(alternate.value.includes(field),alternate.value);
+  assert.ok(!alternate.value.includes('private'));
   const hostile=run('proposal=setmetatable({}, {__index=function()error("secret")end})',undefined,'return result.code,result.issues');
   for(const field of ['proposalGetterError','toAddGetterError','toRemoveGetterError','old2newGetterError','terrainGetterError'])assert.ok(hostile.value.includes(field),hostile.value);
   const many=run('street.addedSegments={};for i=1,64 do street.addedSegments[i]={}end',undefined,'return result.code,result.issues');

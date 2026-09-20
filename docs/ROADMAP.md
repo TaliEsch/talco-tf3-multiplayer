@@ -6,10 +6,13 @@ archive/roadmap-before-scope-review.md; historical blockers do not override this
 
 Current pre-replay check: load the repaired mod, pause, preview a normal road stop
 and cancel, then use **Capture diagnostics** in Advanced — Road stop replay.
-The collector now inspects independent required field shapes together instead of
-stopping diagnostics at the first mismatch. Reports are bounded and explicitly
-flag incomplete inspection. They never authorize replay. The known `lanes`
-mismatch still needs this runtime report; no missing lane array is defaulted.
+The 20:51 runtime report identified absent singular `laneConfig` on both road
+segments and absent stop `modelInstance`. Singular absence now round-trips as
+null, while plural `laneConfigs` remains required; reconstruction requires matching
+native absence rather than defaulting an empty vector. The model remains a blocker.
+The next preview/cancel diagnostic inspects the declared alternative simple-edge
+fields by type only when modelInstance is absent. It never fabricates model data
+or authorizes replay. No new placement is needed for this diagnostic.
 
 Next local proof (user clarification): record one normal action, reload its
 exact pre-action disposable checkpoint, then explicitly replay it once and
