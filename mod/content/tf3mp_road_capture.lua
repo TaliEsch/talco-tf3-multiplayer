@@ -99,12 +99,18 @@ local function edge(v, enums)
   for x = 1, #decorations do local q = array(decorations[x], "decorations"); if #q ~= 2 then bad("decorations") end; copiedDecorations[x] = { int(q[1], "decorations"), bool(q[2], "decorations") } end
   return { type = enum(v.type, enums.BaseEdgeType, "edgeType", "NORMAL", "BRIDGE", "TUNNEL"), typeIndex = int(v.typeIndex, "typeIndex"), objects = copiedObjects, laneConfigs = lanes(v.laneConfigs), roadDevelopmentLocked = bool(v.roadDevelopmentLocked, "roadDevelopmentLocked"), node0 = int(v.node0, "node0"), node1 = int(v.node1, "node1"), position0 = vec3(v.position0, "position0"), position1 = vec3(v.position1, "position1"), tangent0 = vec3(v.tangent0, "tangent0"), tangent1 = vec3(v.tangent1, "tangent1"), laneConfig = lanes(v.laneConfig), edgeDecorations = copiedDecorations, distance = finite(v.distance, "distance"), roadType = enum(v.roadType, enums.RoadType, "roadType", "STREET", "TRACK"), roadTemplate = text(v.roadTemplate, "roadTemplate"), roadStyle = text(v.roadStyle, "roadStyle") }
 end
+local function precedence(v, enums)
+  -- Copy an observed primitive code without guessing YES/NO/AUTO meanings.
+  -- Diagnostic capture is not permission to cast an arbitrary code on replay.
+  if type(v) == "number" then return { nativeCode = int(v, "precedence") } end
+  return enum(v, enums.PrecedencePreference, "precedence", "YES", "NO", "AUTO")
+end
 local function segment(v, enums)
   if int(v.type, "segmentType") ~= 0 then bad("segmentType") end
   local emission, owned = NULL, NULL
   if v.emissionEmitter ~= nil then emission = { position = vec3(v.emissionEmitter.position, "emission"), radius = finite(v.emissionEmitter.radius, "emission"), noisePower = finite(v.emissionEmitter.noisePower, "emission"), pollutionPower = finite(v.emissionEmitter.pollutionPower, "emission") } end
   if v.playerOwned ~= nil then owned = { player = owner(v.playerOwned.player, "playerOwned") } end
-  return { entity = int(v.entity, "segmentEntity"), comp = edge(v.comp, enums), type = 0, streetEdge = { precedenceNode0 = enum(v.streetEdge.precedenceNode0, enums.PrecedencePreference, "precedence", "YES", "NO", "AUTO"), precedenceNode1 = enum(v.streetEdge.precedenceNode1, enums.PrecedencePreference, "precedence", "YES", "NO", "AUTO") }, emissionEmitter = emission, playerOwned = owned }
+  return { entity = int(v.entity, "segmentEntity"), comp = edge(v.comp, enums), type = 0, streetEdge = { precedenceNode0 = precedence(v.streetEdge.precedenceNode0, enums), precedenceNode1 = precedence(v.streetEdge.precedenceNode1, enums) }, emissionEmitter = emission, playerOwned = owned }
 end
 local function node(v) return { entity = int(v.entity, "nodeEntity"), comp = { position = vec3(v.comp.position, "nodePosition") } } end
 local function json_string(v)
@@ -154,10 +160,12 @@ function M.collect(proposal, apiTypes)
     -- Missing/undeclared runtime groups fail as unsupported, never guessed.
     if type(apiTypes) ~= "table" or type(apiTypes.enum) ~= "table" then bad("enumNamespace") end
     local groups = apiTypes.enum
+    local hasPrecedence, precedenceGroup = pcall(function() return groups.PrecedencePreference end)
+    if not hasPrecedence then precedenceGroup = nil end
     return capture(proposal, {
       BaseEdgeType = groups.BaseEdgeType, RoadType = groups.RoadType,
       EdgeObjectType = groups.EdgeObjectType, TransportMode = groups.TransportMode,
-      PrecedencePreference = groups.PrecedencePreference, Mat4f = apiTypes.Mat4f,
+      PrecedencePreference = precedenceGroup, Mat4f = apiTypes.Mat4f,
     })
   end)
   if ok then return { code = "captured", json = result } end

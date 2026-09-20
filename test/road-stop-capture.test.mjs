@@ -20,6 +20,22 @@ test("meaningful copied fields change the digest", () => {
   const a = decode(fixture()); const changed = fixture(); changed.proposal.street.edgeObjectsToAdd[0].left = false;
   assert.notEqual(a.digest, decode(changed).digest);
 });
+test("numeric native precedence codes are copied without assigning symbolic meaning", () => {
+  const value = fixture();
+  value.proposal.street.addedSegments[0].streetEdge = { precedenceNode0: { nativeCode: -7 }, precedenceNode1: { nativeCode: 42 } };
+  value.proposal.street.removedSegments[0].streetEdge = { precedenceNode0: { nativeCode: -7 }, precedenceNode1: { nativeCode: 42 } };
+  const first = decode(value), second = decode(JSON.parse(JSON.stringify(value)));
+  assert.deepEqual(first.capture.proposal.street.addedSegments[0].streetEdge, { precedenceNode0: { nativeCode: -7 }, precedenceNode1: { nativeCode: 42 } });
+  assert.equal(first.digest, second.digest);
+});
+test("native precedence union rejects malformed or non-int32 codes", () => {
+  for (const code of ["1", 1.5, 2147483648, -2147483649]) {
+    assert.throws(() => decode(changed(value => { value.proposal.street.addedSegments[0].streetEdge.precedenceNode0 = { nativeCode: code }; })), /ROAD_STOP_CODEC_UNSUPPORTED/);
+  }
+  for (const value of [{}, { nativeCode: 1, extra: true }, { nativeCode: 1, another: 2 }, { extra: true }]) {
+    assert.throws(() => decode(changed(capture => { capture.proposal.street.addedSegments[0].streetEdge.precedenceNode1 = value; })), /ROAD_STOP_CODEC_UNSUPPORTED/);
+  }
+});
 test("strictly rejects malformed shapes, unknown fields and nonfinite JSON values", () => {
   for (const mutate of [v => { v.extra = 1; }, v => { delete v.proposal.terrain; }, v => { v.proposal.street.addedSegments[0].comp.unknown = 1; }, v => { v.proposal.street.addedSegments[0].comp.distance = "1"; }]) assert.throws(() => decode(changed(mutate)), /ROAD_STOP_CODEC_UNSUPPORTED/);
   assert.throws(() => parseRoadStopCapture('{"schemaVersion":1,"builderId":"streetTerminalBuilder","proposal":NaN}'), /valid JSON/);

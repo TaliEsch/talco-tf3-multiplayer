@@ -58,7 +58,7 @@ export async function validateReviewPackage(root) {
   const gameScript = await readFile(path.join(absoluteRoot, "content", "tf3mp_status.script.tl"), "utf8");
   const factsSource = await readFile(path.join(absoluteRoot, 'content', 'tf3mp_proposal_facts.lua'), 'utf8');
   const captureSource = await readFile(path.join(absoluteRoot, 'content', 'tf3mp_road_capture.lua'), 'utf8');
-  if (createHash('sha256').update(captureSource.replace(/\r\n/g, '\n')).digest('hex') !== 'bdd241172d421b97d039601ecc82db8b3588096608107a41f874ee259001eead') {
+  if (createHash('sha256').update(captureSource.replace(/\r\n/g, '\n')).digest('hex') !== '550f9c5be09ea2f441e4a2622dcda93babd88c39358cc11726e925cc731d0539') {
     throw new Error('road capture collector differs from reviewed passive source');
   }
   if (createHash('sha256').update(factsSource.replace(/\r\n/g, '\n')).digest('hex') !== '55d015ccc1c478f4ea8018b91fbb4aa040c0fd4e01bf735b6a1c1a4cdc9115ce') {

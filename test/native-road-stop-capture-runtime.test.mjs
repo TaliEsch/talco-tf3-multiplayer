@@ -106,6 +106,21 @@ test('Lua capture never leaks a native exception or retains native matrices on f
   assert.deepEqual(run('proposal=setmetatable({}, {__index=function() error(setmetatable({}, {__index=function() error("private-error-reader") end})) end})'),{code:'unsupported',value:'proposal'});
 });
 
+test('Lua capture preserves native numeric precedence without any symbolic enum binding',()=>{
+  const result=run(`
+enums.PrecedencePreference=nil
+setmetatable(enums,{__index=function(_,key) if key=="PrecedencePreference" then error("unexposed member") end end})
+for _,segments in ipairs({street.addedSegments,street.removedSegments}) do
+  for _,s in ipairs(segments) do s.streetEdge.precedenceNode0=17;s.streetEdge.precedenceNode1=42 end
+end
+`);
+  assert.equal(result.code,'captured',result.value);
+  const expected=roadStopCaptureFixture();
+  for(const list of [expected.proposal.street.addedSegments,expected.proposal.street.removedSegments])
+    for(const s of list){s.streetEdge.precedenceNode0={nativeCode:17};s.streetEdge.precedenceNode1={nativeCode:42};}
+  assert.deepEqual(parseRoadStopCapture(result.value).capture,parseRoadStopCapture(JSON.stringify(expected)).capture);
+});
+
 test('Lua capture enforces both record and total serialized-byte bounds',()=>{
   assert.deepEqual(run('for i=2,65 do street.addedSegments[i]=street.addedSegments[1] end'),{code:'unsupported',value:'addedSegments'});
   assert.deepEqual(run(`

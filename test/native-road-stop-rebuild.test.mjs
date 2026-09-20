@@ -55,6 +55,18 @@ components.BaseNode=nil;components.BaseEdge=nil
   assert.deepEqual(parseRoadStopCapture(json).capture,parseRoadStopCapture(JSON.stringify(roadStopCaptureFixture())).capture);
 });
 
+test('fully initialized proposal records need no separate component or grid factory',()=>{
+  const [code,captureCode,json]=execute(`
+types.Proposal.new=function() return {terrain={baseHeightMod={x0=0,y0=0,width=0,height=0}}} end
+types.NodeAndEntity.new=function() return {comp={}} end
+types.SegmentAndEntity.new=function() return {comp={},streetEdge={},emissionEmitter={},playerOwned={}} end
+types.GridVec2f=nil;components={}
+`);
+  assert.equal(code,'unregistered');assert.equal(captureCode,'captured',json);
+  assert.deepEqual(parseRoadStopCapture(json).capture,parseRoadStopCapture(JSON.stringify(roadStopCaptureFixture())).capture);
+  assert.throws(()=>execute('types.Proposal.new=function() return {terrain={baseHeightMod={width=1,height=1}}} end'),/ROAD_STOP_REBUILD_UNQUALIFIED/);
+});
+
 test('rebuild rejects holes, oversized collections, unsupported edits and missing enums',()=>{
   for(const mutation of [
     'copied.proposal.street.addedSegments[3]=copied.proposal.street.addedSegments[1]',
@@ -73,4 +85,21 @@ test('rebuild redacts native getter, setter and constructor errors',()=>{
     assert.match(error.message,/ROAD_STOP_REBUILD_UNQUALIFIED/);
     assert.doesNotMatch(error.message,/private-native-detail/);return true;
   });
+});
+
+test('copied native precedence codes require independently supplied native values',()=>{
+  const mutation=`
+types.enum.PrecedencePreference=nil
+for _,segments in ipairs({copied.proposal.street.addedSegments,copied.proposal.street.removedSegments}) do
+  for _,s in ipairs(segments) do s.streetEdge.precedenceNode0={nativeCode=17};s.streetEdge.precedenceNode1={nativeCode=42} end
+end
+`;
+  assert.throws(()=>execute(mutation),/ROAD_STOP_REBUILD_UNQUALIFIED/);
+  assert.throws(()=>execute(mutation+'types.qualifiedPrecedenceValues={17}'),/ROAD_STOP_REBUILD_UNQUALIFIED/);
+  const [code,captureCode,json]=execute(mutation+'types.qualifiedPrecedenceValues={17,42}');
+  assert.equal(code,'unregistered');assert.equal(captureCode,'captured',json);
+  const expected=roadStopCaptureFixture();
+  for(const list of [expected.proposal.street.addedSegments,expected.proposal.street.removedSegments])
+    for(const s of list){s.streetEdge.precedenceNode0={nativeCode:17};s.streetEdge.precedenceNode1={nativeCode:42};}
+  assert.deepEqual(parseRoadStopCapture(json).capture,parseRoadStopCapture(JSON.stringify(expected)).capture);
 });

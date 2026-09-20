@@ -2,6 +2,28 @@
 
 ## Current status — 20 September 2026
 
+### Copied precedence values and initialized-record reconstruction
+
+Capture/parser now preserve an actually numeric precedence value as a bounded
+`nativeCode` record without needing an unavailable symbolic group or guessing
+enum ordinals. Symbolic values remain supported. The experimental rebuilder only
+uses such codes when the trusted caller supplies independently qualified native
+values; unqualified codes fail. Tests use arbitrary nonstandard numbers to prove
+they are copied, not interpreted as hard-coded YES/NO/AUTO mappings.
+
+Reconstruction now reuses initialized street-edge, optional-component and empty
+terrain records when available, as well as stock-supported node/edge components.
+It does not clear nonempty terrain or invent missing constructors. Added fixtures
+exercise reconstruction without separate component/grid factories. Actual TF3
+precedence representation and these extra initialized defaults remain unverified.
+No replay command was sent and this is not Phase 2 acceptance evidence.
+
+Verification: full suite passed 681/681. A final guard makes an unexposed
+PrecedencePreference member lookup nonfatal; all 26 focused capture/review checks
+passed after that guard. Source-only batch, no staging or game launch. The final
+record/reload/replay execution flow remains to be connected before another manual
+session is requested.
+
 ### Windows request publication repaired; stock wrapper path confirmed
 
 The coordinator's observed `EPERM` at atomic replacement now has bounded

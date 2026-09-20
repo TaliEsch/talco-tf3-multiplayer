@@ -42,6 +42,20 @@ local function named(enums, group, name, allowed)
   if type(name) ~= "string" or not allowed[name] then fail() end
   return enum(enums, group, name)
 end
+local function precedence(types, v)
+  if type(v) == "table" then
+    local count = 0; for key in pairs(v) do if key ~= "nativeCode" then fail() end; count = count + 1 end
+    if count ~= 1 then fail() end
+    local code = int(v.nativeCode)
+    -- These values must come from trusted engine inspection, never the payload.
+    -- Without that runtime qualification, native integer codes remain diagnostic.
+    local qualified = types.qualifiedPrecedenceValues
+    if not array(qualified) or #qualified > 3 then fail() end
+    for _, native in ipairs(qualified) do if type(native) == "number" and native == code then return native end end
+    fail()
+  end
+  return named(types.enum, "PrecedencePreference", v, {YES=true,NO=true,AUTO=true})
+end
 local function list(v, build)
   if not array(v) then fail() end
   local out = {}; for i = 1, #v do out[i] = build(v[i]) end; return out
@@ -110,22 +124,23 @@ local function segment(types, components, enums, v)
   if type(v) ~= "table" or int(v.type) ~= 0 or type(v.streetEdge) ~= "table" then fail() end
   local out = call0(types.SegmentAndEntity)
   out.entity, out.comp, out.type = int(v.entity), edge(types, components, enums, v.comp, out.comp), 0
-  local street = call0(components.BaseEdgeStreet)
-  street.precedenceNode0 = named(enums, "PrecedencePreference", v.streetEdge.precedenceNode0, {YES=true,NO=true,AUTO=true})
-  street.precedenceNode1 = named(enums, "PrecedencePreference", v.streetEdge.precedenceNode1, {YES=true,NO=true,AUTO=true})
+  local street = out.streetEdge or call0(components.BaseEdgeStreet)
+  street.precedenceNode0 = precedence(types, v.streetEdge.precedenceNode0)
+  street.precedenceNode1 = precedence(types, v.streetEdge.precedenceNode1)
   out.streetEdge = street
+  local initializedEmission, initializedOwner = out.emissionEmitter, out.playerOwned
   -- Constructors may initialize optional components; absence must survive too.
   out.emissionEmitter, out.playerOwned = nil, nil
   if v.emissionEmitter ~= nil then
     local source = v.emissionEmitter; if type(source) ~= "table" then fail() end
-    local emission = call0(components.EmissionEmitter)
+    local emission = initializedEmission or call0(components.EmissionEmitter)
     emission.position, emission.radius = vec3(types, source.position), number(source.radius)
     emission.noisePower, emission.pollutionPower = number(source.noisePower), number(source.pollutionPower)
     out.emissionEmitter = emission
   end
   if v.playerOwned ~= nil then
     if type(v.playerOwned) ~= "table" then fail() end
-    local owned = call0(components.PlayerOwned); owned.player = owner(v.playerOwned.player); out.playerOwned = owned
+    local owned = initializedOwner or call0(components.PlayerOwned); owned.player = owner(v.playerOwned.player); out.playerOwned = owned
   end
   return out
 end
@@ -170,7 +185,16 @@ local function rebuild(capture, types, components)
   proposal.toRemove = list(proposalData.toRemove, int)
   proposal.old2new = map(proposalData.old2new, int)
   proposal.toAdd = {}
-  proposal.terrain = {baseHeightMod=call(types.GridVec2f, int(terrain.x0), int(terrain.y0), 0, 0)}
+  local terrainRecord = proposal.terrain
+  local grid = terrainRecord and terrainRecord.baseHeightMod
+  if grid ~= nil then
+    -- A fresh Proposal may provide its empty grid; never clear nonempty data.
+    if grid.width ~= 0 or grid.height ~= 0 then fail() end
+    grid.x0, grid.y0 = int(terrain.x0), int(terrain.y0)
+  else
+    grid = call(types.GridVec2f, int(terrain.x0), int(terrain.y0), 0, 0)
+  end
+  proposal.terrain = {baseHeightMod=grid}
   return {code="unregistered", proposal=proposal}
 end
 

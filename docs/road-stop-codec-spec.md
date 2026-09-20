@@ -46,8 +46,14 @@ to establish a usable runtime path. `Type.enum` exposes the common enum groups;
 constructors are nested declarations whose usable runtime paths still need stock
 source or live confirmation. Do not guess these bindings or numeric enum values.
 The capture adapter now uses `api.type.enum` plus `api.type.Mat4f` correctly and
-returns unsupported if a required group is unavailable. Fixture-supplied bindings
-do not prove those missing runtime capabilities exist.
+returns unsupported if a required value cannot be represented. For precedence
+only, if the actual getter returns a finite int32, capture preserves it as
+`{nativeCode: value}` without inventing a YES/NO/AUTO mapping. Symbolic records
+remain supported when their enum binding exists. No observation has yet proven
+that live TF3 precedence is numeric. The experimental rebuilder rejects copied
+codes unless its trusted caller supplies independently qualified native values;
+payload values alone never authorize casting. Fixture-supplied bindings do not
+prove missing runtime capabilities exist.
 
 Stock-source refinement: `base/content/mission.zip` entries
 `mission/tasks/auto_builder/track_builder.tl:10-47` and
@@ -57,6 +63,12 @@ now prefers those initialized records. This removes the need for separate
 BaseNode/BaseEdge constructors on that path; it does not establish street-edge,
 terrain or full Proposal reconstruction and does not authorize copying live
 world components without checkpoint/reference validation.
+
+The candidate can also reuse initialized street-edge, optional-component and
+empty terrain records when present. It preserves absence of optional components
+and refuses to clear a nonempty default grid. This avoids requiring extra factories
+in that case, but those additional initialized records remain fixture assumptions
+until TF3 confirms them; only node/segment `.comp` has stock-script evidence.
 
 `src/road-stop-replay-case.mjs` creates/checks an offline apply-only case bound to
 the pre-placement save SHA-256, game SHA-256, mod manifest and stop owner. It

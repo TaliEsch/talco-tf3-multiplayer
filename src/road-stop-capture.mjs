@@ -57,6 +57,15 @@ const EDGE_OBJECT_TYPES = new Set(["STOP_LEFT", "STOP_RIGHT", "SIGNAL"]);
 const PRECEDENCE = new Set(["YES", "NO", "AUTO"]);
 const TRANSPORT_MODES = new Set(["PERSON", "CARGO", "CAR", "BUS", "TRUCK", "TRAM", "ELECTRIC_TRAM", "TRAIN", "ELECTRIC_TRAIN", "AIRCRAFT", "SHIP", "SMALL_AIRCRAFT", "SMALL_SHIP", "HELICOPTER", "TRAM_TRACK", "ELECTRIC_TRAM_TRACK"]);
 
+// Native PrecedencePreference values are not always exposed symbolically by
+// the game callback. Preserve a copied numeric code without assigning it a
+// meaning; this diagnostic parser never authorizes reconstruction or admission.
+function precedence(value, name) {
+  if (typeof value === "string") return enumValue(PRECEDENCE, value, name);
+  own(value, ["nativeCode"], name);
+  return { nativeCode: int32(value.nativeCode, `${name}.nativeCode`) };
+}
+
 function laneConfig(value, name) {
   own(value, ["speed", "width", "height", "forward", "transportModes", "offset"], name);
   const transportModes = list(value.transportModes, `${name}.transportModes`, (entry, entryName) => {
@@ -95,7 +104,7 @@ function segment(value, name) {
   own(value.streetEdge, ["precedenceNode0", "precedenceNode1"], `${name}.streetEdge`);
   if (value.type !== 0) fail(`${name}.type is not the supported street variant`);
   if (value.comp?.roadType !== 'STREET') fail(`${name}.comp.roadType is not STREET`);
-  return { entity: int32(value.entity, `${name}.entity`), comp: baseEdge(value.comp, `${name}.comp`), type: 0, streetEdge: { precedenceNode0: enumValue(PRECEDENCE, value.streetEdge.precedenceNode0, `${name}.streetEdge.precedenceNode0`), precedenceNode1: enumValue(PRECEDENCE, value.streetEdge.precedenceNode1, `${name}.streetEdge.precedenceNode1`) }, emissionEmitter, playerOwned };
+  return { entity: int32(value.entity, `${name}.entity`), comp: baseEdge(value.comp, `${name}.comp`), type: 0, streetEdge: { precedenceNode0: precedence(value.streetEdge.precedenceNode0, `${name}.streetEdge.precedenceNode0`), precedenceNode1: precedence(value.streetEdge.precedenceNode1, `${name}.streetEdge.precedenceNode1`) }, emissionEmitter, playerOwned };
 }
 function edgeObject(value, name) {
   own(value, ["resultEntity", "category", "modelInstance", "playerEntity", "left"], name);
