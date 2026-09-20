@@ -14,6 +14,13 @@ Revision 7 integrates bounded copied road-stop capture into the passive observer
 native field access and reconstruction still require game evidence. There is no
 replay button or automatic construction in this build.
 
+The offline replay artifact now also binds the stop model's resource name and
+numeric ID. This prevents a same-ID/different-resource match from passing the
+offline identity check; the name still needs capture-time native evidence and
+reload-time resolution. The read-only baseline preflight is experimental, not a
+claim that the entire loaded save is identical. Replay uses the existing durable
+company transaction boundary; these preparation changes do not enable execution.
+
 Current priority (20 September, after the 12:24 UTC setup run): reuse normal
 native placement and capture its complete proposal/command. Stop extending the
 station coordinate picker or treating guessed placement as an acceptance task.

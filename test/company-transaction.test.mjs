@@ -21,6 +21,29 @@ test('confirmed operation is durably consumed, including after helper restart',a
   assert.equal((await runner.execute(input)).outcome,'verified');
   await assert.rejects(new CompanyTransaction({directory}).execute(input),/ALREADY_CONSUMED/);
 });
+
+test('road-stop replay shares durable company barriers and cannot replay a different capture after uncertainty',async t=>{
+  const {directory,runner,input}=await fixture(t);
+  const confirmation={caseDigest:'b'.repeat(64),company:2};
+  let submissions=0;
+  const replay={...input,action:'replay_road_stop',confirmation,
+    confirmedHash:sha256Canonical(confirmation),prepare:async()=>({confirmation,context:{}}),
+    apply:async()=>{submissions++;throw new Error('receipt lost');}};
+  assert.equal((await runner.execute(replay)).outcome,'unknown');
+  const restarted=new CompanyTransaction({directory});
+  const changed={...confirmation,caseDigest:'c'.repeat(64)};
+  await assert.rejects(restarted.execute({...replay,confirmation:changed,confirmedHash:sha256Canonical(changed)}),/ALREADY_CONSUMED/);
+  await assert.rejects(restarted.execute(input),/BUSY_OR_UNKNOWN/);
+  assert.equal(submissions,1);
+});
+
+test('road-stop replay requires explicit confirmation and fresh preparation before submission',async t=>{
+  const {runner,input}=await fixture(t);let submissions=0;
+  const replay={...input,action:'replay_road_stop',apply:async()=>{submissions++;return {};}};
+  await assert.rejects(runner.execute({...replay,confirmedHash:''}),/EXPLICIT_CONFIRMATION/);
+  const result=await runner.execute({...replay,prepare:async()=>{throw new Error('baseline road changed');}});
+  assert.equal(result.outcome,'rejected');assert.equal(submissions,0);
+});
 test('missing confirmation never prepares or consumes',async t=>{
   const {directory,runner,input}=await fixture(t);
   input.confirmedHash='';input.prepare=()=>assert.fail('must not prepare');

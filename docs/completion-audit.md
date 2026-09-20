@@ -2,6 +2,32 @@
 
 ## Current status — 20 September 2026
 
+### Reload/replay baseline and transaction preparation
+
+Added an experimental read-only road preflight: compare recorded removed road
+segments/nodes against current engine components, require a paused engine and
+the captured company, and distinguish mismatches from unknown getter failures.
+It does not submit a command, prove the entire checkpoint, or validate the new
+stop's model resource. Native reads remain to be qualified in TF3.
+
+Offline replay cases now require a bounded model resource name paired with the
+copied model ID (artifact schema 2). Changed names with unchanged IDs reject;
+legacy cases without this evidence reject. Capture-time resource-name collection
+and reload-time resolution still need to be wired; supplied metadata is not live
+proof. Resource checks never grant execution permission.
+
+The existing durable company transaction mechanism now accepts the road-stop
+replay action. Tests cover explicit confirmation, preparation rejection, lost
+receipts, restart, attempts with a different capture and later company mutations.
+An unknown replay cannot be retried or bypassed by choosing a different action.
+This is preparation for the execution adapter, not an enabled replay button.
+No game launch, staging, native construction or financial change was performed.
+
+Verification: final `npm run check` passed 686/686, including preflight inputs
+validated through the actual copied-capture schema before Lua execution. This
+is synthetic evidence only. The preflight currently requires copied numeric
+precedence records; symbolic-only records reject without guessing an enum.
+
 ### Copied precedence values and initialized-record reconstruction
 
 Capture/parser now preserve an actually numeric precedence value as a bounded

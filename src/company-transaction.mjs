@@ -18,7 +18,7 @@ export class CompanyTransaction {
 
   async execute({checkpointHash, targetCompany, action, confirmation, confirmedHash, prepare, apply, verify}) {
     if (!/^[a-f0-9]{64}$/.test(checkpointHash) || !Number.isSafeInteger(targetCompany) || targetCompany<=0
-      || targetCompany>2147483647 || !['fund','build_depot','buy_vehicle','create_line','assign_service'].includes(action)
+      || targetCompany>2147483647 || !['fund','build_depot','buy_vehicle','create_line','assign_service','replay_road_stop'].includes(action)
       || !confirmation || typeof confirmation!=='object' || Array.isArray(confirmation)
       || [prepare,apply,verify].some(f=>typeof f!=='function')) throw new Error('INVALID_TRANSACTION');
     // Copy before any await: callers cannot change what was visibly confirmed.

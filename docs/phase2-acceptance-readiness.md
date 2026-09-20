@@ -9,6 +9,14 @@ world. The offline replay record and Lua reconstruction candidate are implemente
 and fixture-tested, not connected to a game execution button. Neither the current
 capture build nor a passing parser is a completed Phase 2 acceptance test.
 
+Replay preparation is being joined to the existing durable company transaction
+boundary, not a separate retry mechanism. A replay whose receipt is lost blocks
+subsequent mutations for that checkpoint/company, including after helper restart.
+The remaining execution wiring must verify the reloaded road and resource
+identities, obtain explicit confirmation and compare actual ownership/debit.
+Offline artifact hashes alone do not prove which world is loaded. Do not ask for
+a replay session until these checks and the command/receipt path are connected.
+
 Current priority: normal native placement capture, not the station coordinate
 picker. The guided setup below is on hold after a native depot collision; no
 station was attempted. See native-placement-capture.md and
