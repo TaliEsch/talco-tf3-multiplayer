@@ -1,4 +1,4 @@
--- EXPERIMENTAL / UNREGISTERED.  Read-only evidence gate for a copied capture.
+-- Local replay preflight. Read-only evidence gate for a copied capture.
 -- It deliberately does not construct or submit a Proposal. Input must first
 -- pass the strict copied-capture schema. This is not full checkpoint verification.
 local M = {}

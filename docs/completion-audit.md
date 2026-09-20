@@ -2,6 +2,32 @@
 
 ## Current status — 20 September 2026
 
+### Replay modules registered and helper request/receipt path connected
+
+Moved the six experimental modules into the mod's reviewed content set (25 files)
+and updated existing executable Lua checks to use those shipped files. Event
+subscription migration 18 adds the same-script replay event and receipt query.
+The engine preserves the executor's freshest state and persistent attempt latch.
+The regular protected GUI callback forwards bounded copied data only in the live
+company-test mode, consumes before sending and exports correlated scalar receipts.
+
+The helper now exposes an explicit-confirmation replay method, requiring a fresh
+paused observation and matching local company. Its mailbox validates compatibility
+identity, checks the current helper configuration, publishes with no overwrite,
+and keeps the request as a durable no-retry marker. Polling fails unknown on lost
+observations, changed update/company, timeout or unverifiable receipts. Receipt
+flags remain `replayAcceptanceVerified:false` and `gameplayVerified:false`.
+
+Root ran an inline integration using the real helper, request serializer, mailbox
+files and receipt parser. A synthetic receipt completed the limited observation;
+missing confirmation and a repeat request rejected. No TF3 command was sent.
+Source review passes with manifest
+`17dd029934d71eec3fe93b1b1e886b303f161bf626c1c8afb3ca405da5599306`.
+Launcher exposure, staging and live engine qualification remain outstanding.
+Final existing `npm run check`: 705/705 passed after helper integration. No new
+test files were added in this registration batch; existing Lua tests now execute
+the registered source. The inline file check used a synthetic receipt, not TF3.
+
 ### Local replay execution adapter — not yet registered
 
 The experimental adapter resolves model ID/name in both directions, compares the

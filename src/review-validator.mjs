@@ -13,6 +13,12 @@ const EXPECTED_CONTENT = Object.freeze([
   "tf3mp_native_controls.script.tl",
   "tf3mp_proposal_facts.lua",
   "tf3mp_road_capture.lua",
+  "tf3mp_road_replay_dispatch.lua",
+  "tf3mp_road_replay_execute.lua",
+  "tf3mp_road_replay_preflight.lua",
+  "tf3mp_road_replay_prepare.lua",
+  "tf3mp_road_replay_rebuild.lua",
+  "tf3mp_road_replay_result.lua",
   "tf3mp_service_command.lua",
   "tf3mp_station_command.lua",
   "tf3mp_station_probe.lua",
@@ -60,6 +66,18 @@ export async function validateReviewPackage(root) {
   const captureSource = await readFile(path.join(absoluteRoot, 'content', 'tf3mp_road_capture.lua'), 'utf8');
   if (createHash('sha256').update(captureSource.replace(/\r\n/g, '\n')).digest('hex') !== 'e7f7faf92e1374e96ac774f420dca93c509e22d60fec6001f80659dbd20df6d5') {
     throw new Error('road capture collector differs from reviewed passive source');
+  }
+  for (const [file, digest] of [
+    ['tf3mp_road_replay_dispatch.lua', '61bc6c58787707184a898aea1d465f91695110fd4d2d6fc325f05c13477ccc24'],
+    ['tf3mp_road_replay_execute.lua', 'a48ac29fc0e51953e4a2c8fcbf41b91c9655f68fe6ab7266c220bb7ee7a48d27'],
+    ['tf3mp_road_replay_preflight.lua', '2fea0c06ad219c387de0819029732a4fec9ab8b67a8d4683318f4e0dc4f98163'],
+    ['tf3mp_road_replay_prepare.lua', '14dd1a7736bbf565b413477f2fe7a61a4635e2b51988f40212be515d824c8a2a'],
+    ['tf3mp_road_replay_rebuild.lua', '9f25b40487d5340680997ef50523a78a693dfedd256352c9facfc8a9ec0389f2'],
+    ['tf3mp_road_replay_result.lua', 'fc924f467feb4c3e651df4379b1fff2c9e31ab67ac97c4040ee4ff4c764d9137'],
+  ]) {
+    const source = await readFile(path.join(absoluteRoot, 'content', file), 'utf8');
+    if (createHash('sha256').update(source.replace(/\r\n/g, '\n')).digest('hex') !== digest)
+      throw new Error(`road replay ${file} differs from reviewed source`);
   }
   if (createHash('sha256').update(factsSource.replace(/\r\n/g, '\n')).digest('hex') !== '55d015ccc1c478f4ea8018b91fbb4aa040c0fd4e01bf735b6a1c1a4cdc9115ce') {
     throw new Error('proposal facts collector differs from reviewed passive source');
@@ -121,7 +139,30 @@ export async function validateReviewPackage(root) {
   for (const event of ["tf3mp_engine_probe", "tf3mp_get_engine_receipt", "tf3mp_get_status", "tf3mp_vehicle_command", "tf3mp_get_vehicle_receipt", "tf3mp_company_probe", "tf3mp_get_company_receipt", "tf3mp_finance_probe", "tf3mp_get_finance_receipt"]) {
     if (!gameScript.includes(`state:subscribeToEvent("${event}")`)) throw new Error(`missing script event subscription: ${event}`);
   }
-  if (!gameScript.includes("current.eventSubscriptionsVersion ~= 17")) throw new Error("missing event subscription migration");
+  if (!gameScript.includes("current.eventSubscriptionsVersion ~= 18")) throw new Error("missing event subscription migration");
+  for (const event of ['tf3mp_native_road_stop_replay', 'tf3mp_get_native_road_stop_replay']) {
+    if (!gameScript.includes(`state:subscribeToEvent("${event}")`)) throw new Error('missing road replay subscription');
+  }
+  const roadReplayHeader = 'if src == "tf3mp_status_1::/tf3mp_status.gs" and id == "tf3mp_engine_bridge" and name == "tf3mp_native_road_stop_replay" and type(param) == "table" then';
+  const roadReplayStart = gameScript.indexOf(roadReplayHeader);
+  if (roadReplayStart < 0) throw new Error('missing same-script road replay admission');
+  const roadReplayHandler = gameScript.slice(roadReplayStart, gameScript.indexOf('\n    if src ==', roadReplayStart + roadReplayHeader.length));
+  for (const marker of [
+    'id == "tf3mp_engine_bridge"', 'type(param) == "table"',
+    'previous.nonce == request.nonce and previous.requestId == request.requestId',
+    'pcall(function() : table return roadReplay.handle(state, request) end)',
+    'local saved = state:get() or current', 'saved.roadReplayWireReceipt = receipt as table',
+    'saved.phase2CompanyFault = true', 'saved.roadReplayWireReceipt = {}', 'state:set(saved)',
+  ]) if (!roadReplayHandler.includes(marker)) throw new Error('missing road replay event safety guard');
+  const roadReplayReceiptHeader = 'if id == "tf3mp_engine_bridge" and name == "tf3mp_get_native_road_stop_replay" then';
+  const roadReplayReceiptStart = gameScript.indexOf(roadReplayReceiptHeader);
+  if (roadReplayReceiptStart < 0) throw new Error('missing road replay receipt bridge scope');
+  const roadReplayReceipt = gameScript.slice(roadReplayReceiptStart,
+    gameScript.indexOf('\n    if id ==', roadReplayReceiptStart + roadReplayReceiptHeader.length));
+  if (!roadReplayReceipt.includes('id == "tf3mp_engine_bridge"')
+      || !roadReplayReceipt.includes('return current.roadReplayWireReceipt')) {
+    throw new Error('missing correlated road replay receipt route');
+  }
   for (const event of ["builder.proposalCreate", "builder.proposalApply", "tf3mp_placement_observer_selftest"]) {
     if (!gameScript.includes(`state:subscribeToEvent("${event}")`)) throw new Error("missing native placement observer subscription");
   }

@@ -1,4 +1,4 @@
--- EXPERIMENTAL / UNREGISTERED.  This module only rehydrates copied diagnostic
+-- Local replay reconstruction. This module only rehydrates copied diagnostic
 -- data into public Proposal records.  It never sends a command or otherwise
 -- submits/mutates the world.  Callers must deliberately choose any later use.
 local M = {}

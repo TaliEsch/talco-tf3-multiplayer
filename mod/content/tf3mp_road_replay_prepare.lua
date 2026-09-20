@@ -1,4 +1,4 @@
--- EXPERIMENTAL / UNREGISTERED.  Creates a command value only; never sends it.
+-- Local replay preparation. Creates a command value only; never sends it.
 local M = {}
 local REJECT = {}
 local function fail() error(REJECT, 0) end

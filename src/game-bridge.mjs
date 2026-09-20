@@ -20,6 +20,9 @@ import { createHaltProbe } from "./halt-probe.mjs";
 import { createWatchdogProbe } from "./watchdog-probe.mjs";
 import { createEngineLease } from "./engine-lease.mjs";
 import { parseCompanyInspection, companyInspectionRows } from "./company-inspection.mjs";
+import {createRoadStopReplayRequest} from './road-stop-replay-request.mjs';
+import {checkRoadStopReplayIdentity} from './road-stop-replay-case.mjs';
+import {publishRoadStopReplayRequest,readRoadStopReplayReceipt} from './road-stop-replay-mailbox.mjs';
 
 const LIMIT = 4096;
 export function parseTelemetry(source, nonce) {
@@ -124,6 +127,7 @@ export async function startGameBridge({ directory, logger = () => {}, intervalMs
   let phase2DepotContext = null;
   let phase2Station = null, phase2Service = null, phase2ConstructionContext = null;
   let stationProbe = null;
+  let roadReplay = null, roadReplayResult = null;
   // Only a verified funding receipt can advance this helper to construction.
   // This is not a reset of the generic diagnostic latch or a retry permission.
   let phase2FundedContext = null;
@@ -173,6 +177,25 @@ export async function startGameBridge({ directory, logger = () => {}, intervalMs
           lastObservationWarning = Date.now();
           logger({ level: "warn", event: "engine_observation_unavailable", code: error.code === "ENOENT" ? "OBSERVATION_FILE_MISSING" : "OBSERVATION_SAMPLE_REJECTED" });
         }
+      }
+    }
+    if (roadReplay) {
+      let receipt = null;
+      const sample = observations.status.sample;
+      const lost = !connected || !observations.status.available || sample?.speedup !== 0
+        || sample?.updateCount !== roadReplay.updateCount || sample?.companyEntity !== roadReplay.targetCompany;
+      if (!lost && Date.now() < roadReplay.deadline) {
+        try {
+          const candidate = await readRoadStopReplayReceipt(directory,{nonce,requestId:roadReplay.requestId});
+          if (candidate.tickCount >= roadReplay.issuedTick && candidate.tickCount <= roadReplay.expiresTick
+            && candidate.updateCount === roadReplay.updateCount) receipt = candidate;
+        } catch { /* Partial, old or malformed receipts cannot establish an outcome. */ }
+      }
+      if (receipt || lost || Date.now() >= roadReplay.deadline) {
+        const {nonce:_nonce,...evidence} = receipt ?? {outcome:'unknown',code:lost?'REPLAY_OBSERVATION_LOST':'REPLAY_RECEIPT_TIMEOUT'};
+        roadReplayResult = Object.freeze({...evidence,replayAcceptanceVerified:false,gameplayVerified:false});
+        roadReplay = null; // Never delete the durable request or allow a retry.
+        logger({level:receipt?.outcome === 'verified'?'info':'warn',event:'road_stop_replay_result',...roadReplayResult});
       }
     }
     if (companyInspection) {
@@ -632,6 +655,36 @@ export async function startGameBridge({ directory, logger = () => {}, intervalMs
       });
       pending = operation.catch(() => {}); return operation;
     },
+    requestRoadStopReplay({source,currentIdentity,confirmedCheckpointReloaded}={}) {
+      // Snapshot caller data before joining the asynchronous helper queue.
+      checkRoadStopReplayIdentity(source,currentIdentity);
+      const identity={...currentIdentity};
+      if (confirmedCheckpointReloaded !== true) throw new Error('EXPLICIT_REPLAY_CONFIRMATION_REQUIRED');
+      const operation=pending.then(async()=>{
+        if(stopped||!connected||!observations.status.available||observations.status.sample.speedup!==0)
+          throw new Error('PAUSED_FRESH_BRIDGE_OBSERVATION_REQUIRED');
+        if(companyTestUsed||roadReplay||phase2Setup||depotPreview||selectionId||haltTest||pauseTest||probe||vehicleTest||companyProbe||companyInspection||stationProbe)
+          throw new Error('FRESH_SOLO_HOST_REQUIRED');
+        const sample=observations.status.sample;
+        const options={nonce,requestId:requestSequence+1,issuedTick:sample.tickCount,expiresTick:sample.tickCount+300,confirmedCheckpointReloaded:true};
+        const {request}=createRoadStopReplayRequest(source,options);
+        if(request.targetCompany!==sample.companyEntity)throw new Error('REPLAY_COMPANY_MISMATCH');
+        companyTestUsed=true;requestSequence++;
+        roadReplay={...options,targetCompany:request.targetCompany,updateCount:sample.updateCount,deadline:Date.now()+companyTimeoutMs};
+        try {
+          await publish(directory,'bridge.lua',{schemaVersion:1,nonce,mode:'company_test'});
+          await publishRoadStopReplayRequest(directory,source,options,identity);
+          logger({level:'warn',event:'road_stop_replay_started',code:'DISPOSABLE_RELOADED_CHECKPOINT_ONLY',gameplayVerified:false});
+        } catch {
+          roadReplay=null;
+          roadReplayResult=Object.freeze({outcome:'unknown',code:'REPLAY_PUBLICATION_UNKNOWN',replayAcceptanceVerified:false,gameplayVerified:false});
+          logger({level:'warn',event:'road_stop_replay_result',...roadReplayResult});
+          throw new Error('REPLAY_PUBLICATION_UNKNOWN_DO_NOT_RETRY');
+        }
+      });
+      pending=operation.catch(()=>{});return operation;
+    },
+    get roadStopReplayResult(){return roadReplayResult?{...roadReplayResult}:null;},
     requestStationTemplateProbe(){
       const operation=pending.then(async()=>{
         if(stopped||!connected||!observations.status.available)throw new Error('OBSERVATION_REQUIRED');

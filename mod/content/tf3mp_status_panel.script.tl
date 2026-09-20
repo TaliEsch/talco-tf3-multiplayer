@@ -85,6 +85,10 @@ local stationProbeSent : integer = 0
 local stationProbeReported : integer = 0
 local companyProbeReported : integer = 0
 local companyInspectionSent : integer = 0
+-- Per-session replay barrier. Set before the command is submitted, including
+-- if the command path throws, so a road-stop construction is never retried.
+local roadReplaySent : integer = 0
+local roadReplayReported : integer = 0
 local pausePhaseSent = ""
 local snapshotSent : integer = 0
 local haltSent : integer = 0
@@ -172,6 +176,97 @@ local function userdataExists(name : string) : boolean
     if file == name or file == name .. ".lua" then return true end
   end
   return false
+end
+
+-- The dispatcher validates again, but never forward userdata-derived tables
+-- until they have passed this bounded plain-data copy. This rejects native
+-- objects, metatables, cycles and aliases as well as oversized object graphs.
+local function copyRoadReplayData(value : any) : any
+  local seen : table = {}
+  local nodes : integer = 0
+  local bytes : integer = 0
+  local function addBytes(count : integer) : boolean
+    bytes = bytes + count
+    return bytes <= 1048576
+  end
+  local function visit(item : any, depth : integer) : any
+    if depth > 32 then error("road replay depth") end
+    nodes = nodes + 1
+    if nodes > 20000 then error("road replay nodes") end
+    local kind = type(item)
+    if kind == "nil" then return nil end
+    if kind == "boolean" then if not addBytes(1) then error("road replay bytes") end; return item end
+    if kind == "number" then
+      if item ~= item or item == math.huge or item == -math.huge or not addBytes(8) then error("road replay number") end
+      return item
+    end
+    if kind == "string" then if not addBytes(#item + 8) then error("road replay bytes") end; return item end
+    if kind ~= "table" or getmetatable(item) ~= nil or seen[item] then error("road replay data") end
+    seen[item] = true
+    if not addBytes(16) then error("road replay bytes") end
+    local copied : table = {}
+    for key, child in pairs(item) do
+      local keyKind = type(key)
+      if keyKind ~= "string" and keyKind ~= "number" then error("road replay key") end
+      copied[visit(key, depth + 1)] = visit(child, depth + 1)
+    end
+    return copied
+  end
+  return visit(value, 0)
+end
+
+local function exchangeNativeRoadStopReplay() : nil
+  -- This function is called only from exchangeTelemetry, in the protected
+  -- regular GUI callback; userdata must never be accessed from a timer.
+  if missedAcks > 10 or lastAck < 0 or not userdataExists("bridge") or not userdataExists("native_road_stop_replay_request") then return nil end
+  local config = app.loadUserdata("tf3mp_status_1", "bridge")
+  if config.mode ~= "company_test" or config.nonce ~= bridgeNonce then return nil end
+  local request = app.loadUserdata("tf3mp_status_1", "native_road_stop_replay_request")
+  if request.schemaVersion ~= 1 or request.kind ~= "native_road_stop_replay" or request.nonce ~= bridgeNonce or request.confirmed ~= 1 then return nil end
+  if type(request.requestId) ~= "number" or request.requestId < 1 or request.requestId > 2147483647 or request.requestId % 1 ~= 0 then return nil end
+  local requestId = request.requestId as integer
+  if requestId > roadReplaySent then
+    local payload = copyRoadReplayData(request) as table
+    -- The narrow schema fields are checked before consuming. The engine owns
+    -- exact replay-case admission and independently repeats the deep check.
+    if payload.schemaVersion ~= 1 or payload.kind ~= "native_road_stop_replay" or payload.nonce ~= bridgeNonce
+      or payload.requestId ~= requestId or payload.confirmed ~= 1 then return nil end
+    roadReplaySent = requestId -- Consume before send; never retry uncertain delivery.
+    api.cmd.sendCommand(api.cmd.makeScriptingSendEventCmd("tf3mp_status_1::/tf3mp_status.gs", "tf3mp_engine_bridge", "tf3mp_native_road_stop_replay", payload))
+  end
+  if requestId ~= roadReplaySent or roadReplayReported == roadReplaySent then return nil end
+  local value = api.gui.fireGuiScriptEvent("tf3mp_engine_bridge", "tf3mp_get_native_road_stop_replay", {})
+  if type(value) ~= "table" then return nil end
+  local receipt = value as table
+  if receipt.kind ~= "native_road_stop_replay_receipt" or receipt.nonce ~= bridgeNonce or receipt.requestId ~= roadReplaySent then
+    local checked : integer = 0
+    for _, candidate in pairs(receipt) do
+      checked = checked + 1
+      if checked > 64 then break end
+      if type(candidate) == "table" then
+        local item = candidate as table
+        if item.kind == "native_road_stop_replay_receipt" and item.nonce == bridgeNonce and item.requestId == roadReplaySent then receipt = item; break end
+      end
+    end
+  end
+  if receipt.schemaVersion ~= 1 or receipt.kind ~= "native_road_stop_replay_receipt" or receipt.nonce ~= bridgeNonce or receipt.requestId ~= roadReplaySent then return nil end
+  local result : table = { schemaVersion=1, kind="native_road_stop_replay_receipt", nonce=bridgeNonce, requestId=roadReplaySent }
+  for _, field in ipairs({ "tickCount", "updateCount" }) do
+    local numberValue = receipt[field]
+    if type(numberValue) ~= "number" or numberValue < 0 or numberValue > 9007199254740991 or numberValue % 1 ~= 0 then return nil end
+    result[field] = numberValue
+  end
+  if type(receipt.code) ~= "string" or #receipt.code < 1 or #receipt.code > 128 or not string.match(receipt.code as string, "^[A-Z_]+$") then return nil end
+  if type(receipt.outcome) ~= "string" or #receipt.outcome < 1 or #receipt.outcome > 32 or not string.match(receipt.outcome as string, "^[a-z_]+$") then return nil end
+  result.code = receipt.code; result.outcome = receipt.outcome
+  if receipt.stopEntity ~= nil or receipt.chargedCost ~= nil then
+    if type(receipt.stopEntity) ~= "number" or receipt.stopEntity < 1 or receipt.stopEntity > 2147483647 or receipt.stopEntity % 1 ~= 0
+      or type(receipt.chargedCost) ~= "number" or receipt.chargedCost < 1 or receipt.chargedCost > 9007199254740991 or receipt.chargedCost % 1 ~= 0 then return nil end
+    result.stopEntity = receipt.stopEntity; result.chargedCost = receipt.chargedCost
+  end
+  app.saveUserdata("tf3mp_status_1", "native_road_stop_replay_receipt", result)
+  roadReplayReported = roadReplaySent
+  return nil
 end
 
 local function exchangeHalt() : nil
@@ -1305,6 +1400,8 @@ local function exchangeTelemetry(tickCount : integer, updateCount : integer) : s
     stationProbeReported = 0
     companyProbeReported = 0
     companyInspectionSent = 0
+    roadReplaySent = 0
+    roadReplayReported = 0
     pausePhaseSent = ""
     snapshotSent = 0
     haltSent = 0
@@ -1388,6 +1485,8 @@ local function exchangeTelemetry(tickCount : integer, updateCount : integer) : s
   local inspectionOk = pcall(exchangeCompanyInspection)
   if not inspectionOk then return "company inspection unavailable / see launcher" end
   if config.mode == "company_test" then
+    local roadReplayOk = pcall(exchangeNativeRoadStopReplay)
+    if not roadReplayOk then return "road replay outcome unknown / do not retry" end
     local stationOk = pcall(exchangeStationTemplate)
     if not stationOk then return "station inspection unavailable / do not retry" end
     local depotOk = pcall(exchangePhase2Depot)

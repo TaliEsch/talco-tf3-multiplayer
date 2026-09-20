@@ -1,4 +1,4 @@
--- UNREGISTERED local disposable-save adapter, not a remote command endpoint.
+-- Local disposable-save adapter, not a remote command endpoint.
 -- The caller must validate the copied schema and checkpoint before dispatch.
 -- Engine-state commands have immediate callbacks; late callbacks remain unknown.
 local M = {}

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import fengari from 'fengari';
 const {lua,lauxlib,lualib,to_luastring}=fengari;
-const source=await readFile(new URL('../experimental/native-road-stop-execute.lua',import.meta.url),'utf8');
+const source=await readFile(new URL('../mod/content/tf3mp_road_replay_execute.lua',import.meta.url),'utf8');
 function run(mutation='',tail=''){
   const script=`local function loadAdapter() ${source} end
 local adapter=loadAdapter()

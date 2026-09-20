@@ -1,4 +1,4 @@
--- EXPERIMENTAL / UNREGISTERED.  Read-only receipt evidence for one normal
+-- Local replay result. Read-only receipt evidence for one normal
 -- curb-stop replay.  This module never sends commands or changes engine state.
 local M = {}
 local REJECT = {}

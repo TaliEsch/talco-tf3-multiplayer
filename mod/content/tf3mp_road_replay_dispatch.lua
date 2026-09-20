@@ -1,4 +1,4 @@
--- EXPERIMENTAL / UNREGISTERED.  Disposable-save entry point for one copied
+-- LOCAL DISPOSABLE-SAVE ONLY. Entry point for one copied
 -- roadside-stop replay.  This is deliberately not a remote endpoint: it
 -- accepts only a fully copied, bounded request and composes the local replay
 -- modules supplied by the caller.
@@ -175,4 +175,13 @@ function M.dispatch(state, request, api, dependencies)
   return receipt(request, finalTick, finalUpdate, observed.code, observed.outcome, observed)
 end
 
+function M.handle(state, request)
+  return M.dispatch(state, request, api, {
+    execute=ug_require("tf3mp_status_1::/tf3mp_road_replay_execute.lua"),
+    prepare=ug_require("tf3mp_status_1::/tf3mp_road_replay_prepare.lua"),
+    preflight=ug_require("tf3mp_status_1::/tf3mp_road_replay_preflight.lua"),
+    rebuild=ug_require("tf3mp_status_1::/tf3mp_road_replay_rebuild.lua"),
+    results=ug_require("tf3mp_status_1::/tf3mp_road_replay_result.lua"),
+  })
+end
 return M

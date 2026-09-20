@@ -16,7 +16,8 @@ replay button or automatic construction in this build.
 
 The local replay adapter now composes baseline checking, model resolution,
 native command preparation, one-shot submission and observed stop ownership/debit.
-It remains unregistered while request/receipt integration is completed. Its limited
+It is now registered behind the local company-test bridge, with a helper request
+method and correlated receipt polling. The launcher flow is still outstanding. Its limited
 success result deliberately does not claim native funds enforcement, complete
 road-state equivalence or a working second-company service. These remain Phase 2
 acceptance requirements. Reuse existing checks during integration; add tests only
@@ -25,6 +26,13 @@ where a changed safety boundary requires them, per the user's latest instruction
 `tools/road-stop-replay-case.mjs` records checkpoint identity before placement and
 then creates a capture artifact from the apply envelope. Both outputs are exclusive
 new files; neither operation dispatches construction or proves the loaded save.
+
+The helper's `requestRoadStopReplay` requires explicit reload confirmation,
+matching checkpoint identity, a fresh paused observation and the captured local
+company. Publication is exclusive: a consumed request remains on disk across
+helper shutdown. Do not remove it to retry an uncertain operation. The engine
+also preserves its saved consume latch. This is one-shot disposable-save proof,
+not yet general multiplayer construction or second-company service acceptance.
 
 The offline replay artifact now also binds the stop model's resource name and
 numeric ID. This prevents a same-ID/different-resource match from passing the

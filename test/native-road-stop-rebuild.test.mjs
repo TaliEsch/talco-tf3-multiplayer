@@ -5,7 +5,7 @@ import fengari from 'fengari';
 import {roadStopCaptureFixture} from './fixtures/road-stop-capture.mjs';
 import {parseRoadStopCapture} from '../src/road-stop-capture.mjs';
 const {lua,lauxlib,lualib,to_luastring}=fengari;
-const rebuild=await readFile(new URL('../experimental/native-road-stop-rebuild.lua',import.meta.url),'utf8');
+const rebuild=await readFile(new URL('../mod/content/tf3mp_road_replay_rebuild.lua',import.meta.url),'utf8');
 const capture=await readFile(new URL('../mod/content/tf3mp_road_capture.lua',import.meta.url),'utf8');
 function literal(v){if(v===null)return'nil';if(typeof v==='string')return `string.char(${[...Buffer.from(v)].join(',')})`;if(typeof v==='number'||typeof v==='boolean')return String(v);return `{${Object.entries(v).map(([k,x])=>`[${Array.isArray(v)?Number(k)+1:literal(k)}]=${literal(x)}`).join(',')}}`;}
 function execute(mutation=''){

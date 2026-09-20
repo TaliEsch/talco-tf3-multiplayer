@@ -21,6 +21,9 @@ local record Tf3MpState
   phase2FundingAttempted : boolean
   phase2FundingReceipt : table
   phase2CompanyFault : boolean
+  nativeRoadReplayAttempted : boolean
+  nativeRoadReplayReceipt : table
+  roadReplayWireReceipt : table
   nativeDepotAttempted : boolean
   nativeDepotReceipt : table
   phase2DepotReceipt : table
@@ -90,6 +93,10 @@ local record Tf3MpRoadCapture
 end
 local roadCapture = ug_require "tf3mp_status_1::/tf3mp_road_capture.lua" as Tf3MpRoadCapture
 local roadCaptureTypes = api.type
+local record Tf3MpRoadReplay
+  handle : function(GameScriptState<Tf3MpState>, table): table
+end
+local roadReplay = ug_require "tf3mp_status_1::/tf3mp_road_replay_dispatch.lua" as Tf3MpRoadReplay
 local function roadCaptureModelName(modelId : integer) : string
   return api.res.modelRep.getName(modelId)
 end
@@ -1019,10 +1026,16 @@ local ret : GameScriptWithGui<Tf3MpState, Tf3MpGuiState> = {
         eventSubscriptionsVersion = 0, probeScheduledUpdate = 0, probeOutcome = "applied",
         probePending = false, probePreviousUpdate = 0, vehicleReceipt = {}, vehicleInbox = {}, companyTestAttempted = false, companyReceipt = {}, financeTestAttempted = false, financeReceipt = {}, phase2FundingAttempted = false, phase2FundingReceipt = {}, phase2CompanyFault = false, nativeDepotAttempted = false, nativeDepotReceipt = {}, phase2DepotReceipt = {}, nativeVehicleAttempted = false, nativeVehicleReceipt = {}, phase2VehicleReceipt = {}, nativeStationSlot1Attempted = false, nativeStationSlot2Attempted = false, nativeStationSlot1Receipt = {}, nativeStationSlot2Receipt = {}, nativeStationReceipt = {}, phase2StationReceipt = {}, phase2ServiceReceipt = {}, nativeServiceLineAttempted = false, nativeServiceAssignmentAttempted = false, nativeServiceReceipt = {}, pauseTestAttempted = false, scheduledPauseTestAttempted = false, pauseReceipt = {}, snapshotReceipt = {}, haltTestAttempted = false, haltReceipt = {}, stationTemplateAttempted = false, stationTemplateReceipt = {} }
     end
+    -- Preserve consumed replay state across loads; migrate only absent fields.
+    if current.nativeRoadReplayAttempted == nil then current.nativeRoadReplayAttempted = false end
+    if current.nativeRoadReplayReceipt == nil then current.nativeRoadReplayReceipt = {} end
+    if current.roadReplayWireReceipt == nil then current.roadReplayWireReceipt = {} end
     -- GUI events use the script's event subscriptions too. Existing saves may
     -- already have the engine-only subscription, so hasEventSubscriptions alone
     -- is not sufficient when adding the receipt/status events.
-    if not state:hasEventSubscriptions() or current.eventSubscriptionsVersion ~= 17 then
+    if not state:hasEventSubscriptions() or current.eventSubscriptionsVersion ~= 18 then
+      state:subscribeToEvent("tf3mp_native_road_stop_replay")
+      state:subscribeToEvent("tf3mp_get_native_road_stop_replay")
       state:subscribeToEvent("tf3mp_placement_observer_selftest")
       state:subscribeToEvent("builder.proposalCreate")
       state:subscribeToEvent("builder.proposalApply")
@@ -1069,7 +1082,7 @@ local ret : GameScriptWithGui<Tf3MpState, Tf3MpGuiState> = {
       state:subscribeToEvent("tf3mp_get_pause_receipt")
       state:subscribeToEvent("tf3mp_station_template_probe")
       state:subscribeToEvent("tf3mp_get_station_template")
-      current.eventSubscriptionsVersion = 17
+      current.eventSubscriptionsVersion = 18
     end
     current.tickCount = clock.tickCount
     current.updateCount = clock.updateCount
@@ -1508,6 +1521,26 @@ local ret : GameScriptWithGui<Tf3MpState, Tf3MpGuiState> = {
       end
       return nil
     end
+    if src == "tf3mp_status_1::/tf3mp_status.gs" and id == "tf3mp_engine_bridge" and name == "tf3mp_native_road_stop_replay" and type(param) == "table" then
+      local current = state:get()
+      if current ~= nil and current.schemaVersion ~= nil then
+        local request = param as table
+        local previous = current.roadReplayWireReceipt or {}
+        if previous.nonce == request.nonce and previous.requestId == request.requestId then return nil end
+        local ok, receipt = pcall(function() : table return roadReplay.handle(state, request) end)
+        -- The executor persists its consume latch before submission. Never
+        -- overwrite that state with the pre-dispatch snapshot.
+        local saved = state:get() or current
+        if ok and type(receipt) == "table" then
+          saved.roadReplayWireReceipt = receipt as table
+        else
+          saved.phase2CompanyFault = true
+          saved.roadReplayWireReceipt = {}
+        end
+        state:set(saved)
+      end
+      return nil
+    end
     if src == "tf3mp_status_1::/tf3mp_status.gs" and id == "tf3mp_engine_bridge" and name == "tf3mp_phase2_depot" and type(param) == "table" then
       local current = state:get()
       if current ~= nil and current.schemaVersion ~= nil then
@@ -1750,6 +1783,11 @@ local ret : GameScriptWithGui<Tf3MpState, Tf3MpGuiState> = {
       return nil
     end
     if name == "tf3mp_get_status" then return guiState:get() end
+    if id == "tf3mp_engine_bridge" and name == "tf3mp_get_native_road_stop_replay" then
+      local current = state:get()
+      if current ~= nil then return current.roadReplayWireReceipt end
+      return nil
+    end
     if id == "tf3mp_engine_bridge" and name == "tf3mp_get_phase2_depot" then
       local current = state:get()
       if current ~= nil then return current.phase2DepotReceipt end
