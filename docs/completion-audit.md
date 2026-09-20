@@ -2,6 +2,24 @@
 
 ## Current status — 20 September 2026
 
+### Service evidence persisted; company-control API boundary identified
+
+Read-only service receipts now extend the same setup report, with a bounded,
+secret-free field set and serialized writes. Setup completion remains
+`SETUP_VERIFIED_SERVICE_NOT_OBSERVED`; raw endpoint history does not assert income,
+continuous ownership or a completed trip. The existing guided-mailbox check now
+verifies receipt persistence, signed amounts and redaction in that report.
+
+An independent static company-control audit, checked against declarations by root,
+found explicit `Context.player` for direct construction but no public setter for
+the stock controls' player. See company-control-api-audit.md. This changes the next
+implementation choice: do not build a cosmetic company switch. Preserve native
+placement geometry and establish a company-bound submission route, with live
+ownership/debit verification. Current same-company replay remains unchanged and
+unqualified in the game. No mod/launcher changes, restaging or game launch in this
+report/audit batch.
+Final existing verification suite: 705/705 passed.
+
 ### Read-only post-assignment service observation implemented
 
 The registered collector and protected GUI exchange now return correlated raw

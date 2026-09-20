@@ -74,5 +74,21 @@ test('guided setup confirms a ready flat plan then completes the six real mailbo
     assert.equal(persisted.receipts.length,6);
     assert.equal(persisted.checkpointVerified,false);
     assert.equal(persisted.multiGameVerified,false);
+    await session.onEvent({event:'phase2_service_observation_result',action:'start',outcome:'raw_start_captured',
+      code:'RAW_START_CAPTURED',requestId:8,originalCompany:10,targetCompany:20,vehicleEntity:32,lineEntity:37,
+      accountNet:-100,nonce:bridge.nonce,secret:'must_not_persist'});
+    await session.onEvent({event:'phase2_service_observation_result',action:'end',outcome:'raw_end_captured',
+      code:'RAW_END_CAPTURED',requestId:9,intervalNet:300,intervalMaintenanceVehicle:-50,gameplayVerified:true});
+    const observed=JSON.parse(await readFile(path.join(root,'reports',`local-batch-${session.status.run.batchId}`,'report.json'),'utf8'));
+    assert.equal(observed.receipts.length,6);
+    assert.equal(observed.outcome,'SETUP_VERIFIED_SERVICE_NOT_OBSERVED');
+    assert.equal(observed.serviceObservation.receipts.length,2);
+    assert.equal(observed.serviceObservation.receipts[0].accountNet,-100);
+    assert.equal(observed.serviceObservation.serviceAccountingVerified,false);
+    assert.equal(observed.serviceObservation.completedTripVerified,false);
+    assert.equal(observed.serviceObservation.continuousOwnershipVerified,false);
+    assert.equal(observed.gameplayVerified,false);
+    assert.equal(JSON.stringify(observed).includes(bridge.nonce),false);
+    assert.equal(JSON.stringify(observed).includes('must_not_persist'),false);
   }finally{await session?.close();await bridge.close();await rm(root,{recursive:true,force:true});}
 });

@@ -44,11 +44,18 @@ post-assignment continuation; no new launcher controls or manual test are reques
 yet. Setup still ends with `SETUP_VERIFIED_SERVICE_NOT_OBSERVED`, and raw collection
 does not change that acceptance status.
 
-Next: integrate these observations into the eventual guided acceptance report,
-qualify native accounting filter semantics and observed service operation, and
+Next: qualify native accounting filter semantics and observed service operation, and
 finish the normal-placement route to target-company assets. Do not substitute
 company balance deltas, historical visit flags or another coordinate-picker
 feature for this missing acceptance evidence.
+
+Raw service observations now extend the same local setup report without changing
+its setup-only outcome or claiming a completed trip. The current public-API
+[company-control audit](company-control-api-audit.md) finds a target-company
+parameter for direct construction but no controlled-player switch for stock tools.
+Do not mistake a display-only company selector for playable company control.
+Continue via captured native placement and explicit target-company submission;
+the pre-action admission and correct native owner/debit still need qualification.
 
 The offline replay artifact now also binds the stop model's resource name and
 numeric ID. This prevents a same-ID/different-resource match from passing the

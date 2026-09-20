@@ -6,6 +6,7 @@ export function createPhase2SetupSession({bridge,saveReport,logger=()=>{},checkp
   if(!bridge||typeof saveReport!=='function'||typeof logger!=='function'||typeof now!=='function'
     ||!/^([a-f0-9]{64})$/.test(checkpointHash))throw new TypeError('INVALID_PHASE2_SETUP_OPTIONS');
   let phase='idle',plan=null,run=null,closed=false,busy=false,deadline=0,invalidReads=0;
+  let serviceEvidence=[],servicePersistence=Promise.resolve();
   const emit=(code,extra={})=>logger({level:phase==='failed'?'warn':'info',event:'phase2_setup',code,...extra,gameplayVerified:false});
   async function fail() {
     if(phase==='failed'||closed)return;
@@ -72,8 +73,34 @@ export function createPhase2SetupSession({bridge,saveReport,logger=()=>{},checkp
         if(!closed)emit('RUNNING');
       }catch(error){await fail();throw error;}
     },
-    onEvent(record){return run?.onEvent(record);},
-    async close(){if(closed)return;closed=true;plan=null;await run?.close();phase='closed';},
+    onEvent(record){
+      if(record?.event!=='phase2_service_observation_result')return run?.onEvent(record);
+      // Extend the same acceptance artifact; a setup report alone does not
+      // establish operation. Keep raw evidence separate from its setup outcome.
+      if(closed||phase!=='complete'||!run)return;
+      const row={};
+      const fields=['action','outcome','code','requestId','originalCompany','targetCompany','vehicleEntity','lineEntity',
+        'tickCount','updateCount','gameTime','startGameTime','startUpdateCount','endGameTime','endUpdateCount',
+        'accountNetWindowStart','accountNetWindowEnd','accountNet','intervalNet','intervalMaintenanceVehicle',
+        'intervalMaintenanceInfrastructure','intervalMaintenanceOther','intervalMaintenanceVehicleMaintenance',
+        'startVisitedMask','endVisitedMask','startStopIndex','endStopIndex'];
+      for(const field of fields){
+        const value=record[field];
+        if(['action','outcome','code'].includes(field)){
+          if(typeof value==='string'&&/^[A-Za-z_]{1,64}$/.test(value))row[field]=value;
+        }else if(Number.isSafeInteger(value))row[field]=value;
+      }
+      servicePersistence=servicePersistence.then(async()=>{
+        if(phase!=='complete')return;
+        if(serviceEvidence.length>=2)throw new Error('SERVICE_EVIDENCE_LIMIT');
+        serviceEvidence.push(row);
+        await saveReport({...run.status,serviceObservation:{scope:'raw_endpoint_account_reads',
+          serviceAccountingVerified:false,continuousOwnershipVerified:false,completedTripVerified:false,
+          receipts:structuredClone(serviceEvidence)}});
+      }).catch(async()=>{await fail();emit('SERVICE_REPORT_WRITE_FAILED_STOP_HELPER');});
+      return servicePersistence;
+    },
+    async close(){if(closed)return;closed=true;plan=null;await run?.close();await servicePersistence;phase='closed';},
     get status(){return {phase,run:run?.status??null};},
   };
 }
