@@ -86,6 +86,10 @@ test('Lua capture preserves complete node lane and traffic-light configuration',
   const result=run('',fixture);
   assert.equal(result.code,'captured',result.value);
   assert.deepEqual(parseRoadStopCapture(result.value).capture,parseRoadStopCapture(JSON.stringify(fixture)).capture);
+  fixture.proposal.street.nodeConfigsToAdd[0].comp.userModifiedLaneConnections=null;
+  const absent=run('',fixture);
+  assert.equal(absent.code,'captured',absent.value);
+  assert.deepEqual(parseRoadStopCapture(absent.value).capture,parseRoadStopCapture(JSON.stringify(fixture)).capture);
 });
 
 test('node flag mismatch reports all three bounded representations without coercion or native text',()=>{

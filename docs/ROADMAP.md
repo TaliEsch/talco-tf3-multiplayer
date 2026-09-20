@@ -21,6 +21,10 @@ parsing and native reconstruction, including lane connections, crosswalks and
 traffic-light settings. Local replay confines these edits to existing captured
 road endpoints. Offline checks do not establish native replay success; restart
 from the untouched checkpoint with the repaired staged mod for that same gate.
+The subsequent preview identified a runtime/declaration mismatch:
+userModifiedLaneConnections is absent. Capture preserves it as null, and replay
+requires matching absence rather than inventing false or writing an unavailable
+field. This compatibility repair still needs the native capture/replay result.
 
 The local replay adapter now composes baseline checking, model resolution,
 native command preparation, one-shot submission and observed stop ownership/debit.

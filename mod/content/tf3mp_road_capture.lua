@@ -132,7 +132,7 @@ local function nodeConfig(v, enums)
   local slip, slipKind = readFlag("doubleSlipSwitch")
   local lanesModified, lanesKind = readFlag("userModifiedLaneConnections")
   local lightsModified, lightsKind = readFlag("userModifiedTrafficLightStates")
-  if type(slip) ~= "boolean" or type(lanesModified) ~= "boolean" or type(lightsModified) ~= "boolean" then
+  if type(slip) ~= "boolean" or (type(lanesModified) ~= "boolean" and lanesKind ~= "nil") or type(lightsModified) ~= "boolean" then
     bad("nodeFlagsD" .. slipKind .. "L" .. lanesKind .. "T" .. lightsKind)
   end
   local lanes, lights = {}, {}
@@ -151,7 +151,7 @@ local function nodeConfig(v, enums)
     trafficLightPreference=enum(c.trafficLightPreference,enums.TrafficLightPreference,"nodeConfigPreference","YES","NO","AUTO"),
     trafficLightConfig={states=lights,trafficLightType=int(c.trafficLightConfig.trafficLightType,"nodeConfigLights")},
     doubleSlipSwitch=slip,
-    userModifiedLaneConnections=lanesModified,
+    userModifiedLaneConnections=lanesModified == nil and NULL or lanesModified,
     userModifiedTrafficLightStates=lightsModified } }
 end
 local function json_string(v)

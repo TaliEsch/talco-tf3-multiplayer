@@ -39,7 +39,8 @@ function luaData(value){
   let nodes=0;
   const visit=(entry,depth)=>{
     if(++nodes>MAX_NODES||depth>MAX_DEPTH)fail();
-    // The normalized capture uses null only for optional object components.
+    // The normalized capture uses null for optional components and the observed
+    // absent userModifiedLaneConnections field. The rebuilder preserves absence.
     // Lua's nil is the corresponding data-only representation for those.
     if(entry===null)return 'nil';
     if(typeof entry==='string')return luaString(entry);

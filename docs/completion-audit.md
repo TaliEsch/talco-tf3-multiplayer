@@ -2,6 +2,22 @@
 
 ## Current status — 20 September 2026
 
+### Preserve the observed absent lane-modification flag
+
+Live preview at 20:25:46 returned `nodeFlagsDfalseLnilTfalse`: only
+userModifiedLaneConnections is absent. The collector now encodes that exact
+absence as JSON null, distinct from false. The strict helper schema accepts
+null only for this observed flag; other flag types remain rejected. Lua data
+transport carries null as nil. Reconstruction skips the absent setter only
+when the fresh native component also reports nil; a conflicting default or
+throwing getter rejects preparation. No nil-to-false coercion is introduced.
+Existing runtime tests now cover capture/codec preservation, forbidden setter
+access and constructor mismatch. Native reconstruction remains unverified.
+
+Full suite: 713/713 passed. Staged source/copy match with TF3 closed:
+`91018fd4d5c98dcd9089b1487eae6379588339420798287629c7ee68a8092298`.
+Backup: `tf3mp_backup_03fc74f86453484aa0b99b46c4afe02e`. Launcher unchanged.
+
 ### Native node flags differ from declared Boolean types
 
 Live 20:18 capture reached the newly supported node configuration, then rejected

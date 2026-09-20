@@ -188,7 +188,14 @@ local function nodeConfig(types, enums, v)
   lights.trafficLightType = int(source.trafficLightConfig.trafficLightType)
   comp.trafficLightConfig = lights
   comp.doubleSlipSwitch = bool(source.doubleSlipSwitch)
-  comp.userModifiedLaneConnections = bool(source.userModifiedLaneConnections)
+  -- The audited runtime omits this declared field. Null on the wire becomes
+  -- nil here: require the same absence on the fresh component, never default it
+  -- to false or call a setter for a field the runtime does not expose.
+  if source.userModifiedLaneConnections == nil then
+    if comp.userModifiedLaneConnections ~= nil then fail() end
+  else
+    comp.userModifiedLaneConnections = bool(source.userModifiedLaneConnections)
+  end
   comp.userModifiedTrafficLightStates = bool(source.userModifiedTrafficLightStates)
   out.comp = comp
   return out

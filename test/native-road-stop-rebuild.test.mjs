@@ -92,6 +92,11 @@ test('rebuild uses public node-config and traffic-light constructors',()=>{
 });
 
 test('node configuration rejects missing native constructors and malformed bounded fields',()=>{
+  const absent='copied.proposal.street.nodeConfigsToAdd[1].comp.userModifiedLaneConnections=nil;';
+  const observed=inspectNodeConfig(absent+'types.BaseNodeLaneConnectionAndEntity.new=function() return {comp=setmetatable({}, {__newindex=function(t,k,v) if k=="userModifiedLaneConnections" then error("must not write absent field") end;rawset(t,k,v) end})} end');
+  assert.equal(observed[0],'unregistered');
+  assert.match(observed[1],/:nil:/);
+  assert.throws(()=>inspectNodeConfig(absent+'types.BaseNodeLaneConnectionAndEntity.new=function()return{comp={userModifiedLaneConnections=false}}end'),/ROAD_STOP_REBUILD_UNQUALIFIED/);
   for(const mutation of [
     'types.BaseNodeLaneConnectionAndEntity=nil', 'types.TrafficLightConfig=nil', 'types.TrafficLightState=nil',
     'types.BaseNodeLaneConnectionAndEntity.new=function()return{}end', 'types.enum.TrafficLightPreference=nil',

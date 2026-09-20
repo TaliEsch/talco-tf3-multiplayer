@@ -139,7 +139,7 @@ function nodeConfig(value, name) {
     trafficLightPreference: enumValue(TRAFFIC_LIGHT_PREFERENCES, comp.trafficLightPreference, `${name}.comp.trafficLightPreference`),
     trafficLightConfig: { states: list(comp.trafficLightConfig.states, `${name}.comp.trafficLightConfig.states`, trafficLightState), trafficLightType: int32(comp.trafficLightConfig.trafficLightType, `${name}.comp.trafficLightConfig.trafficLightType`) },
     doubleSlipSwitch: bool(comp.doubleSlipSwitch, `${name}.comp.doubleSlipSwitch`),
-    userModifiedLaneConnections: bool(comp.userModifiedLaneConnections, `${name}.comp.userModifiedLaneConnections`),
+    userModifiedLaneConnections: comp.userModifiedLaneConnections === null ? null : bool(comp.userModifiedLaneConnections, `${name}.comp.userModifiedLaneConnections`),
     userModifiedTrafficLightStates: bool(comp.userModifiedTrafficLightStates, `${name}.comp.userModifiedTrafficLightStates`) } };
 }
 function entityMap(value, name, oneValue) {
