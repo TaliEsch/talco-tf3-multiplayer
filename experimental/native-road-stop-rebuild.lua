@@ -82,9 +82,10 @@ local function lane(enums, v)
   end
   return out
 end
-local function edge(types, components, enums, v)
+local function edge(types, components, enums, v, initialized)
   if type(v) ~= "table" then fail() end
-  local out = call0(components.BaseEdge)
+  -- Stock track_builder.tl writes SegmentAndEntity.new().comp directly.
+  local out = initialized or call0(components.BaseEdge)
   out.type = named(enums, "BaseEdgeType", v.type, {NORMAL=true,BRIDGE=true,TUNNEL=true})
   out.typeIndex = int(v.typeIndex)
   out.objects = list(v.objects, function(pair)
@@ -108,7 +109,7 @@ end
 local function segment(types, components, enums, v)
   if type(v) ~= "table" or int(v.type) ~= 0 or type(v.streetEdge) ~= "table" then fail() end
   local out = call0(types.SegmentAndEntity)
-  out.entity, out.comp, out.type = int(v.entity), edge(types, components, enums, v.comp), 0
+  out.entity, out.comp, out.type = int(v.entity), edge(types, components, enums, v.comp, out.comp), 0
   local street = call0(components.BaseEdgeStreet)
   street.precedenceNode0 = named(enums, "PrecedencePreference", v.streetEdge.precedenceNode0, {YES=true,NO=true,AUTO=true})
   street.precedenceNode1 = named(enums, "PrecedencePreference", v.streetEdge.precedenceNode1, {YES=true,NO=true,AUTO=true})
@@ -130,7 +131,9 @@ local function segment(types, components, enums, v)
 end
 local function node(types, components, v)
   if type(v) ~= "table" or type(v.comp) ~= "table" then fail() end
-  local out, base = call0(types.NodeAndEntity), call0(components.BaseNode)
+  local out = call0(types.NodeAndEntity)
+  -- Stock NodeAndEntity wrappers also initialize this component.
+  local base = out.comp or call0(components.BaseNode)
   out.entity, base.position, out.comp = int(v.entity), vec3(types, v.comp.position), base
   return out
 end
@@ -179,4 +182,3 @@ function M.rebuild(capture, types, components)
 end
 
 return M
-

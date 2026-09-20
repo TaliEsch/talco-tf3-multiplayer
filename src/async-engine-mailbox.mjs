@@ -5,6 +5,7 @@ import { parseFlatDataFile, requirePlainDirectory } from "./userdata-ipc.mjs";
 import { CommandQueue } from "./lockstep.mjs";
 import { decodeCheckpointReceipt } from "./coordinator-checkpoint.mjs";
 import { decodeExecutionReceipt } from "./coordinator-execution.mjs";
+import { replaceUnpublished } from './unpublished-replace.mjs';
 
 const exact = (p, names) => p && Object.keys(p).sort().join(",") === names.split(",").sort().join(",");
 const uint = n => Number.isSafeInteger(n) && n >= 0 && n <= 2147483647;
@@ -73,6 +74,23 @@ export function decodeAsyncEngineRequest(source, nonce) {
   return r;
 }
 
+export async function isUnpublishedEngineSource(temporary,source) {
+  if(typeof source!=='string'||Buffer.byteLength(source)>4096)return false;
+  const before=await lstat(temporary,{bigint:true});
+  if(!before.isFile()||before.isSymbolicLink()||before.nlink!==1n||before.size!==BigInt(Buffer.byteLength(source)))return false;
+  const pending=await open(temporary,'r');
+  try {
+    const actual=await pending.stat({bigint:true});
+    // Windows lstat may report dev=0 while fstat supplies a volume serial.
+    // Compare available device identities and exact bigint file IDs, not rounded numbers.
+    if(!actual.isFile()||actual.nlink!==1n||actual.ino!==before.ino||actual.size!==before.size
+      ||before.dev!==0n&&actual.dev!==0n&&actual.dev!==before.dev)return false;
+    const bytes=Buffer.alloc(4097);
+    const {bytesRead}=await pending.read(bytes,0,bytes.length,0);
+    return bytesRead===Buffer.byteLength(source)&&bytes.subarray(0,bytesRead).equals(Buffer.from(source));
+  }finally{await pending.close();}
+}
+
 export async function createAsyncEngineMailbox({directory,nonce=randomBytes(16).toString("hex"),requireCheckpointSnapshot=true}) {
   if (!/^[0-9a-f]{32}$/.test(nonce)) throw new TypeError("invalid mailbox nonce");
   if(typeof requireCheckpointSnapshot!=='boolean') throw new TypeError('invalid checkpoint evidence option');
@@ -111,11 +129,18 @@ export async function createAsyncEngineMailbox({directory,nonce=randomBytes(16).
           } finally { await h.close(); }
           cancelled();
           publicationStage='replace';
-          await rename(temporary,requestPath);
+          await replaceUnpublished({
+            assertActive:cancelled,
+            replace:async()=>{
+              await requirePlainDirectory(directory);await regularOrAbsent(requestPath);
+              cancelled();await rename(temporary,requestPath);
+            },
+            verifyUnpublished:()=>isUnpublishedEngineSource(temporary,source),
+          });
         } finally { await unlink(temporary).catch(() => {}); }
       }).catch(error=>{
         // Preserve a stage/code for allowlisted diagnostics, not paths or source.
-        // Publication still fails once: this adds no command retry.
+        // Unknown/terminal publication still fails once: no gameplay retry.
         error.publicationStage=publicationStage;
         throw error;
       });

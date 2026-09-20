@@ -49,6 +49,15 @@ The capture adapter now uses `api.type.enum` plus `api.type.Mat4f` correctly and
 returns unsupported if a required group is unavailable. Fixture-supplied bindings
 do not prove those missing runtime capabilities exist.
 
+Stock-source refinement: `base/content/mission.zip` entries
+`mission/tasks/auto_builder/track_builder.tl:10-47` and
+`mission/tasks/auto_builder/electrify.tl:9-25` demonstrate initialized node/segment
+`.comp` records and assigning a live BaseEdge into a segment wrapper. The candidate
+now prefers those initialized records. This removes the need for separate
+BaseNode/BaseEdge constructors on that path; it does not establish street-edge,
+terrain or full Proposal reconstruction and does not authorize copying live
+world components without checkpoint/reference validation.
+
 `src/road-stop-replay-case.mjs` creates/checks an offline apply-only case bound to
 the pre-placement save SHA-256, game SHA-256, mod manifest and stop owner. It
 preserves road ownership rather than silently rewriting it. Digest validation

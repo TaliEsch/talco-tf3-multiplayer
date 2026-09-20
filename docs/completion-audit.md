@@ -2,6 +2,32 @@
 
 ## Current status — 20 September 2026
 
+### Windows request publication repaired; stock wrapper path confirmed
+
+The coordinator's observed `EPERM` at atomic replacement now has bounded
+transport-only recovery: retry the same immutable pending file at most five
+times within a 150-ms retry window, only for Windows EPERM/EBUSY. Before retry
+and again after delay, verify the pending file is a single-link regular file
+with exact bytes and stable bigint file identity. A missing/changed source stays
+unknown. Close/halt cancels further replacement attempts. Never delete the live
+request, generate a new action ID, retry engine execution or infer engine success.
+Windows lstat's zero device value is treated as unavailable, not as a mismatch
+against fstat's volume serial; nonzero device IDs still must agree.
+
+Deterministic fault tests cover persistent/transient errors, changed/consumed
+sources, elapsed time, attempt limits and cancellation. Actual temporary-file
+tests validate content, identity, hard links and successful publication. The
+previously failing coordinator success/unknown-action/report-failure scenarios
+pass together. Final full verification passed 676/676 (36.2 seconds), including
+the stock-wrapper fixture. This repairs request delivery, not construction replay.
+
+Root independently inspected stock `mission/tasks/auto_builder/track_builder.tl`
+and `electrify.tl` inside base mission.zip: NodeAndEntity/SegmentAndEntity wrappers
+initialize writable `.comp` values. The candidate now uses these values instead
+of requiring unexposed BaseNode/BaseEdge factories. Remaining precedence,
+street-edge/optional-component, terrain and full Proposal conversion bindings
+are still unqualified. No TF3 launch, restage or new manual test was requested.
+
 ### Record/reload/replay implementation progress — not yet a live replay
 
 Added an offline apply-only replay case binding copied proposal, company and the

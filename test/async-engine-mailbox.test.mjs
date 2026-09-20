@@ -1,13 +1,47 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp,mkdir,readFile,writeFile,rm } from "node:fs/promises";
+import { mkdtemp,mkdir,readFile,writeFile,rm,link,rename } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
-import { createAsyncEngineMailbox,encodeAsyncEngineRequest,decodeAsyncEngineRequest } from "../src/async-engine-mailbox.mjs";
+import { createAsyncEngineMailbox,encodeAsyncEngineRequest,decodeAsyncEngineRequest,isUnpublishedEngineSource } from "../src/async-engine-mailbox.mjs";
+import {replaceUnpublished} from '../src/unpublished-replace.mjs';
 import { parseFlatDataFile } from "../src/userdata-ipc.mjs";
 import { AsyncSessionParticipant } from "../src/async-session-participant.mjs";
 const nonce="a".repeat(32);
 const request={schemaVersion:1,roundId:"round",operationId:"one",operation:"release",updateCount:100};
+
+test('unpublished source inspection rejects changed, oversized, missing and linked files',async()=>{
+  const root=await mkdtemp(path.join(os.tmpdir(),'tf3mp-unpublished-'));
+  const pending=path.join(root,'pending'),source=encodeAsyncEngineRequest(request,nonce);
+  try{
+    await writeFile(pending,source);
+    assert.equal(await isUnpublishedEngineSource(pending,source),true);
+    assert.equal(await isUnpublishedEngineSource(pending,source.replace('one','two')),false);
+    assert.equal(await isUnpublishedEngineSource(pending,'x'.repeat(4097)),false);
+    assert.equal(await isUnpublishedEngineSource(root,source),false);
+    await assert.rejects(isUnpublishedEngineSource(path.join(root,'missing'),source),{code:'ENOENT'});
+    await link(pending,path.join(root,'other-link'));
+    assert.equal(await isUnpublishedEngineSource(pending,source),false);
+  }finally{await rm(root,{recursive:true,force:true});}
+});
+
+test('Windows replacement retry publishes original bytes and never overwrites after consumed source',async()=>{
+  const root=await mkdtemp(path.join(os.tmpdir(),'tf3mp-replace-'));
+  const pending=path.join(root,'pending'),destination=path.join(root,'request.lua'),source=encodeAsyncEngineRequest(request,nonce);
+  const denied=Object.assign(new Error('sharing conflict'),{code:'EPERM'});
+  try{
+    await writeFile(pending,source);await writeFile(destination,'old');let attempts=0;
+    await replaceUnpublished({platform:'win32',assertActive:()=>{},wait:async()=>{},
+      verifyUnpublished:()=>isUnpublishedEngineSource(pending,source),
+      replace:async()=>{if(++attempts===1)throw denied;await rename(pending,destination);}});
+    assert.equal(attempts,2);assert.equal(await readFile(destination,'utf8'),source);
+    assert.equal(decodeAsyncEngineRequest(await readFile(destination,'utf8'),nonce).operationId,'one');
+    attempts=0;
+    await assert.rejects(replaceUnpublished({platform:'win32',assertActive:()=>{},wait:async()=>{},
+      verifyUnpublished:()=>isUnpublishedEngineSource(pending,source),replace:async()=>{attempts++;throw denied;}}),e=>e===denied);
+    assert.equal(attempts,1);assert.equal(await readFile(destination,'utf8'),source);
+  }finally{await rm(root,{recursive:true,force:true});}
+});
 
 test('mailbox publication failures retain original error and precise safe stage',async()=>{
   const root=await mkdtemp(path.join(os.tmpdir(),'tf3mp-publication-stage-'));

@@ -45,6 +45,16 @@ test('rebuild preserves absent optional components even if constructors initiali
   assert.deepEqual(parseRoadStopCapture(json).capture,parseRoadStopCapture(JSON.stringify(roadStopCaptureFixture())).capture);
 });
 
+test('stock initialized wrapper components avoid unpublished BaseNode/BaseEdge factory paths',()=>{
+  const [code,captureCode,json]=execute(`
+types.NodeAndEntity.new=function() return {comp={}} end
+types.SegmentAndEntity.new=function() return {comp={}} end
+components.BaseNode=nil;components.BaseEdge=nil
+`);
+  assert.equal(code,'unregistered');assert.equal(captureCode,'captured',json);
+  assert.deepEqual(parseRoadStopCapture(json).capture,parseRoadStopCapture(JSON.stringify(roadStopCaptureFixture())).capture);
+});
+
 test('rebuild rejects holes, oversized collections, unsupported edits and missing enums',()=>{
   for(const mutation of [
     'copied.proposal.street.addedSegments[3]=copied.proposal.street.addedSegments[1]',
