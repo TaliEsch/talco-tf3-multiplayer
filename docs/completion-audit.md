@@ -2,6 +2,28 @@
 
 ## Current status — 20 September 2026
 
+### 21:09 preview result: lane repair observed, model source unresolved
+
+Root read the fresh create diagnostic and native stdout after the user's completed
+preview/cancel test on the repaired staged mod. Neither singular laneConfig error
+remains. This locally verifies capture-side handling of absence, not reconstruction.
+The remaining shape report is: modelInstance nil; simple edgeEntity nil; param nil;
+oneWay boolean; model nil; name string. No raw names or native objects are retained
+in this ledger. No complete capture or replay result was produced.
+
+The alternative simple record is not available wholesale in this event; its two
+present fields cannot supply the missing resource and placement information.
+Do not repeat this diagnostic or manufacture the missing data. Required next
+investigation is a supported source of the complete placement data, independent
+of a guessed-coordinate UI. Phase 2 acceptance remains blocked on that route.
+
+Root also inspected stock `gui.zip::gui/construction/construction_react_util.tl`
+at the ACTION_STREET_TERMINAL_BUILDER branch: the descriptor receives resName,
+filtered params and oneWay. `base/tealdef/scripts/builtin.d.tl` declares these
+inputs, not a completed snapped-edge/parameter output. This is a resource-source
+lead, not complete placement capture. No runtime changes, new tests or restaging
+were made for this evidence-only update.
+
 ### Live aggregate report: absent laneConfig and stop model
 
 The user's 20:51 report on manifest `6b1f4dceb7e0529aa89d7122717685f983e77621843216eff446f115ac5cb599`

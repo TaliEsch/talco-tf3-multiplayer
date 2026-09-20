@@ -4,15 +4,16 @@ Revised 20 September 2026 following the user's scope and economy clarification.
 This is the current plan. Historical status is in completion-audit.md and
 archive/roadmap-before-scope-review.md; historical blockers do not override this plan.
 
-Current pre-replay check: load the repaired mod, pause, preview a normal road stop
-and cancel, then use **Capture diagnostics** in Advanced — Road stop replay.
+Current pre-replay status: the 21:09 preview/cancel check is complete. Do not
+repeat it or request a placed stop to investigate the same missing fields.
 The 20:51 runtime report identified absent singular `laneConfig` on both road
 segments and absent stop `modelInstance`. Singular absence now round-trips as
 null, while plural `laneConfigs` remains required; reconstruction requires matching
 native absence rather than defaulting an empty vector. The model remains a blocker.
-The next preview/cancel diagnostic inspects the declared alternative simple-edge
-fields by type only when modelInstance is absent. It never fabricates model data
-or authorizes replay. No new placement is needed for this diagnostic.
+That check confirmed the lane errors are gone. The stop still exposes neither
+modelInstance nor the alternative model/edgeEntity/param fields; oneWay and name
+are present but insufficient. Next work must identify a supported data source or
+record the native boundary as blocked, not extend a field-guessing test loop.
 
 Next local proof (user clarification): record one normal action, reload its
 exact pre-action disposable checkpoint, then explicitly replay it once and
