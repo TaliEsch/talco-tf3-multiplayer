@@ -34,7 +34,7 @@ test('experimental rebuilder uses public constructors and re-captures the full c
   assert.deepEqual(parseRoadStopCapture(json).capture,parseRoadStopCapture(JSON.stringify(roadStopCaptureFixture())).capture);
 });
 test('experimental rebuilder fails with one fixed unqualified code when capability or schema is absent',()=>{
-  for(const mutation of ['types.Vec4f=nil','components.BaseEdge=nil','copied.proposal.street.addedSegments[1].type=1','copied.proposal.terrain.baseHeightMod.width=1']){
+  for(const mutation of ['types.Vec4f=nil','components.BaseEdge=nil','types.enum.PrecedencePreference=nil','types.enum.BaseEdgeType=nil','copied.proposal.street.addedSegments[1].type=1','copied.proposal.terrain.baseHeightMod.width=1']){
     assert.throws(()=>execute(mutation),/ROAD_STOP_REBUILD_UNQUALIFIED/);
   }
 });

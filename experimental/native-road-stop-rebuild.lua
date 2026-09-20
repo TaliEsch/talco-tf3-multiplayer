@@ -34,7 +34,8 @@ local function owner(v) v = int(v); if v <= 0 then fail() end; return v end
 local function bool(v) if type(v) ~= "boolean" then fail() end return v end
 local function string_(v) if type(v) ~= "string" or #v > 1024 or v:find("\0", 1, true) then fail() end return v end
 local function enum(enums, group, name)
-  local value = type(enums) == "table" and type(enums[group]) == "table" and enums[group][name]
+  if type(enums) ~= "table" or type(enums[group]) ~= "table" then fail() end
+  local value = enums[group][name]
   if value == nil then fail() end
   return value
 end

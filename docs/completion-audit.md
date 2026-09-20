@@ -2,6 +2,32 @@
 
 ## Current status — 20 September 2026
 
+### Local replay execution adapter — not yet registered
+
+The experimental adapter resolves model ID/name in both directions, compares the
+removed road baseline, prepares a company-bound native proposal and persists its
+one-shot latch before submission. The result reader checks one new stop, callback
+membership, model/transform, ownership, exact target debit and unchanged peer
+balances while paused. Unknown callbacks remain unknown; even limited verified
+receipts retain the company safety latch rather than implying full acceptance.
+World entity zero is now accepted for clock/speed reads, not road/company IDs.
+Missing enum groups now reject instead of accidentally inserting boolean false.
+
+Existing full suite: 705/705 passed for this adapter batch. A focused rerun of the
+prepare/execute/result suites passed 15/15. No native execution, game launch or
+staging occurred. The offline case utility records pre-placement file hashes and
+binds the copied apply capture without overwriting files. A file hash does not
+prove what the running game loaded. Request/engine integration remains in progress;
+this is not a runnable Phase 2 acceptance release yet.
+
+The bounded request serializer and engine dispatcher now agree on the explicit
+confirmation value, identity fields and 300-tick maximum validity window. Root
+executed the emitted userdata through Lua and the actual dispatcher: the valid
+request reached its injected execution dependency, while wrong confirmation and
+stale clock were rejected before execution. This inline integration check sent no
+native command and added no test files. The full existing suite was rerun with
+child-process permissions after sandbox `spawn EPERM` failures: 705/705 passed.
+
 ### Resource identity connected to passive native capture
 
 Source now resolves the proposed stop's exact model ID through the public

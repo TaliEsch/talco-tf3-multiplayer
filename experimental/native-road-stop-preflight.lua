@@ -28,7 +28,8 @@ local function enum(api, group, name)
   return v
 end
 local function tryComponent(api, entity, kind)
-  if not integer(entity) or entity <= 0 or not api.engine or type(api.engine.getComponent) ~= "function" or not api.type or not api.type.ComponentType then fail() end
+  if not integer(entity) or entity < 0 or (entity == 0 and kind ~= "GAME_SPEED")
+    or not api.engine or type(api.engine.getComponent) ~= "function" or not api.type or not api.type.ComponentType then fail() end
   local ok, value = pcall(api.engine.getComponent, entity, api.type.ComponentType[kind])
   if not ok then unknown() end
   return value

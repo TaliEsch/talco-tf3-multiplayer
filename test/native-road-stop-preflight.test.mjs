@@ -19,6 +19,11 @@ local api={type={enum=enum,ComponentType={PLAYER='PLAYER',BASE_EDGE='BASE_EDGE',
  const L=lauxlib.luaL_newstate();lualib.luaL_openlibs(L);try{assert.equal(lauxlib.luaL_loadstring(L,to_luastring(script)),lua.LUA_OK,lua.lua_tojsstring(L,-1));assert.equal(lua.lua_pcall(L,0,3,0),lua.LUA_OK,lua.lua_tojsstring(L,-1));return [lua.lua_tojsstring(L,-3),lua.lua_tojsstring(L,-2),lua.lua_tojsstring(L,-1)];}finally{lua.lua_close(L)}
 }
 test('read-only preflight proves current removed edge data and returns native precedence without an enum lookup',()=>assert.deepEqual(run(),['unregistered_preflight_checked','AUTO','symbolic_precedence_capture_unqualified_without_native_codes']));
+
+test('world entity zero is valid for the live speed read, not a company or road reference',()=>{
+  assert.equal(run('actual[0]=actual[99];actual[99]=nil;api.engine.util.getWorld=function()return 0 end')[0],'unregistered_preflight_checked');
+  assert.equal(run('capture.proposal.street.removedSegments[1].entity=0')[0],'unregistered_preflight_rejected');
+});
 test('preflight rejects absent references, wrong company, unpaused state, changed edge/resource data, street fields, and throwing optional getters',()=>{
  for(const change of ['actual[22]=nil','capture.proposal.street.edgeObjectsToAdd[1].playerEntity=9','actual[10]=nil','actual[99].GAME_SPEED.speedup=1','capture.proposal.street.removedSegments[1].comp.distance=11','actual[22].BASE_EDGE.roadTemplate="changed"','actual[22].BASE_EDGE_STREET.precedenceNode0=1','capture.proposal.street.removedSegments[1].streetEdge.precedenceNode0="AUTO"','table.insert(capture.proposal.street.removedSegments,capture.proposal.street.removedSegments[1])','capture.proposal.street.removedNodes={{entity=30,comp={position={0,0,0}}}};actual[30]={BASE_NODE={position={x=1,y=0,z=0}}}'])assert.deepEqual(run(change),['unregistered_preflight_rejected','none','none']);
  assert.deepEqual(run('api.engine.getComponent=function(e,k)if k=="EMISSION_EMITTER"then error("private native text")end;return actual[e] and actual[e][k]end'),['unregistered_preflight_unknown','none','none']);
