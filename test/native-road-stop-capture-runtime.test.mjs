@@ -88,6 +88,19 @@ test('Lua capture preserves complete node lane and traffic-light configuration',
   assert.deepEqual(parseRoadStopCapture(result.value).capture,parseRoadStopCapture(JSON.stringify(fixture)).capture);
 });
 
+test('node flag mismatch reports all three bounded representations without coercion or native text',()=>{
+  for(const [comp,field] of [
+    ['{}','nodeFlagsDnilLnilTnil'],
+    ['{doubleSlipSwitch=false,userModifiedLaneConnections=0,userModifiedTrafficLightStates=1}','nodeFlagsDfalseLzeroTone'],
+    ['{doubleSlipSwitch="private",userModifiedLaneConnections=true,userModifiedTrafficLightStates={}}','nodeFlagsDstringLtrueTtable'],
+    ['setmetatable({}, {__index=function()error("private native text")end})','nodeFlagsDerrorLerrorTerror'],
+  ]) {
+    const result=run(`street.nodeConfigsToAdd={{entity=31,comp=${comp}}}`);
+    assert.deepEqual(result,{code:'unsupported',value:field});
+    assert.match(result.value,/^[A-Za-z0-9]{1,64}$/);
+  }
+});
+
 test('Lua capture resolves the exact model during capture and copies only its bounded resource name',()=>{
   const expression='return result.code,result.modelResourceName or result.field';
   assert.deepEqual(run('resolveModelName=function(id) assert(id==7);return "station/road_stop.mdl" end',undefined,expression),

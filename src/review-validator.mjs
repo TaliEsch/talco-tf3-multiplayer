@@ -70,7 +70,7 @@ export async function validateReviewPackage(root) {
     if(!gameScript.includes(`state:subscribeToEvent("${event}")`))throw new Error('missing service observation subscription');
   const factsSource = await readFile(path.join(absoluteRoot, 'content', 'tf3mp_proposal_facts.lua'), 'utf8');
   const captureSource = await readFile(path.join(absoluteRoot, 'content', 'tf3mp_road_capture.lua'), 'utf8');
-  if (createHash('sha256').update(captureSource.replace(/\r\n/g, '\n')).digest('hex') !== 'ec78debeb59a05509b527ebbb2a907afab8a45dec62a4909d36783a8038241fb') {
+  if (createHash('sha256').update(captureSource.replace(/\r\n/g, '\n')).digest('hex') !== 'f627e58ae80d0e64e900d8677d43e2d5f8504f3c9fbe6c5a7ec81091ecf07567') {
     throw new Error('road capture collector differs from reviewed passive source');
   }
   for (const [file, digest] of [

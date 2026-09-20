@@ -115,6 +115,26 @@ end
 local function node(v) return { entity = int(v.entity, "nodeEntity"), comp = { position = vec3(v.comp.position, "nodePosition") } } end
 local function nodeConfig(v, enums)
   local c = v.comp
+  -- Read all three together: one bounded diagnostic identifies every mismatch,
+  -- without printing native values or silently coercing nil/numeric flags.
+  local function readFlag(name)
+    local ok, value = pcall(function() return c[name] end)
+    if not ok then return nil, "error" end
+    if type(value) == "boolean" then return value, value and "true" or "false" end
+    if type(value) == "number" then
+      if value == 0 then return value, "zero" end
+      if value == 1 then return value, "one" end
+    end
+    local kind = type(value)
+    if kind ~= "nil" and kind ~= "number" and kind ~= "string" and kind ~= "table" and kind ~= "userdata" then kind = "other" end
+    return value, kind
+  end
+  local slip, slipKind = readFlag("doubleSlipSwitch")
+  local lanesModified, lanesKind = readFlag("userModifiedLaneConnections")
+  local lightsModified, lightsKind = readFlag("userModifiedTrafficLightStates")
+  if type(slip) ~= "boolean" or type(lanesModified) ~= "boolean" or type(lightsModified) ~= "boolean" then
+    bad("nodeFlagsD" .. slipKind .. "L" .. lanesKind .. "T" .. lightsKind)
+  end
   local lanes, lights = {}, {}
   local connections = array(c.laneConnections, "nodeConfigLanes")
   for i = 1, #connections do
@@ -130,9 +150,9 @@ local function nodeConfig(v, enums)
     crosswalks=entity_list(c.crosswalks,"nodeConfigCrosswalks"),
     trafficLightPreference=enum(c.trafficLightPreference,enums.TrafficLightPreference,"nodeConfigPreference","YES","NO","AUTO"),
     trafficLightConfig={states=lights,trafficLightType=int(c.trafficLightConfig.trafficLightType,"nodeConfigLights")},
-    doubleSlipSwitch=bool(c.doubleSlipSwitch,"nodeConfigFlags"),
-    userModifiedLaneConnections=bool(c.userModifiedLaneConnections,"nodeConfigFlags"),
-    userModifiedTrafficLightStates=bool(c.userModifiedTrafficLightStates,"nodeConfigFlags") } }
+    doubleSlipSwitch=slip,
+    userModifiedLaneConnections=lanesModified,
+    userModifiedTrafficLightStates=lightsModified } }
 end
 local function json_string(v)
   local out = { '"' }; for x = 1, #v do local b = string.byte(v, x); if b == 34 then out[#out + 1] = '\\"' elseif b == 92 then out[#out + 1] = "\\\\" elseif b == 8 then out[#out + 1] = "\\b" elseif b == 12 then out[#out + 1] = "\\f" elseif b == 10 then out[#out + 1] = "\\n" elseif b == 13 then out[#out + 1] = "\\r" elseif b == 9 then out[#out + 1] = "\\t" elseif b < 32 then out[#out + 1] = string.format("\\u%04x", b) else out[#out + 1] = string.char(b) end end; out[#out + 1] = '"'; return table.concat(out)

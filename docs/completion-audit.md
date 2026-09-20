@@ -2,6 +2,27 @@
 
 ## Current status — 20 September 2026
 
+### Native node flags differ from declared Boolean types
+
+Live 20:18 capture reached the newly supported node configuration, then rejected
+`nodeConfigFlags` on both preview and apply. No replay artifact was exported.
+Installed engine.d.tl declares all three fields Boolean. Read-only inspection of
+the first-party GUI/scripts/game_mechanics archives found no representation
+contract for the two user-modified flags; the slip-switch UI uses truthiness but
+that is not evidence permitting lossless coercion for replay.
+
+Collector diagnostics now read all three flags under protection before stopping:
+`nodeFlagsD<kind>L<kind>T<kind>` identifies doubleSlipSwitch, userModifiedLaneConnections,
+and userModifiedTrafficLightStates respectively. Kinds distinguish true/false,
+nil, zero/one, other numeric values, strings/tables/userdata and getter errors;
+no raw native text is exported. No values are defaulted, coerced or submitted.
+The necessary next observation is preview-and-cancel only, not a new placement
+or replay attempt. This is diagnostic readiness, not a completed runtime fix.
+
+Full suite: 713/713 passed. Staged while TF3 was closed; source/copy manifest
+`58731cf9cae7b6019a48a64b144ee98e1336fd3423961abad1c0c506e037e482`.
+Prior mod/cache backup: `tf3mp_backup_7b2742fe013141fb96f6d5ae44769de5`.
+
 ### Public node-configuration capture and replay repair
 
 The live apply event reached the observer but produced
