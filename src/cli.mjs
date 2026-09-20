@@ -15,7 +15,7 @@ import { createLocalIntegrationBatch } from "./local-integration-batch.mjs";
 import { createBatchReportWriter } from "./batch-report.mjs";
 import { createLocalCoordinatorRun } from "./local-coordinator-run.mjs";
 import {createPhase2SetupSession} from './phase2-setup-session.mjs';
-import {beginRoadStopReplayRecording,finishRoadStopReplayRecording,loadRoadStopReplayRecordingCase} from './road-stop-replay-session.mjs';
+import {beginRoadStopReplayRecording,finishRoadStopReplayRecording,loadRoadStopReplayRecordingCase,previewRoadStopReplayCaptureDiagnostics} from './road-stop-replay-session.mjs';
 import {checkRoadStopReplayIdentity} from './road-stop-replay-case.mjs';
 
 function options(args) {
@@ -31,6 +31,7 @@ let coordinatorRun=null, coordinatorStarting=false, coordinatorTimer=null;
 let depotPreviewOwnsHelper=false;
 let phase2Setup=null,phase2Starting=false,phase2Timer=null,observedSaveHash=null;
 let roadReplayWorkflow=null,roadReplayBusy=false;
+const helperStartedAt=Date.now();
 const roadReplayRoot=nodePath.resolve(import.meta.dirname,'..','reports','road-stop-replay');
 async function currentReplayIdentity(){
   if(!opt.save||!opt['bridge-dir'])throw new Error('REPLAY_CHECKPOINT_REQUIRED');
@@ -43,9 +44,17 @@ async function currentReplayIdentity(){
     throw new Error('REPLAY_IDENTITY_CHANGED');
   return {saveSha256,gameSha256,modManifestSha256};
 }
-function replayLog(code,fields={}){rawLog({level:code==='FAILED_STOP_HELPER'?'warn':'info',event:'road_stop_replay_workflow',code,...fields,gameplayVerified:false});}
+function replayLog(code,fields={}){rawLog({level:['FAILED_STOP_HELPER','CAPTURE_NOT_AVAILABLE','CAPTURE_INVALID','CAPTURE_UNSUPPORTED','PAUSED_GAME_REQUIRED'].includes(code)?'warn':'info',event:'road_stop_replay_workflow',code,...fields,gameplayVerified:false});}
 async function handleRoadReplayLine(line){
   const parts=line.trim().split(/\s+/),operation=parts[0];
+  if(operation==='road-replay-diagnostics'){
+    if(parts.length!==1)throw new Error('INVALID_REPLAY_COMMAND');
+    if(roadReplayWorkflow?.phase==='consumed')throw new Error('REPLAY_OWNS_HELPER_STOP_TO_EXIT');
+    const preview=await previewRoadStopReplayCaptureDiagnostics({bridgeDirectory:opt['bridge-dir'],freshAfter:helperStartedAt});
+    if(stopping||roadReplayWorkflow?.phase==='consumed')throw new Error('REPLAY_OWNS_HELPER_STOP_TO_EXIT');
+    replayLog(preview.status,preview.issues?{issues:preview.issues}:{});
+    return;
+  }
   if(roadReplayBusy||stopping||command!=='host'||!bridge||!hostInstance||hostInstance.authority.players().length!==0)
     throw new Error('FRESH_SOLO_HOST_REQUIRED');
   const start=operation==='road-replay-record'||operation==='road-replay-load';
@@ -111,7 +120,11 @@ process.on("SIGINT", stop);
 process.on("SIGTERM", stop);
 if (command === "host" || command === "join") createInterface({ input: process.stdin }).on("line", line => {
   if (line.trim() === "stop") stop();
-  else if(line.trim().startsWith('road-replay-'))void handleRoadReplayLine(line).catch(()=>replayLog('FAILED_STOP_HELPER'));
+  else if(line.trim().startsWith('road-replay-'))void handleRoadReplayLine(line).catch(error=>{
+    const known=['PAUSED_GAME_REQUIRED','CAPTURE_NOT_AVAILABLE','CAPTURE_INVALID','CAPTURE_UNSUPPORTED','CAPTURE_DIAGNOSTICS_STALE','FRESH_SOLO_HOST_REQUIRED','RECORDING_REQUIRED','REPLAY_CHECKPOINT_REQUIRED','REPLAY_IDENTITY_CHANGED','COMPANY_MISMATCH','CONFIRMATION_MISMATCH','INVALID_REPLAY_COMMAND'];
+    const code=roadReplayWorkflow?.phase==='consumed'?'FAILED_STOP_HELPER':known.includes(error?.message)?error.message:'FAILED_STOP_HELPER';
+    replayLog(code,code==='CAPTURE_UNSUPPORTED'&&typeof error.issues==='string'?{issues:error.issues}:{});
+  });
   else if(roadReplayWorkflow||roadReplayBusy)replayLog('REPLAY_OWNS_HELPER_STOP_TO_EXIT');
   else if(line.trim()==='phase2-setup') {
     if(command!=='host'||!bridge||!hostInstance||vehicleTestActive||integrationBatch||batchStarting||coordinatorRun||coordinatorStarting||phase2Setup||phase2Starting||!observedSaveHash||hostInstance.authority.players().length!==0)

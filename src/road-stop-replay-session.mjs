@@ -12,6 +12,8 @@ export const ROAD_STOP_REPLAY_RECORDING_MAX_BYTES=4096;
 const RECORDING_FILE='recording.json';
 const CASE_FILE='case.json';
 const CAPTURE_FILE='road_capture_apply.lua';
+const DIAGNOSTIC_CREATE_FILE='road_capture_diagnostic_create.lua';
+const DIAGNOSTIC_APPLY_FILE='road_capture_diagnostic_apply.lua';
 const fail=()=>{throw new TypeError('INVALID_ROAD_STOP_REPLAY_SESSION');};
 const hash=value=>typeof value==='string'&&/^[a-f0-9]{64}$/.test(value);
 const positiveEntity=value=>Number.isInteger(value)&&value>0&&value<=2147483647;
@@ -36,6 +38,7 @@ function validateRecording(value){
   if(!value||typeof value!=='object'||Array.isArray(value))fail();
   const expected=['schemaVersion','kind','checkpoint','companyEntity','startedAt'];
   if(Object.hasOwn(value,'captureBaselineSha256'))expected.push('captureBaselineSha256');
+  if(Object.hasOwn(value,'diagnosticApplyBaselineSha256'))expected.push('diagnosticApplyBaselineSha256');
   if(Object.keys(value).sort().join(',')!==expected.sort().join(',')
     ||value.schemaVersion!==1||value.kind!=='road_replay_recording'
     ||!positiveEntity(value.companyEntity)||!Number.isSafeInteger(value.startedAt)||value.startedAt<0)fail();
@@ -44,6 +47,10 @@ function validateRecording(value){
   if(Object.hasOwn(value,'captureBaselineSha256')){
     if(!hash(value.captureBaselineSha256))fail();
     recording.captureBaselineSha256=value.captureBaselineSha256;
+  }
+  if(Object.hasOwn(value,'diagnosticApplyBaselineSha256')){
+    if(!hash(value.diagnosticApplyBaselineSha256))fail();
+    recording.diagnosticApplyBaselineSha256=value.diagnosticApplyBaselineSha256;
   }
   return recording;
 }
@@ -89,6 +96,58 @@ async function writeExclusive(filename,source){
   try{await handle.writeFile(source,'utf8');await handle.sync();}catch{fail();}finally{await handle.close();}
 }
 function digest(bytes){return createHash('sha256').update(bytes).digest('hex');}
+function diagnosticFail(){throw new TypeError('INVALID_ROAD_CAPTURE_DIAGNOSTIC');}
+function validIssues(value){
+  return typeof value==='string'&&Buffer.byteLength(value,'utf8')<=2048
+    &&value.split('_').length<=24&&value.split('_').every(token=>/^[A-Za-z][A-Za-z0-9]{0,95}$/.test(token));
+}
+// This intentionally accepts only the inert userdata return literal exported by
+// the mod. It neither evaluates Lua nor treats a clear diagnostic as authority.
+export function parseRoadCaptureDiagnostic(source){
+  if(typeof source!=='string'||Buffer.byteLength(source,'utf8')>ROAD_STOP_REPLAY_RECORDING_MAX_BYTES)diagnosticFail();
+  const wrapper=/^\s*function\s+data\s*\(\s*\)\s*return\s*\{([\s\S]*?)\}\s*end\s*$/.exec(source);
+  if(!wrapper)diagnosticFail();
+  const fields=Object.create(null),body=wrapper[1];
+  const token=/\s*([A-Za-z][A-Za-z0-9_]*)\s*=\s*(?:"([A-Za-z][A-Za-z0-9_]*)"|([1-9][0-9]*))\s*,/y;
+  let offset=0;
+  while(offset<body.length){
+    if(body.slice(offset).trim()==='')break;
+    token.lastIndex=offset;const match=token.exec(body);
+    if(!match||Object.hasOwn(fields,match[1]))diagnosticFail();
+    if(!['schemaVersion','kind','stage','sequence','issues'].includes(match[1]))diagnosticFail();
+    fields[match[1]]=match[2]??Number(match[3]);offset=token.lastIndex;
+  }
+  if(Object.keys(fields).length!==5||fields.schemaVersion!==1||fields.kind!=='road_capture_diagnostic'
+    ||!['create','apply'].includes(fields.stage)||!Number.isInteger(fields.sequence)||fields.sequence<1||fields.sequence>16
+    ||!validIssues(fields.issues))diagnosticFail();
+  return {schemaVersion:1,kind:'road_capture_diagnostic',stage:fields.stage,sequence:fields.sequence,issues:fields.issues};
+}
+async function optionalBoundedRegularFile(filename,limit,decode){
+  try{return await boundedRegularFile(filename,limit,decode);}catch(error){
+    try{await lstat(filename);}catch(missing){if(missing?.code==='ENOENT')return null;}
+    throw error;
+  }
+}
+async function readDiagnostic(bridge,stage){
+  const filename=path.join(bridge,stage==='create'?DIAGNOSTIC_CREATE_FILE:DIAGNOSTIC_APPLY_FILE);
+  const source=await optionalBoundedRegularFile(filename,ROAD_STOP_REPLAY_RECORDING_MAX_BYTES,true);
+  if(!source)return null;
+  let diagnostic;try{diagnostic=parseRoadCaptureDiagnostic(source.text);}catch{diagnosticFail();}
+  if(diagnostic.stage!==stage)diagnosticFail();
+  return {...diagnostic,digest:digest(source.bytes),mtimeMs:source.mtimeMs};
+}
+export async function previewRoadStopReplayCaptureDiagnostics({bridgeDirectory,freshAfter}={}){
+  try{
+    if(!Number.isSafeInteger(freshAfter)||freshAfter<0)fail();
+    const bridge=await safeDirectory(bridgeDirectory,false);
+    const create=await readDiagnostic(bridge,'create');
+    if(!create)return {status:'CAPTURE_NOT_AVAILABLE'};
+    // Preview is read-only. A diagnostic export contains only unsupported
+    // conditions, never a positive replay-readiness result.
+    if(create.mtimeMs<=freshAfter)return {status:'CAPTURE_DIAGNOSTICS_STALE'};
+    return {status:'CAPTURE_UNSUPPORTED',issues:create.issues};
+  }catch{return {status:'CAPTURE_INVALID'};}
+}
 function artifact(result){
   return {digest:result.digest,companyEntity:result.case.companyEntity,checkpoint:result.case.checkpoint,
     source:result.canonical};
@@ -111,6 +170,8 @@ export async function beginRoadStopReplayRecording({directory,bridgeDirectory,ch
       else throw error;
     }
     if(captureExists)recording.captureBaselineSha256=digest((await boundedRegularFile(capturePath,ROAD_STOP_ENVELOPE_MAX_BYTES,false)).bytes);
+    const diagnostic=await optionalBoundedRegularFile(path.join(bridge,DIAGNOSTIC_APPLY_FILE),ROAD_STOP_REPLAY_RECORDING_MAX_BYTES,false);
+    if(diagnostic)recording.diagnosticApplyBaselineSha256=digest(diagnostic.bytes);
     const normalized=validateRecording(recording);
     await writeExclusive(path.join(output,RECORDING_FILE),canonicalJson(normalized));
     return normalized;
@@ -123,15 +184,24 @@ export async function finishRoadStopReplayRecording({directory,bridgeDirectory}=
     const bridge=await safeDirectory(bridgeDirectory,false);
     const recordingSource=await boundedRegularFile(path.join(output,RECORDING_FILE),ROAD_STOP_REPLAY_RECORDING_MAX_BYTES,true);
     let recording;try{recording=validateRecording(JSON.parse(recordingSource.text));}catch{fail();}
-    const capture=await boundedRegularFile(path.join(bridge,CAPTURE_FILE),ROAD_STOP_ENVELOPE_MAX_BYTES,true);
+    let diagnostic;
+    try{diagnostic=await readDiagnostic(bridge,'apply');}catch{throw new TypeError('CAPTURE_INVALID');}
+    const diagnosticFresh=diagnostic&&diagnostic.mtimeMs>recording.startedAt
+      &&(recording.diagnosticApplyBaselineSha256===undefined||diagnostic.digest!==recording.diagnosticApplyBaselineSha256);
+    if(diagnosticFresh)throw Object.assign(new TypeError('CAPTURE_UNSUPPORTED'),{issues:diagnostic.issues});
+    const capture=await optionalBoundedRegularFile(path.join(bridge,CAPTURE_FILE),ROAD_STOP_ENVELOPE_MAX_BYTES,true);
+    if(!capture)throw new TypeError('CAPTURE_NOT_AVAILABLE');
     const captureHash=digest(capture.bytes);
     if(capture.mtimeMs<recording.startedAt
-      ||(recording.captureBaselineSha256!==undefined&&captureHash===recording.captureBaselineSha256))fail();
+      ||(recording.captureBaselineSha256!==undefined&&captureHash===recording.captureBaselineSha256))throw new TypeError('CAPTURE_INVALID');
     let result;
-    try{result=createRoadStopReplayCase({applyEnvelope:capture.text,checkpoint:recording.checkpoint,companyEntity:recording.companyEntity});}catch{fail();}
+    try{result=createRoadStopReplayCase({applyEnvelope:capture.text,checkpoint:recording.checkpoint,companyEntity:recording.companyEntity});}catch{throw new TypeError('CAPTURE_INVALID');}
     await writeExclusive(path.join(output,CASE_FILE),result.canonical);
     return artifact(result);
-  }catch{fail();}
+  }catch(error){
+    if(['CAPTURE_NOT_AVAILABLE','CAPTURE_INVALID','CAPTURE_UNSUPPORTED'].includes(error?.message))throw error;
+    fail();
+  }
 }
 
 export async function loadRoadStopReplayRecordingCase(directory){

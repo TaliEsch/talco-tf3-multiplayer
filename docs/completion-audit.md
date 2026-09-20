@@ -2,6 +2,40 @@
 
 ## Current status — 20 September 2026
 
+### Consolidated capture compatibility diagnostics
+
+The live 20:32 preview/apply progressed beyond node flags but failed `lanes`.
+Rather than normalize an unknown field or request another blind placement,
+the collector now independently inspects required proposal, road, lane, node,
+configuration, matrix and mapping field shapes. Getter failures do not prevent
+inspection of independent siblings. Only fixed field-path/type tokens leave the
+callback; raw native values/errors are not exported. Limits (4096 field reads,
+24 report tokens, 2048 bytes) produce `InspectionLimit` and prevent capture success.
+Successful inspection is not execution permission: the original complete capture
+and strict helper schema must still pass before any replay case is created.
+
+The regular protected GUI callback exports unsupported reports separately from
+capture data. This preserves missing-field evidence for a read-only launcher
+diagnostic without manufacturing a replay payload. Root executed multiple
+simultaneous failures, throwing getters and report-limit cases in the actual Lua
+collector. Native runtime/constructor compatibility remains unverified.
+
+Launcher 0.6.27.0 adds **Check capture diagnostics** (preview/cancel only), and
+distinguishes paused, unsupported, absent and invalid capture from uncertain replay.
+The helper strictly parses bounded inert diagnostic files, checks freshness, and
+never enables replay from them. Stale apply diagnostics do not supersede a fresh
+valid capture. Errors after replay consumption remain terminal unknown; a
+diagnostic read finishing after consumption cannot replace that status.
+Root reviewed the delegated helper/UI changes, added the post-await consumption
+check, and kept the status line short with the full issues in Debug logs.
+
+Full suite: 717/717 passed; additional scoped logger assertions passed 3/3.
+Launcher compiled (not interactively verified), SHA-256
+`5e6465dd8e3a32f292181c559c91a40240a7dccd7b9f9818c795dca3dc2544b2`.
+Mod staged with TF3 closed; source/copy manifest
+`6b1f4dceb7e0529aa89d7122717685f983e77621843216eff446f115ac5cb599`.
+Backup: `tf3mp_backup_5b4ecc79a3dc47628639381d71318e0e`.
+
 ### Preserve the observed absent lane-modification flag
 
 Live preview at 20:25:46 returned `nodeFlagsDfalseLnilTfalse`: only

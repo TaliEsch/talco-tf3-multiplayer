@@ -184,7 +184,9 @@ local function observeNativePlacement(guiState : GameScriptState<Tf3MpGuiState>,
             and type(value.modelResourceName) == "string" and #value.modelResourceName > 0 and #value.modelResourceName <= 1024 then
             result = { code = "captured", json = value.json, modelResourceName = value.modelResourceName, sequence = current.placementSequence }
           elseif value.code == "unsupported" and type(value.field) == "string" and #value.field <= 64 and value.field:match("^[A-Za-z0-9]+$") then
-            result = { code = "unsupported", field = value.field }
+            local issues = "InspectionError"
+            if type(value.issues) == "string" and #value.issues > 0 and #value.issues <= 2048 and value.issues:match("^[A-Za-z0-9_]+$") then issues = value.issues end
+            result = { code = "unsupported", field = value.field, issues = issues, sequence = current.placementSequence }
           end
         end
         if isApply then current.roadCaptureApply = result else current.roadCaptureCreate = result end

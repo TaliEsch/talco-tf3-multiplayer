@@ -141,6 +141,14 @@ local function exchangeRoadCapture() : nil
         local field = "callback"
         if type(captured.field) == "string" and #captured.field <= 64 and captured.field:match("^[A-Za-z0-9]+$") then field = captured.field end
         log.message("{\"event\":\"native_road_capture_unsupported\",\"stage\":\"" .. stage .. "\",\"field\":\"" .. field .. "\",\"observerRevision\":7,\"gameplayVerified\":false}")
+        if type(captured.issues) == "string" and #captured.issues > 0 and #captured.issues <= 2048 and captured.issues:match("^[A-Za-z0-9_]+$")
+          and type(captured.sequence) == "number" and captured.sequence % 1 == 0 and captured.sequence >= 1 and captured.sequence <= 16 then
+          app.saveUserdata("tf3mp_status_1", "road_capture_diagnostic_" .. stage, {
+            schemaVersion = 1, kind = "road_capture_diagnostic", stage = stage,
+            sequence = captured.sequence, issues = captured.issues,
+          })
+          log.message("{\"event\":\"native_road_capture_diagnostic\",\"stage\":\"" .. stage .. "\",\"issues\":\"" .. captured.issues .. "\",\"gameplayVerified\":false}")
+        end
       end
     end
   end

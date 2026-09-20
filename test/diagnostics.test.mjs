@@ -16,6 +16,15 @@ test("replay workflow retains bounded launcher artifact identities without secre
   log({event:'other',recordId,caseDigest});
   assert.equal(records.at(-1).recordId,undefined);
   assert.equal(records.at(-1).caseDigest,undefined);
+  log({event:'road_stop_replay_workflow',code:'CAPTURE_UNSUPPORTED',issues:'roadlaneConfigsNil_roadlaneConfigNil',nonce:'private'});
+  assert.equal(records.at(-1).issues,'roadlaneConfigsNil_roadlaneConfigNil');
+  assert.equal(records.at(-1).nonce,undefined);
+  for(const issues of ['private/path','a'.repeat(97),'A_'.repeat(24)+'A']) {
+    log({event:'road_stop_replay_workflow',issues});
+    assert.equal(records.at(-1).issues,undefined);
+  }
+  log({event:'unrelated',issues:'Private'});
+  assert.equal(records.at(-1).issues,undefined);
   log({event:'road_stop_replay_workflow',recordId:'../private',caseDigest:'secret'});
   assert.equal(records.at(-1).recordId,undefined);
   assert.equal(records.at(-1).caseDigest,undefined);

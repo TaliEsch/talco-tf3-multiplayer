@@ -4,6 +4,13 @@ Revised 20 September 2026 following the user's scope and economy clarification.
 This is the current plan. Historical status is in completion-audit.md and
 archive/roadmap-before-scope-review.md; historical blockers do not override this plan.
 
+Current pre-replay check: load the repaired mod, pause, preview a normal road stop
+and cancel, then use **Capture diagnostics** in Advanced — Road stop replay.
+The collector now inspects independent required field shapes together instead of
+stopping diagnostics at the first mismatch. Reports are bounded and explicitly
+flag incomplete inspection. They never authorize replay. The known `lanes`
+mismatch still needs this runtime report; no missing lane array is defaulted.
+
 Next local proof (user clarification): record one normal action, reload its
 exact pre-action disposable checkpoint, then explicitly replay it once and
 compare ownership, resulting construction and actual charge. This avoids double

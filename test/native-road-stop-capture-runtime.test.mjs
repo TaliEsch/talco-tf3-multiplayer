@@ -105,6 +105,24 @@ test('node flag mismatch reports all three bounded representations without coerc
   }
 });
 
+test('preflight reports independent mismatches together and bounds hostile diagnostics',()=>{
+  const result=run(`
+street.addedSegments[1].comp.laneConfigs=nil
+street.addedSegments[1].comp.laneConfig=nil
+street.removedSegments[1].comp.roadStyle=42
+street.edgeObjectsToAdd[1].modelInstance.transformator="private"
+`,undefined,'return result.code,result.issues');
+  assert.equal(result.code,'unsupported');
+  for(const field of ['roadaddedSegments1complaneConfigsNil','roadaddedSegments1complaneConfigNil','roadremovedSegments1comproadStyleNumber','roadedgeObjectsToAdd1modelInstancetransformatorString'])assert.ok(result.value.includes(field),result.value);
+  assert.ok(!result.value.includes('private'));
+  const hostile=run('proposal=setmetatable({}, {__index=function()error("secret")end})',undefined,'return result.code,result.issues');
+  for(const field of ['proposalGetterError','toAddGetterError','toRemoveGetterError','old2newGetterError','terrainGetterError'])assert.ok(hostile.value.includes(field),hostile.value);
+  const many=run('street.addedSegments={};for i=1,64 do street.addedSegments[i]={}end',undefined,'return result.code,result.issues');
+  assert.equal(many.code,'unsupported');assert.ok(many.value.includes('InspectionLimit'));
+  assert.ok(many.value.length<=2048);assert.ok(many.value.split('_').length<=24);
+  for(const token of many.value.split('_'))assert.match(token,/^[A-Za-z][A-Za-z0-9]{0,95}$/);
+});
+
 test('Lua capture resolves the exact model during capture and copies only its bounded resource name',()=>{
   const expression='return result.code,result.modelResourceName or result.field';
   assert.deepEqual(run('resolveModelName=function(id) assert(id==7);return "station/road_stop.mdl" end',undefined,expression),

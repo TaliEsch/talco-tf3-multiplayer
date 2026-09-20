@@ -207,7 +207,116 @@ local function capture(proposal, enums, resolveModelName)
   return output, resourceName
 end
 
+-- A diagnostic pass over all independent fields, not a substitute for capture.
+-- A bad sibling never prevents inspection of later siblings. Native getters are
+-- individually protected; only fixed field paths/type names leave this function.
+local function inspectShape(proposal, apiTypes)
+  local issues, reads, limited, issueBytes = {}, 0, false, 0
+  local function issue(path, kind)
+    if #issues >= 23 then limited = true; return end
+    local token = path:sub(1, 78) .. kind
+    if issueBytes + #token + 1 > 1900 then limited = true; return end
+    issueBytes = issueBytes + #token + 1
+    issues[#issues + 1] = token
+  end
+  local function kind(v)
+    local t = type(v)
+    if t == "nil" then return "Nil" elseif t == "table" then return "Table" elseif t == "userdata" then return "Userdata"
+    elseif t == "number" then return "Number" elseif t == "boolean" then return "Boolean" elseif t == "string" then return "String" end
+    return "Other"
+  end
+  local function access(parent, key, path, inspect)
+    reads = reads + 1
+    if reads > 4096 or #issues >= 23 then limited = true; return end
+    local ok, value = pcall(function() return parent[key] end)
+    if not ok then issue(path,"GetterError"); return end
+    local checked = pcall(inspect, value, path)
+    if not checked then issue(path,"InspectionError") end
+  end
+  local function record(v,p,fields)
+    if type(v) ~= "table" and type(v) ~= "userdata" then issue(p,kind(v)); return end
+    for _,field in ipairs(fields) do access(v,field[1],p .. field[1],field[2]) end
+  end
+  local function check(fn)
+    return function(v,p) if not pcall(fn,v,p) then issue(p,kind(v)) end end
+  end
+  local number, integer, boolean, stringValue = check(finite), check(int), check(bool), check(text)
+  local function optionalBoolean(v,p) if v ~= nil then boolean(v,p) end end
+  local function vector(item)
+    return function(v,p)
+      if not pcall(array,v,p) then issue(p,kind(v)); return end
+      for i=1,#v do access(v,i,p .. string.format("%d",i),item) end
+    end
+  end
+  local function enumValue(v,p) if v == nil then issue(p,"Nil") end end
+  local function vec(v,p) record(v,p,{{"x",number},{"y",number},{"z",number}}) end
+  local function pairsOf(a,b)
+    return vector(function(v,p)
+      if type(v) ~= "table" or #v ~= 2 then issue(p,kind(v)); return end
+      access(v,1,p .. "First",a); access(v,2,p .. "Second",b)
+    end)
+  end
+  local function nativeMap(item)
+    return function(v,p)
+      if type(v) ~= "table" then issue(p,kind(v)); return end
+      local count,key=0,nil
+      while true do
+        key=next(v,key); if key==nil then break end
+        count=count+1; if count>64 then issue(p,"Limit"); break end
+        -- Never turn arbitrary keys into diagnostic strings.
+        integer(key,p .. "Key"); access(v,key,p .. "Value" .. string.format("%d",count),item)
+      end
+    end
+  end
+  local function modeMap(v,p)
+    if type(v) ~= "table" then issue(p,kind(v)); return end
+    local count,key=0,nil
+    while true do
+      key=next(v,key); if key==nil then break end
+      count=count+1; if count>64 then issue(p,"Limit"); break end
+      access(v,key,p .. "Mode" .. string.format("%d",count),boolean)
+    end
+  end
+  local function laneShape(v,p) record(v,p,{{"speed",number},{"width",number},{"height",number},{"forward",boolean},{"transportModes",modeMap},{"offset",number}}) end
+  local function edgeShape(v,p) record(v,p,{
+    {"type",enumValue},{"typeIndex",integer},{"objects",pairsOf(integer,enumValue)},
+    {"laneConfigs",vector(laneShape)},{"roadDevelopmentLocked",boolean},{"node0",integer},{"node1",integer},
+    {"position0",vec},{"position1",vec},{"tangent0",vec},{"tangent1",vec},{"laneConfig",vector(laneShape)},
+    {"edgeDecorations",pairsOf(integer,boolean)},{"distance",number},{"roadType",enumValue},{"roadTemplate",stringValue},{"roadStyle",stringValue}}) end
+  local function segmentShape(v,p) record(v,p,{{"entity",integer},{"type",integer},{"comp",edgeShape},
+    {"streetEdge",function(x,q) record(x,q,{{"precedenceNode0",enumValue},{"precedenceNode1",enumValue}}) end},
+    {"emissionEmitter",function(x,q) if x~=nil then record(x,q,{{"position",vec},{"radius",number},{"noisePower",number},{"pollutionPower",number}}) end end},
+    {"playerOwned",function(x,q) if x~=nil then record(x,q,{{"player",integer}}) end end}}) end
+  local function nodeShape(v,p) record(v,p,{{"entity",integer},{"comp",function(x,q) record(x,q,{{"position",vec}}) end}}) end
+  local function configShape(v,p) record(v,p,{{"entity",integer},{"comp",function(x,q) record(x,q,{
+    {"laneConnections",vector(function(y,r) record(y,r,{{"segment0",integer},{"lane0",integer},{"segment1",integer},{"lane1",integer},{"withRoad",boolean},{"withTram",boolean}}) end)},
+    {"crosswalks",vector(integer)},{"trafficLightPreference",enumValue},
+    {"trafficLightConfig",function(y,r) record(y,r,{{"trafficLightType",integer},{"states",vector(function(z,s) record(z,s,{{"lockedLanes",vector(integer)},{"duration",number},{"minDuration",number},{"canSkip",boolean}}) end)}}) end},
+    {"doubleSlipSwitch",boolean},{"userModifiedLaneConnections",optionalBoolean},{"userModifiedTrafficLightStates",boolean}}) end}}) end
+  local function matrixShape(v,p)
+    if type(v)~="table" and type(v)~="userdata" then issue(p,kind(v)); return end
+    for col=1,4 do
+      local ok,c=pcall(function() return apiTypes.Mat4f.cols(v,col) end)
+      if not ok then issue(p .. "Column" .. string.format("%d",col),"GetterError")
+      else record(c,p .. "Column" .. string.format("%d",col),{{"x",number},{"y",number},{"z",number},{"w",number}}) end
+    end
+  end
+  record(proposal,"",{
+    {"proposal",function(v,p) record(v,"road",{{"addedNodes",vector(nodeShape)},{"removedNodes",vector(nodeShape)},
+      {"addedSegments",vector(segmentShape)},{"removedSegments",vector(segmentShape)},
+      {"nodeConfigsToAdd",vector(configShape)},{"nodeConfigsToRemove",vector(integer)},
+      {"edgeObjectsToAdd",vector(function(x,q) record(x,q,{{"resultEntity",integer},{"category",integer},{"playerEntity",integer},{"left",boolean},
+        {"modelInstance",function(y,r) record(y,r,{{"modelId",integer},{"transf0",matrixShape},{"transf",matrixShape},{"transformator",integer}}) end}}) end)},
+      {"new2oldEdgeObjects",nativeMap(vector(integer))},{"old2newEdgeObjects",nativeMap(vector(integer))}}) end},
+    {"toAdd",vector(function()end)},{"toRemove",vector(integer)},{"old2new",nativeMap(integer)},
+    {"terrain",function(v,p) record(v,p,{{"baseHeightMod",function(x,q) record(x,q,{{"x0",integer},{"y0",integer},{"width",integer},{"height",integer}}) end}}) end}})
+  if limited then issues[#issues+1]="InspectionLimit" end
+  return table.concat(issues,"_")
+end
+
 function M.collect(proposal, apiTypes, resolveModelName)
+  local shapeOk, issues = pcall(inspectShape, proposal, apiTypes)
+  if not shapeOk then issues = "InspectionError" end
   local ok, result, resourceName = pcall(function()
     -- Type.enum contains the enum groups; Mat4f is directly under Type.
     -- Missing/undeclared runtime groups fail as unsupported, never guessed.
@@ -221,14 +330,16 @@ function M.collect(proposal, apiTypes, resolveModelName)
       PrecedencePreference = precedenceGroup, TrafficLightPreference = groups.TrafficLightPreference, Mat4f = apiTypes.Mat4f,
     }, resolveModelName)
   end)
-  if ok then return { code = "captured", json = result, modelResourceName = resourceName } end
+  if ok and issues == "" then return { code = "captured", json = result, modelResourceName = resourceName } end
   -- A foreign error value can itself have throwing field access. Never inspect
   -- it outside protection, format it, or export its text.
   local recognized, field = pcall(function()
     if type(result) == "table" and result.tag == FAILURE then return result.field end
     return nil
   end)
-  return { code = "unsupported", field = recognized and type(field) == "string" and field or "proposal" }
+  local first = recognized and type(field) == "string" and field or "proposal"
+  if issues == "" then issues = "Capture" .. first end
+  return { code = "unsupported", field = first, issues = issues }
 end
 
 function M.toHex(json)

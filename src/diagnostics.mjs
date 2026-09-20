@@ -7,6 +7,9 @@ export function diagnosticLogger(stream = process.stdout) {
     if (record.event === "road_stop_replay_workflow") {
       if (typeof record.recordId === "string" && /^[a-f0-9]{32}$/.test(record.recordId)) safe.recordId = record.recordId;
       if (typeof record.caseDigest === "string" && /^[a-f0-9]{64}$/.test(record.caseDigest)) safe.caseDigest = record.caseDigest;
+      if (typeof record.issues === "string" && Buffer.byteLength(record.issues, "utf8") <= 2048
+        && record.issues.split("_").length <= 24
+        && record.issues.split("_").every(token => /^[A-Za-z][A-Za-z0-9]{0,95}$/.test(token))) safe.issues = record.issues;
     }
     allowed.add("validation");
     allowed.add("recommended");

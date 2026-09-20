@@ -22,8 +22,8 @@ using System.Windows.Markup;
 [assembly: AssemblyCompany("TF3 Multiplayer Prototype contributors")]
 [assembly: AssemblyProduct("TF3 Multiplayer Prototype")]
 [assembly: AssemblyCopyright("Copyright (c) 2026 TF3 Multiplayer Prototype contributors")]
-[assembly: AssemblyVersion("0.6.26.0")]
-[assembly: AssemblyFileVersion("0.6.26.0")]
+[assembly: AssemblyVersion("0.6.27.0")]
+[assembly: AssemblyFileVersion("0.6.27.0")]
 
 internal static class Program
 {
@@ -372,11 +372,14 @@ internal sealed class MainWindow : Window
         roadReplayContent.Children.Add(new TextBlock { Text = "Disposable-save replay: record a paused pre-action checkpoint, place one stop and wait a few seconds for frames to flush before capture, then manually reload the original checkpoint before replaying it in a fresh solo Host. This is limited verification, not Phase 2 completion.", Foreground = mutedBrush, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 4, 0, 8) });
         WrapPanel roadReplayActions = new WrapPanel();
         roadReplayRecordButton = SmallButton("Record checkpoint", RoadReplayRecordClicked);
+        Button roadReplayDiagnosticsButton = SmallButton("Check capture diagnostics", RoadReplayDiagnosticsClicked);
+        roadReplayDiagnosticsButton.ToolTip = "Read-only preview of fresh capture mismatches; it cannot certify replay readiness.";
         roadReplayCaptureButton = SmallButton("Capture placed stop", RoadReplayCaptureClicked);
         roadReplayCaptureButton.ToolTip = "After placing the stop, wait a few seconds for game frames to flush before capture.";
         roadReplayLoadButton = SmallButton("Load replay case", RoadReplayLoadClicked);
         roadReplayConfirmButton = SmallButton("Confirm replay", RoadReplayConfirmClicked);
         roadReplayActions.Children.Add(roadReplayRecordButton);
+        roadReplayActions.Children.Add(roadReplayDiagnosticsButton);
         roadReplayActions.Children.Add(roadReplayCaptureButton);
         roadReplayActions.Children.Add(roadReplayLoadButton);
         roadReplayActions.Children.Add(roadReplayConfirmButton);
@@ -558,6 +561,15 @@ internal sealed class MainWindow : Window
         } catch (Exception ex) { roadReplayCapturePending = false; RefreshRoadReplayUi(); SetStatus(ex.Message); }
     }
 
+    private void RoadReplayDiagnosticsClicked(object sender, RoutedEventArgs e)
+    {
+        try {
+            RequireRoadReplayHelper("Start a Host helper and load the mod-enabled disposable save first.");
+            helper.StandardInput.WriteLine("road-replay-diagnostics"); helper.StandardInput.Flush();
+            SetStatus("Reading fresh capture diagnostics only • this does not certify replay readiness");
+        } catch (Exception ex) { SetStatus(ex.Message); }
+    }
+
     private void RoadReplayLoadClicked(object sender, RoutedEventArgs e)
     {
         try {
@@ -609,6 +621,7 @@ internal sealed class MainWindow : Window
 
     private static bool IsRoadReplayRecordId(string value) { return value != null && Regex.IsMatch(value, "^[0-9a-fA-F]{32}$"); }
     private static bool IsRoadReplayCaseDigest(string value) { return value != null && Regex.IsMatch(value, "^[0-9a-fA-F]{64}$"); }
+    private static bool IsRoadReplayIssues(string value) { return value != null && Encoding.UTF8.GetByteCount(value) <= 2048 && Regex.IsMatch(value, "^[A-Za-z][A-Za-z0-9]{0,95}(?:_[A-Za-z][A-Za-z0-9]{0,95}){0,23}$"); }
 
     private Button SmallButton(string text, RoutedEventHandler action) { Button b = PrimaryButton(text, action, Color.FromRgb(49, 65, 88)); b.Height = 38; b.Margin = new Thickness(0, 0, 9, 8); return b; }
 
@@ -663,6 +676,7 @@ internal sealed class MainWindow : Window
             if (eventName == "road_stop_replay_workflow") {
                 string recordId = message.TryGetValue("recordId", out value) ? value as string : null;
                 string caseDigest = message.TryGetValue("caseDigest", out value) ? value as string : null;
+                string issues = message.TryGetValue("issues", out value) ? value as string : null;
                 if (code == "RECORDING_STARTED") {
                     if (IsRoadReplayRecordId(recordId)) {
                         roadReplayRecordId = recordId.ToLowerInvariant();
@@ -700,6 +714,24 @@ internal sealed class MainWindow : Window
                     roadReplayResultReceived = true;
                     ClearRoadReplayConfirmation();
                     SetStatus("Road replay stopped • inspect the game and helper log; do not retry uncertain effects");
+                } else if (code == "PAUSED_GAME_REQUIRED") {
+                    roadReplayCapturePending = false;
+                    RefreshRoadReplayUi();
+                    SetStatus("Road replay requires the loaded game paused • stop and restart the helper before trying again");
+                } else if (code == "CAPTURE_UNSUPPORTED") {
+                    roadReplayCapturePending = false;
+                    RefreshRoadReplayUi();
+                    SetStatus(IsRoadReplayIssues(issues) ? "Capture unsupported: " + issues.Split('_').Length + " diagnostic items • see Debug log • no replay was submitted" : "Capture preflight report was invalid • no replay was submitted");
+                } else if (code == "CAPTURE_NOT_AVAILABLE") {
+                    roadReplayCapturePending = false;
+                    RefreshRoadReplayUi();
+                    SetStatus("Capture output is not available yet • no replay was submitted");
+                } else if (code == "CAPTURE_INVALID") {
+                    roadReplayCapturePending = false;
+                    RefreshRoadReplayUi();
+                    SetStatus("Capture output is invalid or uncorrelated • no replay was submitted");
+                } else if (code == "CAPTURE_DIAGNOSTICS_STALE") {
+                    SetStatus("Capture diagnostic is stale for this Host • it does not indicate replay readiness");
                 } else SetStatus("Road replay • " + code);
                 return;
             }
