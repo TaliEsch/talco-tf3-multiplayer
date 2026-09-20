@@ -50,8 +50,12 @@ removes one road segment and adds one edge object, owner 3141, declared cost
 pre-execution admission and company-bound replay remain the next gate; the
 reported cost is not evidence of a verified debit.
 The offline copied-proposal schema/canonicalizer and file checker are now
-implemented for the road-stop subset; see road-stop-codec-spec.md. This is not
-yet connected to native extraction, engine reconstruction or gameplay admission.
+implemented for the road-stop subset; see road-stop-codec-spec.md. Revision 7
+connects native extraction, with live field compatibility not yet qualified.
+An unregistered reconstruction candidate now round-trips the copied fields in
+executable Lua fixtures. The apply-only replay-case record binds the input to a
+pre-placement save hash and matching game/mod hashes, but cannot establish which
+save is loaded. Native reconstruction, execution and accounting remain unverified.
 Unsupported node-configuration/construction/terrain variants reject explicitly.
 
 Earlier live evidence (20 September, 10:23 UTC): the modular passenger station

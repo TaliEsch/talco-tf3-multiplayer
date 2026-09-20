@@ -21,6 +21,47 @@ safety, pre-spend admission or multi-game synchronization.
 
 ## Evidence and non-claim
 
+### Reconstruction candidate and checkpoint record
+
+`experimental/native-road-stop-rebuild.lua` reconstructs the copied road-stop
+subset using supplied public constructors. The caller must supply `Proposal`,
+`Proposal.NodeAndEntity`, `Proposal.SegmentAndEntity`, `Vec3f`, `Vec4f`, `Mat4f`,
+`GridVec2f`, enum groups and `Engine.Component` constructors. This is not a remote
+payload validator; inputs must first pass the strict copied schema. Optional
+JSON null components become absent Lua fields. Native exceptions export only a
+fixed unqualified error, never a raw exception.
+
+The installed declarations provide constructors for nodes/segments/components,
+but `ModelInstance`, `Proposal.EdgeObject`, `StreetProposal` and `Terrain` expose
+structural fields without constructors. The candidate assigns complete structural
+records; actual native setter conversion still needs qualification. It never
+calls proposal evaluation, command submission or world APIs and is not registered.
+Executable tests rebuild and re-capture all fixture fields through the actual Lua
+collector and JS codec. That does not establish TF3-native reconstruction.
+
+Root binding audit additionally found that declared `new` methods are not enough
+to establish a usable runtime path. `Type.enum` exposes the common enum groups;
+`PrecedencePreference` is declared but absent from that published group list.
+`GridVec2f` is declared but absent from the `Type` namespace list. Engine component
+constructors are nested declarations whose usable runtime paths still need stock
+source or live confirmation. Do not guess these bindings or numeric enum values.
+The capture adapter now uses `api.type.enum` plus `api.type.Mat4f` correctly and
+returns unsupported if a required group is unavailable. Fixture-supplied bindings
+do not prove those missing runtime capabilities exist.
+
+`src/road-stop-replay-case.mjs` creates/checks an offline apply-only case bound to
+the pre-placement save SHA-256, game SHA-256, mod manifest and stop owner. It
+preserves road ownership rather than silently rewriting it. Digest validation
+detects accidental modification, not a malicious party who can recompute hashes.
+File identity matching is not loaded-world verification or execution authority;
+both remain explicitly false. No checkpoint load, replay or retry is automatic.
+
+Declaration evidence: `api/tealdef/api/type.d.tl` lines 565–590 (Vec3f), 649–668
+(Vec4f), 741–757 (Mat4f columns), 897–930 (empty GridVec2f), 2230–2240
+(ModelInstance), 2488–2674 (Proposal records/factories); `api/tealdef/api/engine.d.tl`
+99–163 (road components), 352–364 (emitter), 855–860 (owner). These are the locally
+installed public declarations, not evidence of a completed native round trip.
+
 ### Offline implementation
 
 `src/road-stop-capture.mjs` now parses bounded JSON into an explicit copied-value

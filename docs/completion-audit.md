@@ -2,6 +2,36 @@
 
 ## Current status — 20 September 2026
 
+### Record/reload/replay implementation progress — not yet a live replay
+
+Added an offline apply-only replay case binding copied proposal, company and the
+pre-placement save/game/mod hashes. Mismatches, preview records and tampering
+reject; a file match deliberately does not claim the game loaded that checkpoint.
+Added unregistered native reconstruction candidate using public factories and
+structural records. Root reviewed the Terra implementation and fixed optional
+component defaults, array-hole bounds and native setter/getter error redaction.
+Executable Lua tests reconstruct, recapture and compare every fixture field.
+Missing capabilities and unsupported edits fail without submitting anything.
+
+Root also found and corrected the capture enum namespace (`api.type.enum`, not
+direct `api.type` members). Fixture bindings now mirror that distinction. Required
+precedence/grid/component runtime exposure remains unqualified even though their
+types declare members. No numeric enum or missing factory is guessed.
+
+No game launch or construction was performed. Next work is native reconstruction/execution
+integration and the single record/reload/replay test, not another preview-only
+acceptance claim. Separate-company service costs/income still require live proof.
+
+Verification: the initial full reconstruction/case batch passed 666/666 checks.
+After correcting the enum namespace, focused Lua capture/rebuild tests and mod
+review pass, but the full suite hit the existing coordinator-file fault. A focused
+rerun confirmed `ENGINE_DELIVERY_UNKNOWN`, `operation: prepare`, `errorCode: EPERM`,
+`deliveryStage: replace` in the success fixture; 2/3 focused coordinator scenarios
+passed. This is now direct publication-stage evidence, not merely a suspected
+timeout. It was not retried or hidden by weakening safety assertions. The enum
+repair changes source manifest to `320e58c7f303aa0aaeab54ec37b5aad2f8644a48a90d8d3f11ca1c2eb1337b25`;
+it is not staged pending the binding investigation. No new manual run requested.
+
 ### Revision 7 — registered passive capture; replay experiment clarified
 
 Moved the fixture-qualified Lua extractor into the reviewed mod, with one copied

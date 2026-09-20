@@ -1,0 +1,66 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
+import fengari from 'fengari';
+import {roadStopCaptureFixture} from './fixtures/road-stop-capture.mjs';
+import {parseRoadStopCapture} from '../src/road-stop-capture.mjs';
+const {lua,lauxlib,lualib,to_luastring}=fengari;
+const rebuild=await readFile(new URL('../experimental/native-road-stop-rebuild.lua',import.meta.url),'utf8');
+const capture=await readFile(new URL('../mod/content/tf3mp_road_capture.lua',import.meta.url),'utf8');
+function literal(v){if(v===null)return'nil';if(typeof v==='string')return `string.char(${[...Buffer.from(v)].join(',')})`;if(typeof v==='number'||typeof v==='boolean')return String(v);return `{${Object.entries(v).map(([k,x])=>`[${Array.isArray(v)?Number(k)+1:literal(k)}]=${literal(x)}`).join(',')}}`;}
+function execute(mutation=''){
+  const script=`
+local rebuilder=(function() ${rebuild} end)()
+local collector=(function() ${capture} end)()
+local copied=${literal(roadStopCaptureFixture())}
+local function ctor() return {new=function(...) return {} end} end
+local types={Proposal=ctor(),NodeAndEntity=ctor(),SegmentAndEntity=ctor(),Vec3f={new=function(x,y,z)return{x=x,y=y,z=z}end},Vec4f={new=function(x,y,z,w)return{x=x,y=y,z=z,w=w}end},Mat4f={new=function(a,b,c,d)return{a,b,c,d}end},GridVec2f={new=function(x0,y0,w,h)return{x0=x0,y0=y0,width=w,height=h}end},enum={}}
+local components={BaseNode=ctor(),BaseEdge=ctor(),BaseEdgeStreet=ctor(),EmissionEmitter=ctor(),PlayerOwned=ctor()}
+for _,name in ipairs({'BaseEdgeType','RoadType','EdgeObjectType','PrecedencePreference','TransportMode'}) do types.enum[name]=setmetatable({}, {__index=function(t,k)local x={};rawset(t,k,x);return x end}) end
+${mutation}
+local result=rebuilder.rebuild(copied,types,components)
+local proposal=result.proposal
+local enums=types.enum
+enums.Mat4f={cols=function(v,col)local c=v[col];return{x=c.x,y=c.y,z=c.z,w=c.w}end}
+local encoded=collector.collect(proposal,{enum=enums,Mat4f=enums.Mat4f})
+return result.code,encoded.code,encoded.json or encoded.field
+`;
+  const L=lauxlib.luaL_newstate();lualib.luaL_openlibs(L);try{
+    lua.lua_sethook(L,()=>lauxlib.luaL_error(L,to_luastring('TEST_INSTRUCTION_LIMIT')),lua.LUA_MASKCOUNT,10_000_000);
+    assert.equal(lauxlib.luaL_loadstring(L,to_luastring(script)),lua.LUA_OK,lua.lua_tojsstring(L,-1));assert.equal(lua.lua_pcall(L,0,3,0),lua.LUA_OK,lua.lua_tojsstring(L,-1));return [lua.lua_tojsstring(L,-3),lua.lua_tojsstring(L,-2),lua.lua_tojsstring(L,-1)];}finally{lua.lua_close(L);}
+}
+test('experimental rebuilder uses public constructors and re-captures the full copied proposal',()=>{
+  const [code,captureCode,json]=execute();assert.equal(code,'unregistered');assert.equal(captureCode,'captured',json);
+  assert.deepEqual(parseRoadStopCapture(json).capture,parseRoadStopCapture(JSON.stringify(roadStopCaptureFixture())).capture);
+});
+test('experimental rebuilder fails with one fixed unqualified code when capability or schema is absent',()=>{
+  for(const mutation of ['types.Vec4f=nil','components.BaseEdge=nil','copied.proposal.street.addedSegments[1].type=1','copied.proposal.terrain.baseHeightMod.width=1']){
+    assert.throws(()=>execute(mutation),/ROAD_STOP_REBUILD_UNQUALIFIED/);
+  }
+});
+
+test('rebuild preserves absent optional components even if constructors initialize them',()=>{
+  const [code,captureCode,json]=execute('types.SegmentAndEntity.new=function() return {emissionEmitter={},playerOwned={player=999}} end');
+  assert.equal(code,'unregistered');assert.equal(captureCode,'captured',json);
+  assert.deepEqual(parseRoadStopCapture(json).capture,parseRoadStopCapture(JSON.stringify(roadStopCaptureFixture())).capture);
+});
+
+test('rebuild rejects holes, oversized collections, unsupported edits and missing enums',()=>{
+  for(const mutation of [
+    'copied.proposal.street.addedSegments[3]=copied.proposal.street.addedSegments[1]',
+    'for i=2,65 do copied.proposal.street.addedSegments[i]=copied.proposal.street.addedSegments[1] end',
+    'copied.proposal.toAdd={{}}', 'copied.proposal.street.nodeConfigsToAdd={{}}',
+    'types.enum.RoadType={}', 'copied.proposal.street.edgeObjectsToAdd[1].modelInstance.transf[1]=0/0',
+  ])assert.throws(()=>execute(mutation),/ROAD_STOP_REBUILD_UNQUALIFIED/);
+});
+
+test('rebuild redacts native getter, setter and constructor errors',()=>{
+  for(const mutation of [
+    'types.Proposal.new=function() error("private-native-detail") end',
+    'components.BaseEdge.new=function() return setmetatable({}, {__newindex=function() error("private-native-detail") end}) end',
+    'copied=setmetatable({}, {__index=function() error("private-native-detail") end})',
+  ])assert.throws(()=>execute(mutation),error=>{
+    assert.match(error.message,/ROAD_STOP_REBUILD_UNQUALIFIED/);
+    assert.doesNotMatch(error.message,/private-native-detail/);return true;
+  });
+});

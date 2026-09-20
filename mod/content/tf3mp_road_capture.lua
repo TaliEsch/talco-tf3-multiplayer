@@ -148,8 +148,18 @@ local function capture(proposal, enums)
   local pieces = { bytes = 0 }; encode(copied, pieces); local output = table.concat(pieces); return output
 end
 
-function M.collect(proposal, enumTypes)
-  local ok, result = pcall(capture, proposal, enumTypes)
+function M.collect(proposal, apiTypes)
+  local ok, result = pcall(function()
+    -- Type.enum contains the enum groups; Mat4f is directly under Type.
+    -- Missing/undeclared runtime groups fail as unsupported, never guessed.
+    if type(apiTypes) ~= "table" or type(apiTypes.enum) ~= "table" then bad("enumNamespace") end
+    local groups = apiTypes.enum
+    return capture(proposal, {
+      BaseEdgeType = groups.BaseEdgeType, RoadType = groups.RoadType,
+      EdgeObjectType = groups.EdgeObjectType, TransportMode = groups.TransportMode,
+      PrecedencePreference = groups.PrecedencePreference, Mat4f = apiTypes.Mat4f,
+    })
+  end)
   if ok then return { code = "captured", json = result } end
   -- A foreign error value can itself have throwing field access. Never inspect
   -- it outside protection, format it, or export its text.

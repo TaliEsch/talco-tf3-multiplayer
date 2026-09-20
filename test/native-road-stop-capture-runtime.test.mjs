@@ -52,7 +52,7 @@ for _,segments in ipairs({street.addedSegments,street.removedSegments}) do
   end
 end
 ${mutation}
-local result=adapter.collect(proposal,enums)
+local result=adapter.collect(proposal,{enum=enums,Mat4f=enums.Mat4f})
 ${resultExpression}
 `;
   const L=lauxlib.luaL_newstate();lualib.luaL_openlibs(L);
@@ -93,6 +93,7 @@ test('Lua capture rejects missing enums, malformed arrays, unsupported edits and
     ['street.edgeObjectsToAdd[1].playerEntity=0','playerEntity'],
     ['street.addedSegments[1].comp.objects[100]={1,enums.EdgeObjectType.STOP_LEFT}','objects'],
     ['street.addedSegments[1].comp.roadType=enums.RoadType.TRACK','roadType'],
+    ['enums.PrecedencePreference=nil','precedence'],
     ['proposal.terrain.baseHeightMod.width=1','terrain'],
     ['street.nodeConfigsToRemove={5}','nodeConfigs'],
     ['proposal.toAdd={{}}','toAdd'],

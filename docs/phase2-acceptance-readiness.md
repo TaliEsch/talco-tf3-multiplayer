@@ -2,6 +2,13 @@
 
 **NOT READY. Do not run another preview-only test as Phase 2 acceptance.**
 
+Next meaningful local gate is record/reload/replay of one normal stop, followed
+by the second-company service/accounting sequence. Reload the identical starting
+checkpoint before replay, rather than duplicating an action in its modified
+world. The offline replay record and Lua reconstruction candidate are implemented
+and fixture-tested, not connected to a game execution button. Neither the current
+capture build nor a passing parser is a completed Phase 2 acceptance test.
+
 Current priority: normal native placement capture, not the station coordinate
 picker. The guided setup below is on hold after a native depot collision; no
 station was attempted. See native-placement-capture.md and
