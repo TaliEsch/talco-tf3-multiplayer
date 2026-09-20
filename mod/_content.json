@@ -8,6 +8,7 @@
     "tf3mp_native_controls.res.lua",
     "tf3mp_native_controls.script.tl",
     "tf3mp_proposal_facts.lua",
+    "tf3mp_road_capture.lua",
     "tf3mp_service_command.lua",
     "tf3mp_station_command.lua",
     "tf3mp_station_probe.lua",

@@ -24,7 +24,7 @@ export function summarizeNativePlacementLog(text) {
     const start=line.indexOf('{"event":"native_placement_');
     if(start<0||line.length-start>2048)continue;
     let item;try{item=JSON.parse(line.slice(start));}catch{continue;}
-    if(![1,2,3,4,5,6].includes(item.observerRevision)||item.passive!==true||item.gameplayVerified!==false)continue;
+    if(![1,2,3,4,5,6,7].includes(item.observerRevision)||item.passive!==true||item.gameplayVerified!==false)continue;
     if(item.event==='native_placement_observer_ready'){
       if(runs.length>=100)throw new Error('TOO_MANY_OBSERVER_RUNS');
       current={revision:item.observerRevision,samples:[],rejectedRecords:0,observerErrors:0,selfTestDelivered:null,selfTestCallSucceeded:null};runs.push(current);continue;

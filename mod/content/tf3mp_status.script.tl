@@ -85,6 +85,11 @@ local record Tf3MpProposalFacts
   collect : function(any, any, any) : string
 end
 local proposalFacts = ug_require "tf3mp_status_1::/tf3mp_proposal_facts.lua" as Tf3MpProposalFacts
+local record Tf3MpRoadCapture
+  collect : function(any, any) : table
+end
+local roadCapture = ug_require "tf3mp_status_1::/tf3mp_road_capture.lua" as Tf3MpRoadCapture
+local roadCaptureTypes = api.type
 
 local record Tf3MpGuiState
   status : string
@@ -93,6 +98,8 @@ local record Tf3MpGuiState
   placementSequence : integer
   placementLogQueue : {string}
   placementObserverFailed : boolean
+  roadCaptureCreate : table
+  roadCaptureApply : table
 end
 
 local function readClock() : Engine.Component.GameTime
@@ -145,12 +152,29 @@ local function observeNativePlacement(guiState : GameScriptState<Tf3MpGuiState>,
         return proposalFacts.collect(slots[1], slots[2], slots[3])
       end)
       if factsOk and type(captured) == "string" and #captured <= 1024 then facts = captured as string end
+      -- One bounded copied capture per stage. Never retain the event userdata.
+      if (isApply and current.roadCaptureApply == nil) or (not isApply and current.roadCaptureCreate == nil) then
+        local captureOk, captureValue = pcall(function() : table
+          local slots = param as table
+          return roadCapture.collect(slots[1], roadCaptureTypes)
+        end)
+        local result : table = { code = "unsupported", field = "callback" }
+        if captureOk and type(captureValue) == "table" then
+          local value = captureValue as table
+          if value.code == "captured" and type(value.json) == "string" and #value.json > 0 and #value.json <= 262144 then
+            result = { code = "captured", json = value.json, sequence = current.placementSequence }
+          elseif value.code == "unsupported" and type(value.field) == "string" and #value.field <= 64 and value.field:match("^[A-Za-z0-9]+$") then
+            result = { code = "unsupported", field = value.field }
+          end
+        end
+        if isApply then current.roadCaptureApply = result else current.roadCaptureCreate = result end
+      end
     end
   end
   -- Engine API access may be restricted inside GUI event dispatch. Do not read
   -- the clock here; unknown values are more honest than a swallowed exception.
   local tick, update = -1, -1
-  local entry = "{\"event\":\"native_placement_observed\",\"observerRevision\":6,\"stage\":\"" .. (isApply and "apply" or "create")
+  local entry = "{\"event\":\"native_placement_observed\",\"observerRevision\":7,\"stage\":\"" .. (isApply and "apply" or "create")
     .. "\",\"builderId\":\"" .. builderId .. "\",\"sequence\":" .. tostring(current.placementSequence)
     .. ",\"sample\":" .. tostring(count) .. ",\"tickCount\":" .. tostring(tick) .. ",\"updateCount\":" .. tostring(update)
     .. ",\"proposalType\":\"" .. proposalType .. "\",\"dataType\":\"" .. dataType .. "\",\"resultType\":\"" .. resultType
@@ -1640,7 +1664,7 @@ local ret : GameScriptWithGui<Tf3MpState, Tf3MpGuiState> = {
     guiState:set(guiCurrent)
     pcall(function()
       for _, entry in ipairs(pendingLogs) do log.message(entry) end
-      if failed then log.message("{\"event\":\"native_placement_observer_error\",\"observerRevision\":6,\"passive\":true,\"gameplayVerified\":false}") end
+      if failed then log.message("{\"event\":\"native_placement_observer_error\",\"observerRevision\":7,\"passive\":true,\"gameplayVerified\":false}") end
     end)
   end,
 
@@ -1648,7 +1672,7 @@ local ret : GameScriptWithGui<Tf3MpState, Tf3MpGuiState> = {
     if id == "tf3mp_placement_observer" and name == "tf3mp_placement_observer_selftest" then
       -- Explicit synchronous acknowledgement; no nested dispatch or GUI-state
       -- write/readback ambiguity. Not a native construction event.
-      return { kind = "placement_observer_ack", observerRevision = 6, passive = true }
+      return { kind = "placement_observer_ack", observerRevision = 7, passive = true }
     end
     if name == "builder.proposalCreate" or name == "builder.proposalApply" then
       local observed = pcall(function() observeNativePlacement(guiState, id, name, _param) end)

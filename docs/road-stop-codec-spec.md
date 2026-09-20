@@ -1,6 +1,23 @@
-# Road-stop proposal codec specification (blocked design)
+# Road-stop proposal capture and replay qualification
 
-20 September 2026. This is a read-only design boundary for the normal `streetTerminalBuilder` roadside-stop proposal. It does **not** authorize a codec, a submission path, or remote construction. It records what a lossless codec would have to cover under the installed public declarations, and why that coverage has not been demonstrated.
+20 September 2026. The registered diagnostic captures the normal `streetTerminalBuilder` roadside-stop proposal. Capture does not authorize remote execution. Native reconstruction and replay remain unqualified.
+
+## Next gate: record, reload, replay
+
+Use the user's proposed single-machine experiment. Begin from an identified
+disposable pre-placement checkpoint, record one normal valid placement, then
+reload that exact checkpoint before explicitly replaying the captured apply
+proposal once. Compare construction, reference mapping, ownership and actual
+company debit against the original action. Do not replay into the world where
+the original action already exists. Preview and cancellation are not commits.
+
+This separates reconstruction qualification from live interception. Match the
+game/mod builds and resources, validate existing entity references after reload,
+and record starting balances/state. Timing and spontaneous simulation changes
+must be controlled or reported; reloading alone does not prove determinism.
+Never auto-load, auto-replay or retry an uncertain construction. A successful
+record/reload/replay test does not establish network ordering, concurrent-action
+safety, pre-spend admission or multi-game synchronization.
 
 ## Evidence and non-claim
 
@@ -19,18 +36,19 @@ is inferred from a valid capture.
 prints only its digest, counts and explicit false verification/authorization
 flags. It does not read live Proposal userdata or send game commands. Its success
 means the copied JSON fits this schema, not that TF3 has exported or reconstructed
-it. The current in-game observer still exports revision-6 facts only; do not feed
-those facts into this checker as a complete proposal.
+it. Revision 7 adds copied capture files alongside the summary facts; do not feed
+the summary facts into this checker as a complete proposal.
 
 Next integration: bounded native extraction and enum/matrix conversion, followed
 by engine-side reconstruction qualification against the same normalized data.
 Keep the direct Proposal constructor route open; no SimpleProposal conversion is
 assumed. Admission before native spending is still a separate required gate.
 
-The extraction candidate now exists at `experimental/native-road-stop-capture.lua`.
+The extraction module is registered at `mod/content/tf3mp_road_capture.lua`.
 It copies fixed declared fields, maps enums by explicit constant equality, reads
 matrix columns through the documented 1..4 accessor, and returns bounded JSON
-or a fixed unsupported-field label. It is not registered in the mod. Executable
+or a fixed unsupported-field label. The observer attempts one capture per stage
+within its bounded event window. Executable
 Lua fixture tests round-trip its output through the JS canonicalizer; they do
 not establish TF3 enum bindings, GUI permission to read matrix columns, native
 data completeness, capture freshness or engine reconstruction.
@@ -39,8 +57,10 @@ data completeness, capture freshness or engine reconstruction.
 envelope (revision 7, stage/sequence, hex-encoded JSON). The checker accepts it
 with `--userdata`. This parser never evaluates Lua; arbitrary fields, duplicate
 keys, executable trailing text and invalid UTF-8 are rejected. The gameplay IPC
-parser retains its original 4096-byte limit. No native envelope writer is wired
-yet, and metadata alone never establishes capture freshness or execution rights.
+parser retains its original 4096-byte limit. A protected regular GUI step writes
+at most one file per stage, independently of helper availability. Publication
+errors disable only the diagnostic writer; they do not retry or submit anything.
+Metadata alone never establishes capture freshness or execution rights.
 
 Revision 6 observed nine normal-builder events: each selected proposal exposed `proposal.proposal.addedSegments = 1`, `removedSegments = 1`, and `edgeObjectsToAdd = 1`; `addedNodes`, `removedNodes`, `proposal.toAdd`, `proposal.toRemove`, and apply `result` had count zero. It also read edge-object owner `3141`, `ProposalData.costs = 67500`, and `ProposalData.errorState.critical = false`. See `C:/Users/olihf/Downloads/Temp/tf3-multiplayer-prototype/docs/completion-audit.md:5-20` and the bounded collector at `C:/Users/olihf/Downloads/Temp/tf3-multiplayer-prototype/mod/content/tf3mp_proposal_facts.lua:44-104`.
 

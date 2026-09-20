@@ -107,3 +107,19 @@ test('revision six keeps strictly bounded proposal facts without claiming replay
     assert.equal(secret.rejectedRecords,1);assert.ok(!JSON.stringify(secret).includes('private path'));
   }
 });
+
+test('revision seven accepts the revision-six facts event shape across readiness, self-test, create and apply',()=>{
+  const r={...ready,observerRevision:7};
+  const ack={...r,event:'native_placement_observer_selftest',synthetic:true,delivered:true,
+    callSucceeded:true,attempt:1,final:true,returnType:'table',controlDelivered:true};
+  const facts={schemaVersion:1,code:'readable',addedNodes:0,addedSegments:1,removedNodes:0,removedSegments:1,
+    edgeObjects:1,constructions:0,removals:0,resultCount:1,cost:100,critical:false,ownerCompany:3141};
+  const create={...event,observerRevision:7,payloadType:'table',shapeInspected:true,proposalFacts:facts};
+  const apply={...create,stage:'apply',sequence:2,sample:2};
+  const report=parse(lines(r,ack,create,apply));
+  assert.equal(report.observerReady,true);assert.equal(report.observerRevision,7);
+  assert.equal(report.selfTestDelivered,true);assert.equal(report.selfTestCallSucceeded,true);
+  assert.equal(report.createObserved,true);assert.equal(report.applyObserved,true);
+  assert.equal(report.outcome,'CREATE_AND_APPLY_OBSERVED');
+  assert.deepEqual(report.samples.map(sample=>sample.proposalFacts),[facts,facts]);
+});

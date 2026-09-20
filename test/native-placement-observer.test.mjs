@@ -8,7 +8,7 @@ import { validateReviewPackage } from "../src/review-validator.mjs";
 const statusUrl = new URL("../mod/content/tf3mp_status.script.tl", import.meta.url);
 const panelUrl = new URL("../mod/content/tf3mp_status_panel.script.tl", import.meta.url);
 
-test("native placement observer rev6 uses protected bounded inspection and a scalar acknowledgement", async () => {
+test("native placement observer rev7 uses protected bounded inspection, capture and a scalar acknowledgement", async () => {
   const [source, panel] = await Promise.all([readFile(statusUrl, "utf8"), readFile(panelUrl, "utf8")]);
   for (const marker of [
     'current.eventSubscriptionsVersion ~= 17',
@@ -34,10 +34,14 @@ test("native placement observer rev6 uses protected bounded inspection and a sca
     'pcall(function() observeNativePlacement(guiState, id, name, _param) end)',
     'return nil -- No restriction/error result, even if observation failed.',
     'local guiCurrent = guiState:get() or {}',
-    'return { kind = "placement_observer_ack", observerRevision = 6, passive = true }',
+    'return { kind = "placement_observer_ack", observerRevision = 7, passive = true }',
     'if shapeOk and id == "streetTerminalBuilder" then',
     'return proposalFacts.collect(slots[1], slots[2], slots[3])',
     'type(captured) == "string" and #captured <= 1024',
+    'if (isApply and current.roadCaptureApply == nil) or (not isApply and current.roadCaptureCreate == nil) then',
+    'return roadCapture.collect(slots[1], roadCaptureTypes)',
+    'type(value.json) == "string" and #value.json > 0 and #value.json <= 262144',
+    'result = { code = "captured", json = value.json, sequence = current.placementSequence }',
   ]) assert.ok(source.includes(marker), marker);
   for (const marker of [
     'local placementRouteChecked = false',
@@ -49,15 +53,20 @@ test("native placement observer rev6 uses protected bounded inspection and a sca
     'if placementRouteSteps % 60 ~= 0 then return nil end',
     'placementRouteAttempts = placementRouteAttempts + 1',
     'if placementRouteAttempts == 1 then',
-    'native_placement_observer_ready\\",\\"observerRevision\\":6',
+    'native_placement_observer_ready\\",\\"observerRevision\\":7',
     'api.gui.fireGuiScriptEvent("tf3mp_placement_observer", "tf3mp_placement_observer_selftest", {})',
-    'ack.kind == "placement_observer_ack" and ack.observerRevision == 6 and ack.passive == true',
+    'ack.kind == "placement_observer_ack" and ack.observerRevision == 7 and ack.passive == true',
     'api.gui.fireGuiScriptEvent("tf3mp_engine_bridge", "tf3mp_get_status", {})',
     'local controlDelivered = false', 'type(controlValue) == "table"', 'local control = controlValue as table', 'type(control.status) == "string"',
     'placementRouteChecked = delivered or placementRouteAttempts >= 12',
     '\\"attempt\\":', '\\"final\\":', '\\"returnType\\":', '\\"controlDelivered\\":',
     '\\"delivered\\":', '\\"callSucceeded\\":', '\\"synthetic\\":true',
-    'react.onStep(function()\n    checkPlacementRoute()\n    if bridgeFailed then',
+    'local function exchangeRoadCapture()',
+    'local function flushRoadCapture()',
+    '-- USERDATA EXCHANGE BEGIN: only invoked by the protected regular onStep callback.',
+    'local ok = pcall(exchangeRoadCapture)',
+    'app.saveUserdata("tf3mp_status_1", "road_capture_" .. stage, {',
+    'react.onStep(function()\n    checkPlacementRoute()\n    flushRoadCapture()\n    if bridgeFailed then',
   ]) assert.ok(panel.includes(marker), marker);
   assert.doesNotMatch(source, /rawget\s*\(/);
   const guiUpdate = source.slice(source.indexOf("  guiUpdate = function"), source.indexOf("  guiHandleEvent = function"));
@@ -122,12 +131,15 @@ test("review rejects weakened native placement observer safety boundaries", asyn
     ));
     await assert.rejects(validateReviewPackage(root), /must log and verify its explicit acknowledgement|must remain two fixed read-only GUI dispatches/);
 
-    await writeFile(panelFile, panel.replace('checkPlacementRoute()\n    if bridgeFailed then', 'if bridgeFailed then\n    checkPlacementRoute()'));
+    await writeFile(panelFile, panel.replace(
+      'checkPlacementRoute()\n    flushRoadCapture()\n    if bridgeFailed then',
+      'if bridgeFailed then\n    checkPlacementRoute()\n    flushRoadCapture()',
+    ));
     await assert.rejects(validateReviewPackage(root), /must run once from the regular panel step callback/);
 
     await writeFile(panelFile, panel);
     await writeFile(file, source.replace(
-      'return { kind = "placement_observer_ack", observerRevision = 6, passive = true }',
+      'return { kind = "placement_observer_ack", observerRevision = 7, passive = true }',
       'return { kind = "placement_observer_ack", observerRevision = 2, passive = true }',
     ));
     await assert.rejects(validateReviewPackage(root), /must fail open/);

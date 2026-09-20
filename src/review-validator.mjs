@@ -12,6 +12,7 @@ const EXPECTED_CONTENT = Object.freeze([
   "tf3mp_native_controls.res.lua",
   "tf3mp_native_controls.script.tl",
   "tf3mp_proposal_facts.lua",
+  "tf3mp_road_capture.lua",
   "tf3mp_service_command.lua",
   "tf3mp_station_command.lua",
   "tf3mp_station_probe.lua",
@@ -56,6 +57,10 @@ export async function validateReviewPackage(root) {
   if (forbidden.length) throw new Error(`forbidden bundled file: ${forbidden[0]}`);
   const gameScript = await readFile(path.join(absoluteRoot, "content", "tf3mp_status.script.tl"), "utf8");
   const factsSource = await readFile(path.join(absoluteRoot, 'content', 'tf3mp_proposal_facts.lua'), 'utf8');
+  const captureSource = await readFile(path.join(absoluteRoot, 'content', 'tf3mp_road_capture.lua'), 'utf8');
+  if (createHash('sha256').update(captureSource.replace(/\r\n/g, '\n')).digest('hex') !== '8b5c2ce838132ab2fc2d6368dfa433490fa04a1f6d7616184bdf79d92e0e7146') {
+    throw new Error('road capture collector differs from reviewed passive source');
+  }
   if (createHash('sha256').update(factsSource.replace(/\r\n/g, '\n')).digest('hex') !== '55d015ccc1c478f4ea8018b91fbb4aa040c0fd4e01bf735b6a1c1a4cdc9115ce') {
     throw new Error('proposal facts collector differs from reviewed passive source');
   }
@@ -137,6 +142,10 @@ export async function validateReviewPackage(root) {
     'local factsOk, captured = pcall(function() : string',
     'return proposalFacts.collect(slots[1], slots[2], slots[3])',
     'type(captured) == "string" and #captured <= 1024',
+    'if (isApply and current.roadCaptureApply == nil) or (not isApply and current.roadCaptureCreate == nil) then',
+    'return roadCapture.collect(slots[1], roadCaptureTypes)',
+    'type(value.json) == "string" and #value.json > 0 and #value.json <= 262144',
+    'result = { code = "captured", json = value.json, sequence = current.placementSequence }',
     'local tick, update = -1, -1', 'local entry = "{\\"event\\":\\"native_placement_observed\\"',
     'local queue = current.placementLogQueue or {}', 'if #queue < 16 then queue[#queue + 1] = entry end',
     'current.placementLogQueue = queue', '\\"payloadType\\":\\"', '\\"shapeInspected\\":',
@@ -168,7 +177,7 @@ export async function validateReviewPackage(root) {
       || !guiHandler.includes('pcall(function() observeNativePlacement(guiState, id, name, _param) end)')
       || !guiHandler.includes('if not observed then') || !guiHandler.includes('current.placementObserverFailed = true')
       || !guiHandler.includes('if id == "tf3mp_placement_observer" and name == "tf3mp_placement_observer_selftest" then')
-      || !selfTestHandler.includes('return { kind = "placement_observer_ack", observerRevision = 6, passive = true }')
+      || !selfTestHandler.includes('return { kind = "placement_observer_ack", observerRevision = 7, passive = true }')
       || /guiState\s*[:.]/.test(selfTestHandler)
       || !guiHandler.includes('return nil -- No restriction/error result, even if observation failed.')) {
     throw new Error("native placement observer must fail open");
@@ -229,10 +238,10 @@ export async function validateReviewPackage(root) {
     'local placementRouteSteps : integer = 0', 'local placementRouteAttempts : integer = 0',
     'if placementRouteChecked then return nil end', 'placementRouteSteps = placementRouteSteps + 1',
     'if placementRouteSteps % 60 ~= 0 then return nil end', 'placementRouteAttempts = placementRouteAttempts + 1',
-    'if placementRouteAttempts == 1 then', 'native_placement_observer_ready', 'observerRevision\\\":6',
+    'if placementRouteAttempts == 1 then', 'native_placement_observer_ready', 'observerRevision\\\":7',
     'api.gui.fireGuiScriptEvent("tf3mp_placement_observer", "tf3mp_placement_observer_selftest", {})',
     'local delivered = false', 'if ok and type(value) == "table" then',
-    'ack.kind == "placement_observer_ack" and ack.observerRevision == 6 and ack.passive == true',
+    'ack.kind == "placement_observer_ack" and ack.observerRevision == 7 and ack.passive == true',
     'api.gui.fireGuiScriptEvent("tf3mp_engine_bridge", "tf3mp_get_status", {})',
     'local controlDelivered = false', 'type(controlValue) == "table"', 'local control = controlValue as table', 'type(control.status) == "string"',
     'placementRouteChecked = delivered or placementRouteAttempts >= 12',
@@ -252,6 +261,18 @@ export async function validateReviewPackage(root) {
   if (!panelStep.includes('checkPlacementRoute()')
       || panelStep.indexOf('checkPlacementRoute()') > panelStep.indexOf('if bridgeFailed then')) {
     throw new Error("native placement observer route probe must run once from the regular panel step callback");
+  }
+  if (!panelStep.includes('flushRoadCapture()') || panelStep.indexOf('flushRoadCapture()') > panelStep.indexOf('if bridgeFailed then')) {
+    throw new Error('road capture publication must run independently of helper availability');
+  }
+  const captureExchange = panelScript.slice(panelScript.indexOf('local captureSteps'), panelScript.indexOf('-- Temporary GUI diagnostic only:'));
+  for (const marker of ['local ok = pcall(exchangeRoadCapture)', 'captureDisabled = true',
+    'if captureSteps % 60 ~= 0 then return nil end', 'captureReported[stage] = true',
+    'local value : any = current.roadCaptureCreate', 'if stage == "apply" then value = current.roadCaptureApply end',
+    '#captured.json <= 262144', 'captured.sequence <= 16', '#hex > 524288',
+    'app.saveUserdata("tf3mp_status_1", "road_capture_" .. stage, {',
+    'schemaVersion = 1, observerRevision = 7, kind = "native_road_stop_capture"']) {
+    if (!captureExchange.includes(marker)) throw new Error('road capture publication must remain bounded and protected');
   }
   const bindingStart = gameScript.indexOf('name == "tf3mp_bind_session"');
   const binding = gameScript.slice(bindingStart, gameScript.indexOf('name == "tf3mp_hold_checkpoint"', bindingStart));

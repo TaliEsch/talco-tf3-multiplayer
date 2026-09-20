@@ -5,7 +5,7 @@ import fengari from 'fengari';
 import {roadStopCaptureFixture} from './fixtures/road-stop-capture.mjs';
 import {parseRoadStopCapture} from '../src/road-stop-capture.mjs';
 const {lua,lauxlib,lualib,to_luastring}=fengari;
-const source=await readFile(new URL('../experimental/native-road-stop-capture.lua',import.meta.url),'utf8');
+const source=await readFile(new URL('../mod/content/tf3mp_road_capture.lua',import.meta.url),'utf8');
 
 // Executes the actual Lua module. Mocks below represent declared field shapes,
 // not TF3 userdata, access permissions, enum bindings or native side effects.
@@ -15,7 +15,7 @@ function literal(value){
   if(typeof value==='number'||typeof value==='boolean')return String(value);
   return `{${Object.entries(value).map(([key,v])=>`[${Array.isArray(value)?Number(key)+1:literal(key)}]=${literal(v)}`).join(',')}}`;
 }
-function run(mutation='',fixture=roadStopCaptureFixture()){
+function run(mutation='',fixture=roadStopCaptureFixture(),resultExpression='return result.code,result.json or result.field'){
   const setup=`
 local adapter=(function() ${source} end)()
 local copied=${literal(fixture)}
@@ -53,7 +53,7 @@ for _,segments in ipairs({street.addedSegments,street.removedSegments}) do
 end
 ${mutation}
 local result=adapter.collect(proposal,enums)
-return result.code,result.json or result.field
+${resultExpression}
 `;
   const L=lauxlib.luaL_newstate();lualib.luaL_openlibs(L);
   try{
@@ -69,6 +69,14 @@ test('Lua capture round-trips all declared fixture fields through the real JS co
   const fixture=roadStopCaptureFixture(),result=run('',fixture);
   assert.equal(result.code,'captured',result.value);
   assert.deepEqual(parseRoadStopCapture(result.value),parseRoadStopCapture(JSON.stringify(fixture)));
+});
+
+test('Lua diagnostic hex encoding preserves bytes and bounds input',()=>{
+  const text='quote"\\ newline\n\u0000 é 🚎';
+  assert.deepEqual(run('',roadStopCaptureFixture(),`return "hex",adapter.toHex(${literal(text)})`),
+    {code:'hex',value:Buffer.from(text).toString('hex')});
+  for(const expression of ['nil','{}','""','string.rep("x",262145)'])
+    assert.deepEqual(run('',roadStopCaptureFixture(),`return "bounded",adapter.toHex(${expression}) == nil and "yes" or "no"`),{code:'bounded',value:'yes'});
 });
 
 test('Lua capture preserves JSON escaping and optional components as explicit null',()=>{

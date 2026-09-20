@@ -4,6 +4,16 @@ Revised 20 September 2026 following the user's scope and economy clarification.
 This is the current plan. Historical status is in completion-audit.md and
 archive/roadmap-before-scope-review.md; historical blockers do not override this plan.
 
+Next local proof (user clarification): record one normal action, reload its
+exact pre-action disposable checkpoint, then explicitly replay it once and
+compare ownership, resulting construction and actual charge. This avoids double
+application and does not require a pre-commit interception hook for the local
+experiment. Capture/reconstruction comes first; live host ordering and concurrent
+admission remain separate requirements, not prerequisites to this replay test.
+Revision 7 integrates bounded copied road-stop capture into the passive observer;
+native field access and reconstruction still require game evidence. There is no
+replay button or automatic construction in this build.
+
 Current priority (20 September, after the 12:24 UTC setup run): reuse normal
 native placement and capture its complete proposal/command. Stop extending the
 station coordinate picker or treating guessed placement as an acceptance task.
@@ -16,7 +26,8 @@ Verify this concrete lifecycle candidate in free play before a preview wrapper
 or native companion. No interception or multiplayer construction is implemented yet.
 The passive lifecycle observer is now implemented; follow
 [normal-placement observation](native-placement-observer-test.md) for its bounded
-free-play delivery check. It logs scalar evidence only and leaves native actions
+free-play delivery check. Revision 7 adds bounded copied proposal files to the
+scalar summary logs and leaves native actions
 unchanged. It does not require the Phase 2 setup helper or a custom placement UI.
 The first free-play observation recorded readiness but no native event samples.
 Revision 4 retains the restricted-context-safe observer and tests the GUI route

@@ -2,6 +2,27 @@
 
 ## Current status — 20 September 2026
 
+### Revision 7 — registered passive capture; replay experiment clarified
+
+Moved the fixture-qualified Lua extractor into the reviewed mod, with one copied
+JSON capture per stage and no retained event userdata. The regular protected GUI
+step publishes bounded hex envelopes independently of helper availability; errors
+stop only diagnostic publication. Native observation still returns no restriction
+and does not intercept, reconstruct or submit construction. Added byte-exact hex
+runtime coverage; the report reader accepts revision 7 and still supports 6.
+
+The next replay proof follows the user's record/reload/replay proposal: record
+one normal action, reload the exact starting save, replay once, compare actual
+ownership and spending. Pre-commit interception is not required for that bounded
+experiment. It remains distinct from live multiplayer admission and ordering.
+No native capture, replay or Phase 2 completion is claimed by this source batch.
+
+Verification: 656/656 automated checks passed; source review accepted 19 content
+files. TF3 was closed for staging. Source/stage hashes match manifest
+`b016d0c726e342d725909da3b1c4b207327944b73d746aaf1901b49248fcf50a`;
+the prior stage/cache was preserved in `tf3mp_backup_e11f55b9f7b4481ba80bed8914ac1705`.
+The game was not launched. Native revision-7 capture is awaiting manual evidence.
+
 ### Native extraction candidate — executable Lua fixture qualification
 
 Implemented `experimental/native-road-stop-capture.lua`, a passive fixed-field

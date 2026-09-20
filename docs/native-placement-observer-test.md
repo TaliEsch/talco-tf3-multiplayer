@@ -16,6 +16,19 @@ not a native placement or a construction command and does not count as one.
 
 ## One disposable-save run
 
+Current revision 7 retains the passed routing/facts check and adds one complete
+copied capture attempt for each stage, within the existing event limit. No extra
+helper or test UI is required. After preview, cancel, then one real placement,
+the agent checks `tf3mp_status_1/road_capture_create.lua` and
+`tf3mp_status_1/road_capture_apply.lua` under the game's local userdata directory
+using `node tools/check-road-stop-capture.mjs --userdata <file>`. Files from older
+loads are not proof of a new capture: correlate modification times and this
+run's `native_road_capture_saved` events. Fixed unsupported-field or IO-failure
+events are failures, not permission to replay. GUI reloads reset capture limits.
+
+The subsequent experiment will reload the identical pre-placement checkpoint
+before a single explicit replay. This build does not yet implement replay.
+
 Revision 6 adds a separate read-only field qualification for
 `streetTerminalBuilder` only. It records counts of added/removed street nodes and
 segments, edge objects, construction additions/removals and result entries, plus

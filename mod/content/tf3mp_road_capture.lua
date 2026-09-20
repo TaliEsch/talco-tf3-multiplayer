@@ -1,5 +1,5 @@
--- Passive, synchronous Proposal -> copied JSON experiment.  This file is not
--- registered by the mod and must never submit, clone, retain, or replay a proposal.
+-- Passive, synchronous Proposal -> copied JSON diagnostic. Never submit, clone,
+-- retain native objects, or replay a proposal. Only copied strings leave collect.
 -- Mat4f's public declaration documents column access through cols(matrix, 1..4).
 -- That accessor may be unavailable in a restricted GUI callback; pcall below turns
 -- that condition into the fixed `matrix` unsupported result, without retaining text.
@@ -158,6 +158,11 @@ function M.collect(proposal, enumTypes)
     return nil
   end)
   return { code = "unsupported", field = recognized and type(field) == "string" and field or "proposal" }
+end
+
+function M.toHex(json)
+  if type(json) ~= "string" or #json == 0 or #json > MAX_BYTES then return nil end
+  return (json:gsub(".", function(c) return string.format("%02x", string.byte(c)) end))
 end
 
 return M

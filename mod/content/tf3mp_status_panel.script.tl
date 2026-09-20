@@ -4,6 +4,10 @@ local engine_react_util = ug_require "::/gui/main/engine_react_util.tl" as Engin
 local game_bar_widgets = ug_require "::/gui/game_bar/game_bar_widgets.tl" as GameBarWidgets
 local game_react_globals = ug_require "::/gui/main/game_react_globals.tl" as GameReactGlobals
 local native_controls = ug_require "tf3mp_status_1::/tf3mp_native_controls.script.tl" as table
+local record Tf3MpCaptureEncoding
+  toHex : function(string) : string
+end
+local roadCapture = ug_require "tf3mp_status_1::/tf3mp_road_capture.lua" as Tf3MpCaptureEncoding
 
 local record Tf3MpPanelState
   tickCount : integer
@@ -31,7 +35,7 @@ local function checkPlacementRoute() : nil
   placementRouteAttempts = placementRouteAttempts + 1
   if placementRouteAttempts == 1 then
     pcall(function()
-      log.message("{\"event\":\"native_placement_observer_ready\",\"observerRevision\":6,\"limitPerStage\":8,\"passive\":true,\"gameplayVerified\":false}")
+      log.message("{\"event\":\"native_placement_observer_ready\",\"observerRevision\":7,\"limitPerStage\":8,\"passive\":true,\"gameplayVerified\":false}")
     end)
   end
   local ok, value = pcall(function() : any
@@ -40,7 +44,7 @@ local function checkPlacementRoute() : nil
   local delivered = false
   if ok and type(value) == "table" then
     local ack = value as table
-    delivered = ack.kind == "placement_observer_ack" and ack.observerRevision == 6 and ack.passive == true
+    delivered = ack.kind == "placement_observer_ack" and ack.observerRevision == 7 and ack.passive == true
   end
   -- Positive control: the established status read, not a gameplay request.
   -- Retry only these read-only diagnostics; never retry uncertain mutations.
@@ -54,7 +58,7 @@ local function checkPlacementRoute() : nil
   end
   placementRouteChecked = delivered or placementRouteAttempts >= 12
   pcall(function()
-    log.message("{\"event\":\"native_placement_observer_selftest\",\"observerRevision\":6,\"delivered\":" .. tostring(delivered)
+    log.message("{\"event\":\"native_placement_observer_selftest\",\"observerRevision\":7,\"delivered\":" .. tostring(delivered)
       .. ",\"attempt\":" .. tostring(placementRouteAttempts) .. ",\"final\":" .. tostring(placementRouteChecked)
       .. ",\"returnType\":\"" .. type(value) .. "\",\"controlDelivered\":" .. tostring(controlDelivered)
       .. ",\"callSucceeded\":" .. tostring(ok) .. ",\"synthetic\":true,\"passive\":true,\"gameplayVerified\":false}")
@@ -98,6 +102,51 @@ local pendingPauseDelivery : table = {}
 local pendingVehicleDelivery : table = {}
 
 -- USERDATA EXCHANGE BEGIN: only invoked by the protected regular onStep callback.
+local captureSteps : integer = 0
+local captureDisabled = false
+local captureReported : table = {}
+local function exchangeRoadCapture() : nil
+  if captureDisabled or (captureReported.create and captureReported.apply) then return nil end
+  captureSteps = captureSteps + 1
+  if captureSteps % 60 ~= 0 then return nil end
+  local response = api.gui.fireGuiScriptEvent("tf3mp_engine_bridge", "tf3mp_get_status", {})
+  if type(response) ~= "table" then return nil end
+  local current = response as table
+  for _, stage in ipairs({ "create", "apply" }) do
+    local value : any = current.roadCaptureCreate
+    if stage == "apply" then value = current.roadCaptureApply end
+    if not captureReported[stage] and type(value) == "table" then
+      -- Diagnostic writes are bounded and never retried after an uncertain IO result.
+      captureReported[stage] = true
+      local captured = value as table
+      if captured.code == "captured" and type(captured.json) == "string" and #captured.json > 0 and #captured.json <= 262144
+        and type(captured.sequence) == "number" and captured.sequence % 1 == 0 and captured.sequence >= 1 and captured.sequence <= 16 then
+        local hex = roadCapture.toHex(captured.json)
+        if type(hex) ~= "string" or #hex > 524288 then return nil end
+        app.saveUserdata("tf3mp_status_1", "road_capture_" .. stage, {
+          schemaVersion = 1, observerRevision = 7, kind = "native_road_stop_capture",
+          stage = stage, sequence = captured.sequence, captureHex = hex,
+        })
+        log.message("{\"event\":\"native_road_capture_saved\",\"stage\":\"" .. stage .. "\",\"observerRevision\":7,\"gameplayVerified\":false}")
+      else
+        local field = "callback"
+        if type(captured.field) == "string" and #captured.field <= 64 and captured.field:match("^[A-Za-z0-9]+$") then field = captured.field end
+        log.message("{\"event\":\"native_road_capture_unsupported\",\"stage\":\"" .. stage .. "\",\"field\":\"" .. field .. "\",\"observerRevision\":7,\"gameplayVerified\":false}")
+      end
+    end
+  end
+  return nil
+end
+local function flushRoadCapture() : nil
+  if captureDisabled then return nil end
+  local ok = pcall(exchangeRoadCapture)
+  if not ok then
+    captureDisabled = true
+    pcall(function() log.message("{\"event\":\"native_road_capture_io_failed\",\"observerRevision\":7,\"gameplayVerified\":false}") end)
+  end
+  return nil
+end
+
 -- Temporary GUI diagnostic only: this does not restrict construction or provide
 -- a multiplayer authority boundary. Never set GameSpeedPause (it can resume).
 local controlFlags : table = {}
@@ -1377,6 +1426,7 @@ local Tf3MpStatusPanel = react.RegisterPluginRecipe(game_bar_widgets.GameBarInfo
   -- TF3's own map editor uses getAllUserdata here. Never move this into makeState.
   react.onStep(function()
     checkPlacementRoute()
+    flushRoadCapture()
     if bridgeFailed then pcall(restoreSpeedControls); return end
     local checkpointOk = pcall(dispatchCheckpointAtUpdate)
     if not checkpointOk then
