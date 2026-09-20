@@ -11,13 +11,14 @@ application and does not require a pre-commit interception hook for the local
 experiment. Capture/reconstruction comes first; live host ordering and concurrent
 admission remain separate requirements, not prerequisites to this replay test.
 Revision 7 integrates bounded copied road-stop capture into the passive observer;
-native field access and reconstruction still require game evidence. There is no
-replay button or automatic construction in this build.
+native field access and reconstruction still require game evidence. The guided
+local replay workflow is implemented in Debug, with explicit confirmation only;
+see [the bounded procedure](road-stop-replay-test.md). It is not Phase 2 completion.
 
 The local replay adapter now composes baseline checking, model resolution,
 native command preparation, one-shot submission and observed stop ownership/debit.
 It is now registered behind the local company-test bridge, with a helper request
-method and correlated receipt polling. The launcher flow is still outstanding. Its limited
+method, correlated receipt polling and a guided launcher flow. Its limited
 success result deliberately does not claim native funds enforcement, complete
 road-state equivalence or a working second-company service. These remain Phase 2
 acceptance requirements. Reuse existing checks during integration; add tests only
@@ -33,6 +34,14 @@ company. Publication is exclusive: a consumed request remains on disk across
 helper shutdown. Do not remove it to retry an uncertain operation. The engine
 also preserves its saved consume latch. This is one-shot disposable-save proof,
 not yet general multiplayer construction or second-company service acceptance.
+
+Next implementation priority after this replay integration: connect the existing
+read-only vehicle service collector to a post-assignment observation phase. The
+current service setup stops while paused with `SETUP_VERIFIED_SERVICE_NOT_OBSERVED`;
+it cannot prove operation or finances. Read actual asset-level expenses/income,
+qualify their native semantics, and recheck ownership/route through the run before
+invoking the service verifier. Do not substitute company balance deltas or another
+coordinate-picker feature for this missing acceptance evidence.
 
 The offline replay artifact now also binds the stop model's resource name and
 numeric ID. This prevents a same-ID/different-resource match from passing the

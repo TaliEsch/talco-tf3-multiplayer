@@ -15,6 +15,8 @@ import { createLocalIntegrationBatch } from "./local-integration-batch.mjs";
 import { createBatchReportWriter } from "./batch-report.mjs";
 import { createLocalCoordinatorRun } from "./local-coordinator-run.mjs";
 import {createPhase2SetupSession} from './phase2-setup-session.mjs';
+import {beginRoadStopReplayRecording,finishRoadStopReplayRecording,loadRoadStopReplayRecordingCase} from './road-stop-replay-session.mjs';
+import {checkRoadStopReplayIdentity} from './road-stop-replay-case.mjs';
 
 function options(args) {
   const result = {};
@@ -28,6 +30,58 @@ let integrationBatch = null, batchStarting = false, observedGameHash = null;
 let coordinatorRun=null, coordinatorStarting=false, coordinatorTimer=null;
 let depotPreviewOwnsHelper=false;
 let phase2Setup=null,phase2Starting=false,phase2Timer=null,observedSaveHash=null;
+let roadReplayWorkflow=null,roadReplayBusy=false;
+const roadReplayRoot=nodePath.resolve(import.meta.dirname,'..','reports','road-stop-replay');
+async function currentReplayIdentity(){
+  if(!opt.save||!opt['bridge-dir'])throw new Error('REPLAY_CHECKPOINT_REQUIRED');
+  const [saveSha256,gameSha256,modManifestSha256,stagedHash]=await Promise.all([
+    sha256File(opt.save),readGameBuild(opt.exe??'E:\\Steam\\steamapps\\common\\Transport Fever 3\\TransportFever3.exe'),
+    hashManifest(nodePath.resolve(import.meta.dirname,'..','mod')),
+    hashManifest(nodePath.resolve(opt['bridge-dir'],'..','staging_area','tf3mp_status_1')),
+  ]);
+  if(saveSha256!==observedSaveHash||gameSha256!==observedGameHash||modManifestSha256!==opt['mod-hash']||stagedHash!==modManifestSha256)
+    throw new Error('REPLAY_IDENTITY_CHANGED');
+  return {saveSha256,gameSha256,modManifestSha256};
+}
+function replayLog(code,fields={}){rawLog({level:code==='FAILED_STOP_HELPER'?'warn':'info',event:'road_stop_replay_workflow',code,...fields,gameplayVerified:false});}
+async function handleRoadReplayLine(line){
+  const parts=line.trim().split(/\s+/),operation=parts[0];
+  if(roadReplayBusy||stopping||command!=='host'||!bridge||!hostInstance||hostInstance.authority.players().length!==0)
+    throw new Error('FRESH_SOLO_HOST_REQUIRED');
+  const start=operation==='road-replay-record'||operation==='road-replay-load';
+  if(start&&(vehicleTestActive||integrationBatch||batchStarting||coordinatorRun||coordinatorStarting||phase2Setup||phase2Starting||roadReplayWorkflow))
+    throw new Error('FRESH_SOLO_HOST_REQUIRED');
+  if((operation==='road-replay-record'&&parts.length!==1)||(operation!=='road-replay-record'&&(!/^[a-f0-9]{32}$/.test(parts[1]??''))))throw new Error('INVALID_REPLAY_COMMAND');
+  // Reserve this helper before any await; remote players cannot join mid-test.
+  vehicleTestActive=true;roadReplayBusy=true;
+  try{
+    const observation=bridge.engineObservation;
+    if(!bridge.connected||!observation.available||observation.sample.speedup!==0)throw new Error('PAUSED_GAME_REQUIRED');
+    const identity=await currentReplayIdentity();
+    if(stopping)throw new Error('STOPPED');
+    if(operation==='road-replay-record'){
+      const recordId=randomBytes(16).toString('hex');
+      await beginRoadStopReplayRecording({directory:nodePath.join(roadReplayRoot,recordId),bridgeDirectory:opt['bridge-dir'],checkpoint:identity,companyEntity:observation.sample.companyEntity});
+      roadReplayWorkflow={recordId,phase:'recording'};replayLog('RECORDING_STARTED',{recordId});
+    }else if(operation==='road-replay-capture'&&parts.length===2){
+      if(roadReplayWorkflow?.phase!=='recording'||roadReplayWorkflow.recordId!==parts[1])throw new Error('RECORDING_REQUIRED');
+      const artifact=await finishRoadStopReplayRecording({directory:nodePath.join(roadReplayRoot,parts[1]),bridgeDirectory:opt['bridge-dir']});
+      checkRoadStopReplayIdentity(artifact.source,identity);
+      roadReplayWorkflow={recordId:parts[1],phase:'captured'};replayLog('CAPTURE_SAVED',{recordId:parts[1],caseDigest:artifact.digest});
+    }else if(operation==='road-replay-load'&&parts.length===2){
+      const artifact=await loadRoadStopReplayRecordingCase(nodePath.join(roadReplayRoot,parts[1]));
+      checkRoadStopReplayIdentity(artifact.source,identity);
+      if(artifact.companyEntity!==observation.sample.companyEntity)throw new Error('COMPANY_MISMATCH');
+      roadReplayWorkflow={recordId:parts[1],phase:'ready',digest:artifact.digest,source:artifact.source};
+      replayLog('READY_TO_CONFIRM',{recordId:parts[1],caseDigest:artifact.digest});
+    }else if(operation==='road-replay-confirm'&&parts.length===3){
+      if(roadReplayWorkflow?.phase!=='ready'||roadReplayWorkflow.recordId!==parts[1]||roadReplayWorkflow.digest!==parts[2])throw new Error('CONFIRMATION_MISMATCH');
+      roadReplayWorkflow.phase='consumed';
+      await bridge.requestRoadStopReplay({source:roadReplayWorkflow.source,currentIdentity:identity,confirmedCheckpointReloaded:true});
+      replayLog('REPLAY_SUBMITTED',{recordId:parts[1]});
+    }else throw new Error('INVALID_REPLAY_COMMAND');
+  }finally{roadReplayBusy=false;}
+}
 const log = record => {
   if(record.event === "game_hash" && /^[a-f0-9]{64}$/.test(record.hash ?? "")) observedGameHash=record.hash;
   rawLog(record); integrationBatch?.onEvent(record);void phase2Setup?.onEvent(record);
@@ -57,6 +111,8 @@ process.on("SIGINT", stop);
 process.on("SIGTERM", stop);
 if (command === "host" || command === "join") createInterface({ input: process.stdin }).on("line", line => {
   if (line.trim() === "stop") stop();
+  else if(line.trim().startsWith('road-replay-'))void handleRoadReplayLine(line).catch(()=>replayLog('FAILED_STOP_HELPER'));
+  else if(roadReplayWorkflow||roadReplayBusy)replayLog('REPLAY_OWNS_HELPER_STOP_TO_EXIT');
   else if(line.trim()==='phase2-setup') {
     if(command!=='host'||!bridge||!hostInstance||vehicleTestActive||integrationBatch||batchStarting||coordinatorRun||coordinatorStarting||phase2Setup||phase2Starting||!observedSaveHash||hostInstance.authority.players().length!==0)
       rawLog({level:'warn',event:'phase2_setup',code:'FAILED_STOP_HELPER'});

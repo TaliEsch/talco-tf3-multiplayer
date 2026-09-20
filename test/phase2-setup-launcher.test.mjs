@@ -7,7 +7,7 @@ const debug=source.slice(source.indexOf('private void DebugClicked'),source.inde
 const helper=source.slice(source.indexOf('private void HelperLine'),source.indexOf('private void StopHelper'));
 
 test('Phase 2 setup is an explicitly-started, read-only location-selection flow',()=>{
-  assert.match(debug,/SmallButton\("Phase 2: service setup"/);
+  assert.match(debug,/SmallButton\("Legacy: coordinate setup"/);
   assert.match(debug,/WriteLine\("phase2-setup"\)/);
   assert.match(debug,/does not fund, build, buy, or create a line/);
   assert.match(debug,/paused, zero-balance test company/);
@@ -38,7 +38,7 @@ test('confirmation is single-use and stale setup hashes are reset without launch
   assert.match(debug,/verifies the original company is unchanged and stops if it detects a mismatch/);
   assert.match(source,/process\.Exited[\s\S]*?helper = null; ResetBatchUi\(\)/);
   assert.match(source,/private void StopHelper\(\)[\s\S]*?ResetBatchUi\(\)/);
-  const setupFlow=debug.slice(debug.indexOf('Phase 2: service setup'),debug.indexOf('// Legacy diagnostic confirmation'));
+  const setupFlow=debug.slice(debug.indexOf('Legacy: coordinate setup'),debug.indexOf('// Legacy diagnostic confirmation'));
   assert.doesNotMatch(setupFlow,/StartGameClicked|StartGameWithInstructions|Process\.Start\(new ProcessStartInfo/);
   assert.match(debug,/if \(guidedBatchOwnsHelper\) throw new InvalidOperationException\("The current guided diagnostic owns this helper\. Stop it before starting local sync\."\)/);
 });

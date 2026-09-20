@@ -22,8 +22,8 @@ using System.Windows.Markup;
 [assembly: AssemblyCompany("TF3 Multiplayer Prototype contributors")]
 [assembly: AssemblyProduct("TF3 Multiplayer Prototype")]
 [assembly: AssemblyCopyright("Copyright (c) 2026 TF3 Multiplayer Prototype contributors")]
-[assembly: AssemblyVersion("0.6.25.0")]
-[assembly: AssemblyFileVersion("0.6.25.0")]
+[assembly: AssemblyVersion("0.6.26.0")]
+[assembly: AssemblyFileVersion("0.6.26.0")]
 
 internal static class Program
 {
@@ -56,6 +56,10 @@ internal sealed class MainWindow : Window
     private Button batchStartButton;
     private Button phase2SetupButton;
     private Button phase2SetupConfirmButton;
+    private Button roadReplayRecordButton;
+    private Button roadReplayCaptureButton;
+    private Button roadReplayLoadButton;
+    private Button roadReplayConfirmButton;
     private Expander advancedDiagnostics;
     private bool batchControlsReady;
     private bool guidedBatchOwnsHelper;
@@ -64,6 +68,15 @@ internal sealed class MainWindow : Window
     private int pendingPhase2OriginalCompany;
     private int pendingPhase2TargetCompany;
     private int pendingPhase2FundingAmount;
+    private string roadReplayRecordId;
+    private string roadReplayCaseDigest;
+    private bool roadReplayWorkflowActive;
+    private bool roadReplayRequiresFreshHost;
+    private bool roadReplayFreshHostStarted;
+    private bool roadReplayReadyToConfirm;
+    private bool roadReplayResultReceived;
+    private bool roadReplayCapturePending;
+    private bool roadReplayLoadPending;
     private string secret;
     private string modHash;
     private string joiningSaveName;
@@ -321,7 +334,7 @@ internal sealed class MainWindow : Window
         });
         batchConfirmButton.IsEnabled = batchControlsReady;
         batchConfirmButton.ToolTip = "Available when the batch asks you to check speed inputs, native vehicle toggle and manager restrictions.";
-        phase2SetupButton = SmallButton("Phase 2: service setup", delegate {
+        phase2SetupButton = SmallButton("Legacy: coordinate setup", delegate {
             try {
                 if (helper == null || helper.HasExited) throw new InvalidOperationException("Start a fresh solo Host and load the paused disposable save with the existing test company first.");
                 if (guidedBatchOwnsHelper) throw new InvalidOperationException("The current guided diagnostic owns this helper. Stop it before starting disposable service setup.");
@@ -335,7 +348,7 @@ internal sealed class MainWindow : Window
                 SetStatus("Phase 2 setup • pause game, select depot + two stations + bus in Company tools, then submit");
             } catch (Exception ex) { SetStatus(ex.Message); }
         });
-        phase2SetupConfirmButton = SmallButton("Confirm disposable setup", delegate {
+        phase2SetupConfirmButton = SmallButton("Confirm legacy setup", delegate {
             try {
                 string planHash = pendingPhase2SetupHash;
                 if (helper == null || helper.HasExited) throw new InvalidOperationException("The helper is not running.");
@@ -353,8 +366,23 @@ internal sealed class MainWindow : Window
         phase2SetupConfirmButton.Visibility = Visibility.Collapsed;
         phase2SetupButton.IsEnabled = !guidedBatchOwnsHelper;
         if (!phase2SetupConfirmed && HasPendingPhase2SetupPlan()) { phase2SetupConfirmButton.Visibility = Visibility.Visible; phase2SetupConfirmButton.IsEnabled = true; }
-        primaryActions.Children.Add(phase2SetupButton);
-        primaryActions.Children.Add(phase2SetupConfirmButton);
+        actions.Children.Add(phase2SetupButton);
+        actions.Children.Add(phase2SetupConfirmButton);
+        StackPanel roadReplayContent = new StackPanel();
+        roadReplayContent.Children.Add(new TextBlock { Text = "Disposable-save replay: record a paused pre-action checkpoint, place one stop and wait a few seconds for frames to flush before capture, then manually reload the original checkpoint before replaying it in a fresh solo Host. This is limited verification, not Phase 2 completion.", Foreground = mutedBrush, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 4, 0, 8) });
+        WrapPanel roadReplayActions = new WrapPanel();
+        roadReplayRecordButton = SmallButton("Record checkpoint", RoadReplayRecordClicked);
+        roadReplayCaptureButton = SmallButton("Capture placed stop", RoadReplayCaptureClicked);
+        roadReplayCaptureButton.ToolTip = "After placing the stop, wait a few seconds for game frames to flush before capture.";
+        roadReplayLoadButton = SmallButton("Load replay case", RoadReplayLoadClicked);
+        roadReplayConfirmButton = SmallButton("Confirm replay", RoadReplayConfirmClicked);
+        roadReplayActions.Children.Add(roadReplayRecordButton);
+        roadReplayActions.Children.Add(roadReplayCaptureButton);
+        roadReplayActions.Children.Add(roadReplayLoadButton);
+        roadReplayActions.Children.Add(roadReplayConfirmButton);
+        roadReplayContent.Children.Add(roadReplayActions);
+        primaryActions.Children.Add(new Expander { Header = "Advanced — Road stop replay", IsExpanded = false, Content = roadReplayContent, Foreground = mutedBrush, Margin = new Thickness(0, 0, 9, 8) });
+        RefreshRoadReplayUi();
         // Legacy diagnostic confirmation is not part of the coordinated run.
         primaryActions.Children.Add(SmallButton("Open batch reports", delegate {
             string folder = Path.Combine(projectRoot, "reports");
@@ -495,6 +523,93 @@ internal sealed class MainWindow : Window
         logBox.Text = logHistory.ToString();
     }
 
+    private void RoadReplayRecordClicked(object sender, RoutedEventArgs e)
+    {
+        try {
+            RequireRoadReplayHelper("Start a fresh solo Host and load the selected disposable save, paused at the pre-action checkpoint, first.");
+            if (guidedBatchOwnsHelper || roadReplayWorkflowActive) throw new InvalidOperationException("Finish or stop the current guided workflow before recording a replay checkpoint.");
+            if (MessageBox.Show(this, "ROAD STOP REPLAY — DISPOSABLE SELECTED SAVE ONLY.\n\nThe selected save must already be loaded in TF3, paused before any stop placement or related action. This records a checkpoint only; it does not overwrite a save, place a stop, launch TF3, or prove Phase 2.\n\nDo not mix any other workflow into this helper session. Record this checkpoint?", "Record road replay checkpoint", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No) != MessageBoxResult.Yes) return;
+            roadReplayRecordId = null;
+            roadReplayCaseDigest = null;
+            roadReplayRequiresFreshHost = false;
+            roadReplayFreshHostStarted = false;
+            roadReplayReadyToConfirm = false;
+            roadReplayResultReceived = false;
+            roadReplayCapturePending = false;
+            roadReplayLoadPending = false;
+            roadReplayWorkflowActive = true;
+            guidedBatchOwnsHelper = true;
+            helper.StandardInput.WriteLine("road-replay-record"); helper.StandardInput.Flush();
+            RefreshRoadReplayUi();
+            if (advancedDiagnostics != null) { advancedDiagnostics.IsExpanded = false; advancedDiagnostics.IsEnabled = false; }
+            SetStatus("Recording paused disposable-save checkpoint • wait for the helper receipt");
+        } catch (Exception ex) { SetStatus(ex.Message); }
+    }
+
+    private void RoadReplayCaptureClicked(object sender, RoutedEventArgs e)
+    {
+        try {
+            RequireRoadReplayHelper("Keep the recording helper running and place the one intended road stop in the loaded disposable save first.");
+            if (!roadReplayWorkflowActive || roadReplayCapturePending || !IsRoadReplayRecordId(roadReplayRecordId) || IsRoadReplayCaseDigest(roadReplayCaseDigest)) throw new InvalidOperationException("No recorded replay checkpoint is waiting to capture one placed stop.");
+            roadReplayCapturePending = true;
+            helper.StandardInput.WriteLine("road-replay-capture " + roadReplayRecordId); helper.StandardInput.Flush();
+            RefreshRoadReplayUi();
+            SetStatus("Capturing the placed stop once • do not make further game changes");
+        } catch (Exception ex) { roadReplayCapturePending = false; RefreshRoadReplayUi(); SetStatus(ex.Message); }
+    }
+
+    private void RoadReplayLoadClicked(object sender, RoutedEventArgs e)
+    {
+        try {
+            RequireRoadReplayHelper("Stop the recording helper, manually reload the original checkpoint, then start a fresh solo Host before loading this replay case.");
+            if (!roadReplayWorkflowActive || roadReplayLoadPending || roadReplayReadyToConfirm || !roadReplayRequiresFreshHost || !roadReplayFreshHostStarted || !IsRoadReplayRecordId(roadReplayRecordId) || !IsRoadReplayCaseDigest(roadReplayCaseDigest)) throw new InvalidOperationException("Capture a replay case, stop the helper, manually reload the original checkpoint, and start a fresh solo Host first.");
+            if (MessageBox.Show(this, "Load the captured replay case only after you have manually reloaded the original checkpoint in TF3 and started this fresh solo Host. The game must be paused. This does not launch or reload TF3 for you. Load the case now?", "Load road replay case", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No) != MessageBoxResult.Yes) return;
+            roadReplayLoadPending = true;
+            roadReplayReadyToConfirm = false;
+            RefreshRoadReplayUi();
+            helper.StandardInput.WriteLine("road-replay-load " + roadReplayRecordId); helper.StandardInput.Flush();
+            SetStatus("Replay case loading in the fresh Host • leave the reloaded game paused");
+        } catch (Exception ex) { roadReplayLoadPending = false; RefreshRoadReplayUi(); SetStatus(ex.Message); }
+    }
+
+    private void RoadReplayConfirmClicked(object sender, RoutedEventArgs e)
+    {
+        try {
+            RequireRoadReplayHelper("The fresh Host helper is not running.");
+            if (!roadReplayWorkflowActive || !roadReplayFreshHostStarted || !roadReplayReadyToConfirm || !IsRoadReplayRecordId(roadReplayRecordId) || !IsRoadReplayCaseDigest(roadReplayCaseDigest)) throw new InvalidOperationException("Wait for a fresh READY_TO_CONFIRM replay event before confirming.");
+            if (MessageBox.Show(this, "CONFIRM ROAD REPLAY?\n\nThis can charge and build for the company captured in the replay case. Confirm that you manually reloaded the original disposable-save checkpoint, started a fresh solo Host, and left TF3 paused. There is no automatic retry, rollback, save overwrite, launch, or reload.\n\nThis is limited replay verification only — not Phase 2 completion. Proceed?", "Confirm road replay", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No) != MessageBoxResult.Yes) return;
+            roadReplayReadyToConfirm = false;
+            RefreshRoadReplayUi();
+            roadReplayLoadPending = true; // Do not offer Load again while execution is uncertain.
+            RefreshRoadReplayUi();
+            helper.StandardInput.WriteLine("road-replay-confirm " + roadReplayRecordId + " " + roadReplayCaseDigest); helper.StandardInput.Flush();
+            SetStatus("Road replay confirmed once • leave the fresh reloaded game paused • await the limited result");
+        } catch (Exception ex) { SetStatus(ex.Message); }
+    }
+
+    private void RequireRoadReplayHelper(string message)
+    {
+        if (helper == null || helper.HasExited) throw new InvalidOperationException(message);
+    }
+
+    private void RefreshRoadReplayUi()
+    {
+        bool helperRunning = helper != null && !helper.HasExited;
+        if (roadReplayRecordButton != null) roadReplayRecordButton.IsEnabled = helperRunning && !guidedBatchOwnsHelper && !roadReplayWorkflowActive;
+        if (roadReplayCaptureButton != null) roadReplayCaptureButton.IsEnabled = helperRunning && roadReplayWorkflowActive && !roadReplayResultReceived && !roadReplayCapturePending && IsRoadReplayRecordId(roadReplayRecordId) && !IsRoadReplayCaseDigest(roadReplayCaseDigest);
+        if (roadReplayLoadButton != null) roadReplayLoadButton.IsEnabled = helperRunning && roadReplayWorkflowActive && !roadReplayResultReceived && !roadReplayLoadPending && !roadReplayReadyToConfirm && roadReplayRequiresFreshHost && roadReplayFreshHostStarted && IsRoadReplayRecordId(roadReplayRecordId) && IsRoadReplayCaseDigest(roadReplayCaseDigest);
+        if (roadReplayConfirmButton != null) { roadReplayConfirmButton.IsEnabled = helperRunning && roadReplayReadyToConfirm; roadReplayConfirmButton.Visibility = roadReplayReadyToConfirm ? Visibility.Visible : Visibility.Collapsed; }
+    }
+
+    private void ClearRoadReplayConfirmation()
+    {
+        roadReplayReadyToConfirm = false;
+        RefreshRoadReplayUi();
+    }
+
+    private static bool IsRoadReplayRecordId(string value) { return value != null && Regex.IsMatch(value, "^[0-9a-fA-F]{32}$"); }
+    private static bool IsRoadReplayCaseDigest(string value) { return value != null && Regex.IsMatch(value, "^[0-9a-fA-F]{64}$"); }
+
     private Button SmallButton(string text, RoutedEventHandler action) { Button b = PrimaryButton(text, action, Color.FromRgb(49, 65, 88)); b.Height = 38; b.Margin = new Thickness(0, 0, 9, 8); return b; }
 
     private void StartGameClicked(object sender, RoutedEventArgs e)
@@ -526,7 +641,13 @@ internal sealed class MainWindow : Window
         process.ErrorDataReceived += delegate(object s, DataReceivedEventArgs a) { if (a.Data != null) HelperLine("ERROR: " + a.Data); };
         process.Exited += delegate { Dispatcher.BeginInvoke((Action)delegate { if (helper == process) { helper = null; ResetBatchUi(); SetStatus(sessionFailure ?? "Session ended"); } }); };
         if (!process.Start()) throw new InvalidOperationException("Node.js did not start.");
-        helper = process; process.BeginOutputReadLine(); process.BeginErrorReadLine(); AppendLog(label + " helper started.");
+        helper = process;
+        if (label == "Host" && roadReplayWorkflowActive && roadReplayRequiresFreshHost) {
+            roadReplayFreshHostStarted = true;
+            guidedBatchOwnsHelper = true;
+        }
+        RefreshRoadReplayUi();
+        process.BeginOutputReadLine(); process.BeginErrorReadLine(); AppendLog(label + " helper started.");
     }
 
     private void HelperLine(string line)
@@ -538,6 +659,61 @@ internal sealed class MainWindow : Window
             string eventName = message.TryGetValue("event", out value) ? value as string : "";
             string kind = message.TryGetValue("kind", out value) ? value as string : "";
             string code = message.TryGetValue("code", out value) ? value as string : "";
+            string outcome = message.TryGetValue("outcome", out value) ? value as string : "";
+            if (eventName == "road_stop_replay_workflow") {
+                string recordId = message.TryGetValue("recordId", out value) ? value as string : null;
+                string caseDigest = message.TryGetValue("caseDigest", out value) ? value as string : null;
+                if (code == "RECORDING_STARTED") {
+                    if (IsRoadReplayRecordId(recordId)) {
+                        roadReplayRecordId = recordId.ToLowerInvariant();
+                        roadReplayCaseDigest = null;
+                        roadReplayWorkflowActive = true;
+                        roadReplayRequiresFreshHost = false;
+                        roadReplayFreshHostStarted = false;
+                        roadReplayResultReceived = false;
+                        roadReplayCapturePending = false;
+                        roadReplayLoadPending = false;
+                        guidedBatchOwnsHelper = true;
+                        ClearRoadReplayConfirmation();
+                        SetStatus("Road replay checkpoint recorded • place one stop, wait a few seconds for frames to flush, then Capture placed stop");
+                    } else SetStatus("Road replay recording returned an invalid receipt • stop helper and inspect Debug");
+                } else if (code == "CAPTURE_SAVED") {
+                    if (IsRoadReplayRecordId(recordId) && IsRoadReplayCaseDigest(caseDigest) && String.Equals(recordId, roadReplayRecordId, StringComparison.OrdinalIgnoreCase)) {
+                        roadReplayCaseDigest = caseDigest.ToLowerInvariant();
+                        roadReplayCapturePending = false;
+                        roadReplayRequiresFreshHost = true;
+                        roadReplayFreshHostStarted = false;
+                        ClearRoadReplayConfirmation();
+                        SetStatus("Replay case captured • Stop helper, manually reload the original checkpoint, then start a fresh solo Host and Load replay case");
+                    } else SetStatus("Road replay capture returned an invalid or mismatched receipt • stop helper and inspect Debug");
+                } else if (code == "READY_TO_CONFIRM") {
+                    if (roadReplayWorkflowActive && roadReplayFreshHostStarted && IsRoadReplayRecordId(recordId) && IsRoadReplayCaseDigest(caseDigest) &&
+                        String.Equals(recordId, roadReplayRecordId, StringComparison.OrdinalIgnoreCase) && String.Equals(caseDigest, roadReplayCaseDigest, StringComparison.OrdinalIgnoreCase)) {
+                        roadReplayReadyToConfirm = true;
+                        roadReplayLoadPending = false;
+                        RefreshRoadReplayUi();
+                        SetStatus("Road replay ready • confirm only if the original checkpoint was manually reloaded in this fresh paused Host");
+                    } else SetStatus("Road replay READY receipt is stale or invalid • do not confirm; inspect Debug");
+                } else if (code == "FAILED_STOP_HELPER") {
+                    roadReplayCapturePending = false;
+                    roadReplayLoadPending = false;
+                    roadReplayResultReceived = true;
+                    ClearRoadReplayConfirmation();
+                    SetStatus("Road replay stopped • inspect the game and helper log; do not retry uncertain effects");
+                } else SetStatus("Road replay • " + code);
+                return;
+            }
+            if (eventName == "road_stop_replay_result") {
+                roadReplayResultReceived = true;
+                ClearRoadReplayConfirmation();
+                roadReplayCapturePending = false;
+                roadReplayLoadPending = false;
+                if (String.Equals(outcome, "verified", StringComparison.OrdinalIgnoreCase) && String.Equals(code, "ROAD_STOP_OWNER_AND_DEBIT_OBSERVED", StringComparison.Ordinal)) SetStatus("Road replay verified only within its limited scope • game remains paused • not Phase 2 completion");
+                else if (String.Equals(outcome, "unknown", StringComparison.OrdinalIgnoreCase)) SetStatus("Road replay result unknown • inspect the game and helper log • do not retry uncertain effects");
+                else SetStatus("Road replay result: " + code + " • not Phase 2 completion");
+                RefreshRoadReplayUi();
+                return;
+            }
             if (eventName == "phase2_setup") {
                 string planHash = message.TryGetValue("planHash", out value) ? value as string : null;
                 if (code == "PLAN_READY") {
@@ -549,7 +725,7 @@ internal sealed class MainWindow : Window
                         TryPhase2SetupCompanies(originalCompany, targetCompany, fundingAmount, out pendingPhase2OriginalCompany, out pendingPhase2TargetCompany, out pendingPhase2FundingAmount)) {
                         pendingPhase2SetupHash = planHash.ToLowerInvariant();
                         if (phase2SetupConfirmButton != null) { phase2SetupConfirmButton.Visibility = Visibility.Visible; phase2SetupConfirmButton.IsEnabled = true; }
-                        SetStatus("Phase 2 plan ready for target company " + pendingPhase2TargetCompany + " • review locations, then Confirm disposable setup");
+                        SetStatus("Legacy coordinate plan ready for target company " + pendingPhase2TargetCompany + " • review locations, then Confirm legacy setup");
                     } else SetStatus("Phase 2 setup sent an invalid or stale plan • select locations and submit again");
                 } else if (code == "SELECT_LOCATIONS") {
                     ClearPendingPhase2SetupPlan();
@@ -660,8 +836,9 @@ internal sealed class MainWindow : Window
 
     private void StopHelper()
     {
+        Process process = helper; helper = null;
         ResetBatchUi();
-        Process process = helper; helper = null; if (process == null) return;
+        if (process == null) return;
         hostReady = null;
         try { if (!process.HasExited) { process.StandardInput.WriteLine("stop"); if (!process.WaitForExit(2000)) process.Kill(); } } catch { }
     }
@@ -673,6 +850,12 @@ internal sealed class MainWindow : Window
         if (batchConfirmButton != null) batchConfirmButton.IsEnabled = false;
         if (batchStartButton != null) batchStartButton.IsEnabled = true;
         ResetPhase2SetupUi();
+        roadReplayReadyToConfirm = false;
+        roadReplayCapturePending = false;
+        roadReplayLoadPending = false;
+        roadReplayFreshHostStarted = false;
+        if (roadReplayResultReceived || !roadReplayRequiresFreshHost) roadReplayWorkflowActive = false;
+        RefreshRoadReplayUi();
         if (advancedDiagnostics != null) advancedDiagnostics.IsEnabled = true;
     }
 

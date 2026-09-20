@@ -2,6 +2,32 @@
 
 ## Current status — 20 September 2026
 
+### Guided normal-stop replay workflow built and staged
+
+Launcher 0.6.26.0 exposes Record checkpoint, Capture placed stop, Load replay case
+and explicit Confirm replay. Records survive helper restart in the same launcher
+window; confirmations do not. The CLI blocks remote admission before asynchronous
+work, requires a fresh solo host for record/load, checks current save/executable/
+source/staged-mod hashes, and consumes confirmation before publishing the request.
+The original save is never overwritten or loaded automatically. Old coordinate
+setup controls are labelled legacy and kept in advanced diagnostics.
+
+Root verified offline recording with no previous capture, capture/load round trip,
+and no-overwrite failures using synthetic data. Existing full suite passed 705/705;
+the legacy setup label assertions were updated without dropping safety checks.
+The launcher compiled successfully (no interactive UI/game verification).
+Canonical executable SHA-256:
+`77fa8c6253e6a457bcdd02efdc70930339e27441b9f27524278e8ac39aa0f8b3`.
+The 25-file mod was staged with source/copy verification while TF3 was closed:
+`17dd029934d71eec3fe93b1b1e886b303f161bf626c1c8afb3ca405da5599306`.
+Prior mod/cache backup: `tf3mp_backup_ff0327dda0814e818fb3569f7390bd7c`.
+
+This provides a bounded replay test, not full Phase 2 acceptance. Independent
+review confirmed that current setup stops after line assignment; the existing
+experimental service collector still needs integration and native financial
+semantics qualification. Two owned operating services and isolated expenses and
+revenue remain unverified. See road-stop-replay-test.md for the limited procedure.
+
 ### Replay modules registered and helper request/receipt path connected
 
 Moved the six experimental modules into the mod's reviewed content set (25 files)
