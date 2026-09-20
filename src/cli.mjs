@@ -134,6 +134,15 @@ if (command === "host" || command === "join") createInterface({ input: process.s
     if(!phase2Setup||!/^[a-f0-9]{64}$/.test(hash))rawLog({level:'warn',event:'phase2_setup',code:'CONFIRMATION_REQUIRED'});
     else phase2Setup.confirm(hash).catch(()=>rawLog({level:'warn',event:'phase2_setup',code:'CONFIRMATION_REJECTED_CHECK_STATUS'}));
   }
+  else if(['service-observation-start','service-observation-end'].includes(line.trim())) {
+    // Read-only continuation of this helper's verified local setup, not a new
+    // asset selector or permission to run the old coordinate setup again.
+    if(command!=='host'||!bridge||!hostInstance||hostInstance.authority.players().length!==0
+      ||!vehicleTestActive||phase2Setup?.status.phase!=='complete'||stopping)
+      rawLog({level:'warn',event:'phase2_service_observation_result',outcome:'unavailable',code:'VERIFIED_SERVICE_SETUP_REQUIRED',gameplayVerified:false});
+    else bridge.requestServiceObservation(line.trim().endsWith('-start')?'start':'end')
+      .catch(()=>rawLog({level:'warn',event:'phase2_service_observation_result',outcome:'unavailable',code:'PAUSED_SERVICE_OBSERVATION_REQUIRED',gameplayVerified:false}));
+  }
   else if(phase2Setup||phase2Starting)rawLog({level:'warn',event:'phase2_setup',code:'SETUP_OWNS_HELPER_STOP_TO_EXIT'});
   else if(depotPreviewOwnsHelper) rawLog({level:'warn',event:'depot_preview',code:'STOP_HELPER_TO_EXIT_PREVIEW'});
   else if(line.trim()==='station-template-probe') {

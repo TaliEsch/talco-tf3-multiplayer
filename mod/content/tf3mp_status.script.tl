@@ -37,6 +37,9 @@ local record Tf3MpState
   nativeStationReceipt : table
   phase2StationReceipt : table
   phase2ServiceReceipt : table
+  nativeServiceObservation : table
+  nativeServiceObservationReceipt : table
+  phase2ServiceObservationReceipt : table
   nativeServiceLineAttempted : boolean
   nativeServiceAssignmentAttempted : boolean
   nativeServiceReceipt : table
@@ -80,6 +83,12 @@ local record Tf3MpServiceCommand
   execute : function(GameScriptState<Tf3MpState>, table, table, table): table
 end
 local serviceCommand = ug_require "tf3mp_status_1::/tf3mp_service_command.lua" as Tf3MpServiceCommand
+local record Tf3MpServiceObservation
+  handle : function(GameScriptState<Tf3MpState>, table): table
+end
+-- Read-only evidence capture for the already-verified disposable service.
+-- It owns its saved start/end snapshot and never issues a native command.
+local serviceObservation = ug_require "tf3mp_status_1::/tf3mp_service_observation.lua" as Tf3MpServiceObservation
 
 -- This adapter only evaluates the documented template path; it has no command
 -- capability and returns a compact observation for the bridge.
@@ -1024,16 +1033,19 @@ local ret : GameScriptWithGui<Tf3MpState, Tf3MpGuiState> = {
       current = { schemaVersion = 1, tickCount = 0, updateCount = 0, lastDiagnosticUpdate = -1,
         probeNonce = "", probeRequestId = 0, probeTickCount = 0, probeUpdateCount = 0,
         eventSubscriptionsVersion = 0, probeScheduledUpdate = 0, probeOutcome = "applied",
-        probePending = false, probePreviousUpdate = 0, vehicleReceipt = {}, vehicleInbox = {}, companyTestAttempted = false, companyReceipt = {}, financeTestAttempted = false, financeReceipt = {}, phase2FundingAttempted = false, phase2FundingReceipt = {}, phase2CompanyFault = false, nativeDepotAttempted = false, nativeDepotReceipt = {}, phase2DepotReceipt = {}, nativeVehicleAttempted = false, nativeVehicleReceipt = {}, phase2VehicleReceipt = {}, nativeStationSlot1Attempted = false, nativeStationSlot2Attempted = false, nativeStationSlot1Receipt = {}, nativeStationSlot2Receipt = {}, nativeStationReceipt = {}, phase2StationReceipt = {}, phase2ServiceReceipt = {}, nativeServiceLineAttempted = false, nativeServiceAssignmentAttempted = false, nativeServiceReceipt = {}, pauseTestAttempted = false, scheduledPauseTestAttempted = false, pauseReceipt = {}, snapshotReceipt = {}, haltTestAttempted = false, haltReceipt = {}, stationTemplateAttempted = false, stationTemplateReceipt = {} }
+        probePending = false, probePreviousUpdate = 0, vehicleReceipt = {}, vehicleInbox = {}, companyTestAttempted = false, companyReceipt = {}, financeTestAttempted = false, financeReceipt = {}, phase2FundingAttempted = false, phase2FundingReceipt = {}, phase2CompanyFault = false, nativeDepotAttempted = false, nativeDepotReceipt = {}, phase2DepotReceipt = {}, nativeVehicleAttempted = false, nativeVehicleReceipt = {}, phase2VehicleReceipt = {}, nativeStationSlot1Attempted = false, nativeStationSlot2Attempted = false, nativeStationSlot1Receipt = {}, nativeStationSlot2Receipt = {}, nativeStationReceipt = {}, phase2StationReceipt = {}, phase2ServiceReceipt = {}, nativeServiceObservation = {}, nativeServiceObservationReceipt = {}, phase2ServiceObservationReceipt = {}, nativeServiceLineAttempted = false, nativeServiceAssignmentAttempted = false, nativeServiceReceipt = {}, pauseTestAttempted = false, scheduledPauseTestAttempted = false, pauseReceipt = {}, snapshotReceipt = {}, haltTestAttempted = false, haltReceipt = {}, stationTemplateAttempted = false, stationTemplateReceipt = {} }
     end
     -- Preserve consumed replay state across loads; migrate only absent fields.
     if current.nativeRoadReplayAttempted == nil then current.nativeRoadReplayAttempted = false end
     if current.nativeRoadReplayReceipt == nil then current.nativeRoadReplayReceipt = {} end
     if current.roadReplayWireReceipt == nil then current.roadReplayWireReceipt = {} end
+    if current.nativeServiceObservation == nil then current.nativeServiceObservation = {} end
+    if current.nativeServiceObservationReceipt == nil then current.nativeServiceObservationReceipt = {} end
+    if current.phase2ServiceObservationReceipt == nil then current.phase2ServiceObservationReceipt = {} end
     -- GUI events use the script's event subscriptions too. Existing saves may
     -- already have the engine-only subscription, so hasEventSubscriptions alone
     -- is not sufficient when adding the receipt/status events.
-    if not state:hasEventSubscriptions() or current.eventSubscriptionsVersion ~= 18 then
+    if not state:hasEventSubscriptions() or current.eventSubscriptionsVersion ~= 19 then
       state:subscribeToEvent("tf3mp_native_road_stop_replay")
       state:subscribeToEvent("tf3mp_get_native_road_stop_replay")
       state:subscribeToEvent("tf3mp_placement_observer_selftest")
@@ -1047,6 +1059,8 @@ local ret : GameScriptWithGui<Tf3MpState, Tf3MpGuiState> = {
       state:subscribeToEvent("tf3mp_get_phase2_station")
       state:subscribeToEvent("tf3mp_phase2_service")
       state:subscribeToEvent("tf3mp_get_phase2_service")
+      state:subscribeToEvent("tf3mp_phase2_service_observation")
+      state:subscribeToEvent("tf3mp_get_phase2_service_observation")
       state:subscribeToEvent("tf3mp_phase2_funding")
       state:subscribeToEvent("tf3mp_get_phase2_funding")
       state:subscribeToEvent("tf3mp_arm_execution_hold")
@@ -1082,7 +1096,7 @@ local ret : GameScriptWithGui<Tf3MpState, Tf3MpGuiState> = {
       state:subscribeToEvent("tf3mp_get_pause_receipt")
       state:subscribeToEvent("tf3mp_station_template_probe")
       state:subscribeToEvent("tf3mp_get_station_template")
-      current.eventSubscriptionsVersion = 18
+      current.eventSubscriptionsVersion = 19
     end
     current.tickCount = clock.tickCount
     current.updateCount = clock.updateCount
@@ -1597,6 +1611,25 @@ local ret : GameScriptWithGui<Tf3MpState, Tf3MpGuiState> = {
       end
       return nil
     end
+    if src == "tf3mp_status_1::/tf3mp_status.gs" and id == "tf3mp_engine_bridge" and name == "tf3mp_phase2_service_observation" and type(param) == "table" then
+      local current = state:get()
+      if current ~= nil and current.schemaVersion ~= nil then
+        -- The adapter validates a closed scalar request schema and only reads
+        -- native state. Preserve its receipt even for rejected observations.
+        local request = param as table
+        local previous = current.phase2ServiceObservationReceipt or {}
+        -- The command can be delivered more than once. Never recapture a
+        -- start/end observation for a consumed nonce/request pair.
+        if previous.nonce == request.nonce and previous.requestId == request.requestId then return nil end
+        local ok, receipt = pcall(function() : table return serviceObservation.handle(state, request) end)
+        if ok and type(receipt) == "table" then
+          local saved = state:get() or current
+          saved.phase2ServiceObservationReceipt = receipt as table
+          state:set(saved)
+        end
+      end
+      return nil
+    end
     if src == "tf3mp_status_1::/tf3mp_status.gs" and id == "tf3mp_engine_bridge" and name == "tf3mp_station_template_probe" and type(param) == "table" then
       local current = state:get()
       if current ~= nil and current.schemaVersion ~= nil then
@@ -1806,6 +1839,11 @@ local ret : GameScriptWithGui<Tf3MpState, Tf3MpGuiState> = {
     if id == "tf3mp_engine_bridge" and name == "tf3mp_get_phase2_service" then
       local current = state:get()
       if current ~= nil then return current.phase2ServiceReceipt end
+      return nil
+    end
+    if id == "tf3mp_engine_bridge" and name == "tf3mp_get_phase2_service_observation" then
+      local current = state:get()
+      if current ~= nil then return current.phase2ServiceObservationReceipt end
       return nil
     end
     if id == "tf3mp_engine_bridge" and name == "tf3mp_get_phase2_funding" then

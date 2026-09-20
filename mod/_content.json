@@ -16,6 +16,7 @@
     "tf3mp_road_replay_rebuild.lua",
     "tf3mp_road_replay_result.lua",
     "tf3mp_service_command.lua",
+    "tf3mp_service_observation.lua",
     "tf3mp_station_command.lua",
     "tf3mp_station_probe.lua",
     "tf3mp_status.gs.lua",

@@ -4,6 +4,7 @@ import {mkdtemp,readFile,writeFile,rm} from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import {startGameBridge} from '../src/game-bridge.mjs';
+import {parseFlatDataFile} from '../src/userdata-ipc.mjs';
 const lua=value=>`function data() return {${Object.entries(value).map(([k,v])=>`${k}=${JSON.stringify(v)},`).join('')}} end`;
 async function until(fn){for(let i=0;i<500;i++){if(await fn())return;await new Promise(r=>setTimeout(r,5));}assert.fail('mailbox timeout');}
 const depot={resource:'base::/construction/road/road_depot/road_depot.con',seed:1,x:1,y:2,z:3,yaw:0};
@@ -84,6 +85,37 @@ for(const mode of ['verified','unknown_station','balance_changed','update_change
       assert.equal(result.gameplayVerified,false);
       await assert.rejects(bridge.requestPhase2Service(service),/VERIFIED_SERVICE_ASSETS/);
       await assert.rejects(readFile(path.join(directory,'phase2_service_request.lua')),{code:'ENOENT'});
+      if(mode==='verified'){
+        assert.equal(bridge.serviceObservationState.phase,'ready');
+        await bridge.requestServiceObservation('start');
+        const start=parseFlatDataFile(await readFile(path.join(directory,'phase2_service_observation_request.lua'),'utf8'));
+        const raw={startGameTime:100,startUpdateCount:80,endGameTime:0,endUpdateCount:0,accountNetWindowStart:0,
+          accountNetWindowEnd:100,accountNet:-50,intervalNet:0,intervalMaintenanceVehicle:0,
+          intervalMaintenanceInfrastructure:0,intervalMaintenanceOther:0,intervalMaintenanceVehicleMaintenance:0,
+          startVisitedMask:0,endVisitedMask:0,startStopIndex:0,endStopIndex:0};
+        await writeFile(path.join(directory,'phase2_service_observation_receipt.lua'),lua({...start,
+          kind:'phase2_service_observation_receipt',outcome:'raw_start_captured',code:'RAW_START_CAPTURED',
+          tickCount:101,updateCount:80,gameTime:100,...raw}));
+        await until(()=>bridge.serviceObservationState.phase==='observing');
+        await assert.rejects(bridge.requestServiceObservation('start'));
+        await assert.rejects(bridge.requestServiceObservation('end'),/SIMULATION_DID_NOT_ADVANCE/);
+        await writeFile(path.join(directory,'engine_observation.lua'),lua({...sample,counter:2,tickCount:110,updateCount:85,speedup:1}));
+        await until(()=>bridge.engineObservation.sample?.speedup===1);
+        await assert.rejects(bridge.requestServiceObservation('end'),/VERIFIED_PAUSED_SERVICE/);
+        await writeFile(path.join(directory,'engine_observation.lua'),lua({...sample,counter:3,tickCount:120,updateCount:90}));
+        await until(()=>bridge.engineObservation.sample?.updateCount===90);
+        await bridge.requestServiceObservation('end');
+        const end=parseFlatDataFile(await readFile(path.join(directory,'phase2_service_observation_request.lua'),'utf8'));
+        await writeFile(path.join(directory,'phase2_service_observation_receipt.lua'),lua({...end,
+          kind:'phase2_service_observation_receipt',outcome:'raw_end_captured',code:'RAW_END_CAPTURED',
+          tickCount:121,updateCount:90,gameTime:200,...raw,endGameTime:200,endUpdateCount:90,accountNetWindowEnd:200,
+          intervalNet:500,intervalMaintenanceVehicle:-100,endVisitedMask:3,endStopIndex:1}));
+        await until(()=>bridge.serviceObservationState.phase==='finished');
+        const evidence=events.filter(e=>e.event==='phase2_service_observation_result');
+        assert.equal(evidence.length,2);assert.equal(evidence[1].intervalMaintenanceVehicle,-100);
+        assert.equal(evidence[1].serviceAccountingVerified,false);assert.equal(evidence[1].nonce,undefined);
+        await assert.rejects(bridge.requestServiceObservation('end'));
+      }else await assert.rejects(bridge.requestServiceObservation('start'));
     }finally{await bridge.close();await rm(root,{recursive:true,force:true});}
   });
 }

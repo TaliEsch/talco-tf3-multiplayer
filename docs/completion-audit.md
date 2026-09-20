@@ -2,6 +2,35 @@
 
 ## Current status — 20 September 2026
 
+### Read-only post-assignment service observation implemented
+
+The registered collector and protected GUI exchange now return correlated raw
+start/end observations for a service already verified by the native setup adapter.
+They recheck the saved assignment, all owned assets, route stations, paused clock
+and original company. Endpoints retain exact vehicle-account net and four signed
+maintenance-category reads. They do not infer income, complete trips or a Phase 2
+pass. The helper accepts only its own successful setup's IDs, consumes each endpoint
+before publication, and refuses lost context, repeated endpoints and unpaused reads.
+The local CLI continuation is `service-observation-start` / `service-observation-end`
+after completed setup; it is not a new station-placement workflow or a request for
+the user to repeat the legacy coordinate test.
+
+Root executed the actual Lua collector in an offline interpreter with public-API
+fixtures, including start/end, duplicates, malformed requests, nonce, ownership,
+route and pause failures, then parsed its signed receipt with the actual helper
+parser. This caught and fixed a Lua syntax error and unsigned-parser integration
+error before staging. The existing service mailbox check now also traverses both
+observation endpoints and running/paused transitions with real files. No new test
+files were added to the suite. Native runtime, continuous service operation and
+financial-category semantics remain unverified; no game was launched.
+
+Final existing full suite passed 705/705, including the updated observation source
+checks and real-file continuation assertions. The 26-file mod was staged while
+TF3 was closed, with matching source/copy manifest:
+`86f89689e204e19437220ec09a408067bc1c35559f7d163601fe544ec028a33e`.
+Previous mod/cache backup: `tf3mp_backup_008e3cad33954de5b630812df488d29d`.
+Launcher remains 0.6.26.0; no launcher source change or rebuild in this batch.
+
 ### Guided normal-stop replay workflow built and staged
 
 Launcher 0.6.26.0 exposes Record checkpoint, Capture placed stop, Load replay case

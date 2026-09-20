@@ -35,13 +35,20 @@ helper shutdown. Do not remove it to retry an uncertain operation. The engine
 also preserves its saved consume latch. This is one-shot disposable-save proof,
 not yet general multiplayer construction or second-company service acceptance.
 
-Next implementation priority after this replay integration: connect the existing
-read-only vehicle service collector to a post-assignment observation phase. The
-current service setup stops while paused with `SETUP_VERIFIED_SERVICE_NOT_OBSERVED`;
-it cannot prove operation or finances. Read actual asset-level expenses/income,
-qualify their native semantics, and recheck ownership/route through the run before
-invoking the service verifier. Do not substitute company balance deltas or another
-coordinate-picker feature for this missing acceptance evidence.
+The read-only vehicle service collector is now registered behind the local bridge.
+After verified setup, explicit start/end observations bind to that service's saved
+receipt, require paused endpoints, and permit simulation between them. They copy
+the vehicle account's exact-window net and four raw maintenance-filter values,
+with ownership, route and helper-session rechecks. The helper exposes this as a
+post-assignment continuation; no new launcher controls or manual test are requested
+yet. Setup still ends with `SETUP_VERIFIED_SERVICE_NOT_OBSERVED`, and raw collection
+does not change that acceptance status.
+
+Next: integrate these observations into the eventual guided acceptance report,
+qualify native accounting filter semantics and observed service operation, and
+finish the normal-placement route to target-company assets. Do not substitute
+company balance deltas, historical visit flags or another coordinate-picker
+feature for this missing acceptance evidence.
 
 The offline replay artifact now also binds the stop model's resource name and
 numeric ID. This prevents a same-ID/different-resource match from passing the

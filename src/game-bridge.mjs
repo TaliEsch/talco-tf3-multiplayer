@@ -11,6 +11,7 @@ import { depotRequest, parseDepotReceipt, serializeDepotRequest } from "./phase2
 import { vehicleRequest, parseVehicleReceipt, serializeVehicleRequest } from "./phase2-vehicle.mjs";
 import { stationRequest, parseStationReceipt, serializeStationRequest } from "./phase2-station.mjs";
 import { serviceRequest, parseServiceReceipt, serializeServiceRequest } from "./phase2-service.mjs";
+import {serviceObservationRequest,serializeServiceObservationRequest,parseServiceObservationReceipt} from './service-observation.mjs';
 import {parsePhase2SetupPlan,serializePhase2SetupConfig} from './phase2-setup.mjs';
 import {stationTemplateRequest,parseStationTemplateReceipt} from './station-template-probe.mjs';
 import { createPauseProbe } from "./pause-probe.mjs";
@@ -82,6 +83,7 @@ async function publish(directory, name, fields) {
     : name === 'phase2_vehicle_request.lua' ? serializeVehicleRequest(fields)
     : name === 'phase2_station_request.lua' ? serializeStationRequest(fields)
     : name === 'phase2_service_request.lua' ? serializeServiceRequest(fields)
+    : name === 'phase2_service_observation_request.lua' ? serializeServiceObservationRequest(fields)
     : name === 'phase2_setup.lua' ? serializePhase2SetupConfig(fields) : null;
   const body = source ?? Object.entries(fields).map(([key, value]) => {
     if (!/^[a-zA-Z]+$/.test(key) || !(Number.isSafeInteger(value) && value >= 0 || typeof value === "string" && /^[a-z0-9_]{1,64}$/.test(value))) throw new TypeError("invalid local bridge field");
@@ -126,6 +128,7 @@ export async function startGameBridge({ directory, logger = () => {}, intervalMs
   let phase2Vehicle = null;
   let phase2DepotContext = null;
   let phase2Station = null, phase2Service = null, phase2ConstructionContext = null;
+  let serviceBinding=null, serviceObservation=null, serviceObservationPhase='unavailable', serviceObservationStart=null;
   let stationProbe = null;
   let roadReplay = null, roadReplayResult = null;
   // Only a verified funding receipt can advance this helper to construction.
@@ -309,11 +312,42 @@ export async function startGameBridge({ directory, logger = () => {}, intervalMs
       if(receipt?.outcome==='verified'&&(!phase2HeldContext(phase2Service.context)||receipt.updateCount!==phase2Service.context.updateCount))
         receipt={...receipt,outcome:'unknown',code:'CONTINUATION_STATE_CHANGED'};
       if(expired||receipt){
+        if(receipt?.outcome==='verified'){
+          serviceBinding=Object.freeze({originalCompany:receipt.companyEntity,targetCompany:receipt.targetCompany,
+            vehicleEntity:receipt.vehicleEntity,lineEntity:receipt.lineEntity,updateCount:receipt.updateCount});
+          serviceObservationPhase='ready';
+        }
         phase2Service=null;
         await unlink(path.join(directory,'phase2_service_request.lua')).catch(()=>{});
         const {nonce:_nonce,...evidence}=receipt??{};
         logger({level:receipt?.outcome==='verified'?'info':'warn',...evidence,event:'phase2_service_result',
           code:receipt?.code??'OUTCOME_UNKNOWN_DO_NOT_RETRY',outcome:receipt?.outcome??'unknown',gameplayVerified:false});
+      }
+    }
+    // Observation permits simulation between two explicit paused endpoints,
+    // never between request publication and its correlated engine readback.
+    if(serviceObservationPhase==='observing'&&(!connected||!observations.status.available
+      ||observations.status.sample.companyEntity!==serviceBinding?.originalCompany
+      ||observations.status.sample.updateCount<serviceObservationStart.updateCount)){
+      serviceObservationPhase='failed';
+      logger({level:'warn',event:'phase2_service_observation_result',code:'OBSERVATION_CONTINUITY_LOST',outcome:'unavailable',gameplayVerified:false});
+    }
+    if(serviceObservation){
+      const active=serviceObservation;
+      let receipt=null;
+      const expired=Date.now()>=active.deadline||!connected||!observations.status.available||!phase2HeldContext(active.context);
+      if(!expired)try{receipt=parseServiceObservationReceipt(await readBounded(directory,'phase2_service_observation_receipt.lua'),active.request);}catch{}
+      if(receipt&&receipt.outcome!=='rejected'&&(receipt.updateCount!==active.context.updateCount
+        ||(active.request.action==='end'&&(receipt.startGameTime!==serviceObservationStart?.gameTime
+          ||receipt.startUpdateCount!==serviceObservationStart?.updateCount))))receipt=null;
+      if(expired||receipt){
+        serviceObservation=null;
+        serviceObservationPhase=receipt?.outcome==='raw_start_captured'?'observing':receipt?.outcome==='raw_end_captured'?'finished':'failed';
+        if(receipt?.outcome==='raw_start_captured')serviceObservationStart=receipt;
+        await unlink(path.join(directory,'phase2_service_observation_request.lua')).catch(()=>{});
+        const {nonce:_nonce,...evidence}=receipt??{};
+        logger({level:receipt&&receipt.outcome!=='rejected'?'info':'warn',...evidence,event:'phase2_service_observation_result',
+          outcome:receipt?.outcome??'unavailable',code:receipt?.code??'OBSERVATION_UNAVAILABLE',gameplayVerified:false,serviceAccountingVerified:false});
       }
     }
     if (phase2Funding) {
@@ -778,6 +812,28 @@ export async function startGameBridge({ directory, logger = () => {}, intervalMs
       });
       pending=operation.catch(()=>{});return operation;
     },
+    get serviceObservationState(){return Object.freeze({phase:serviceObservationPhase,binding:serviceBinding});},
+    requestServiceObservation(action){
+      const operation=pending.then(async()=>{
+        if(stopped||!connected||!observations.status.available||serviceObservation
+          ||!serviceBinding||!['start','end'].includes(action)
+          ||serviceObservationPhase!==(action==='start'?'ready':'observing')
+          ||phase2Station||phase2Service||phase2Vehicle||phase2Depot||phase2Funding||roadReplay
+          ||companyProbe||companyInspection||haltTest||pauseTest||probe||vehicleTest||selectionId)
+          throw new Error('VERIFIED_SERVICE_OBSERVATION_REQUIRED');
+        const sample=observations.status.sample;
+        if(action==='start'&&sample.updateCount!==serviceBinding.updateCount)throw new Error('SERVICE_START_CONTEXT_CHANGED');
+        if(action==='end'&&sample.updateCount<=serviceObservationStart.updateCount)throw new Error('SIMULATION_DID_NOT_ADVANCE');
+        const request=serviceObservationRequest({nonce,requestId:requestSequence+1,action,sample,binding:serviceBinding});
+        // Consume the endpoint before awaiting publication. This is not a native
+        // mutation, but replacing an uncertain baseline would invalidate evidence.
+        serviceObservationPhase='pending';requestSequence++;
+        serviceObservation={request,context:{originalCompany:sample.companyEntity,updateCount:sample.updateCount},deadline:Date.now()+companyTimeoutMs};
+        await publish(directory,'phase2_service_observation_request.lua',request);
+        logger({level:'info',event:'phase2_service_observation_started',action,gameplayVerified:false});
+      });
+      pending=operation.catch(()=>{});return operation;
+    },
     requestPhase2Funding({targetCompany,amount,confirmed}={}) {
       const operation=pending.then(async()=>{
         if(stopped||!connected||!observations.status.available)throw new Error('OBSERVATION_REQUIRED');
@@ -892,6 +948,9 @@ export async function startGameBridge({ directory, logger = () => {}, intervalMs
         if(active)logger({level:'warn',event:`phase2_${name}_result`,outcome:'unknown',code:'OUTCOME_UNKNOWN_DO_NOT_RETRY',gameplayVerified:false});
       }
       phase2Station=null;phase2Service=null;phase2ConstructionContext=null;
+      await unlink(path.join(directory,'phase2_service_observation_request.lua')).catch(()=>{});
+      if(serviceObservation||serviceObservationPhase==='observing')logger({level:'warn',event:'phase2_service_observation_result',outcome:'unavailable',code:'OBSERVATION_CLOSED',gameplayVerified:false});
+      serviceObservation=null;serviceBinding=null;serviceObservationPhase='closed';
       if (companyProbe) logger({ level: "warn", event: companyProbe.finance ? "finance_test_result" : "company_test_result", code: "OUTCOME_UNKNOWN_DO_NOT_RETRY" });
       if (vehicleTest) await vehicleTest.close();
       for (const name of ["vehicle_intent.lua", "vehicle_command.lua", "vehicle_receipt.lua"]) await unlink(path.join(directory, name)).catch(() => {});

@@ -30,7 +30,7 @@ test('protected GUI consumes before station dispatch and only saves a bounded co
 });
 
 test('station receipt uses a separate wire record and migration subscribes to its event', () => {
-  for (const marker of ['phase2StationReceipt : table', 'current.eventSubscriptionsVersion ~= 18',
+  for (const marker of ['phase2StationReceipt : table', 'current.eventSubscriptionsVersion ~= 19',
     'state:subscribeToEvent("tf3mp_phase2_station")', 'tf3mp_get_phase2_station']) assert.ok(engine.includes(marker), marker);
   assert.match(engine, /kind="phase2_station_receipt"/);
 });

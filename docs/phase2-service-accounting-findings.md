@@ -2,8 +2,10 @@
 
 Audited 20 September 2026 against the locally installed Transport Fever 3
 public Teal declarations and first-party GUI archive. This is static interface
-evidence only; the experimental collector remains unregistered and has not
-been qualified in a disposable save.
+evidence only. The collector is now registered as
+`mod/content/tf3mp_service_observation.lua`, but has not been qualified in a
+disposable save. The earlier experimental source is historical, not the shipped
+implementation.
 
 ## Exact attributed interval reads; split remains unproven
 
@@ -43,6 +45,22 @@ difference is revenue. Ownership, line assignment, two-stop route, and exact
 game-time advancement remain rechecked at both endpoints.
 
 ## Remaining qualification
+
+The registered collector reads all four declared maintenance categories
+(`VEHICLE`, `INFRASTRUCTURE`, `OTHER`, `VEHICLE_MAINTENANCE`) in addition to the
+maintenance/income net, retaining signed integer results without deriving income.
+First-party `game_mechanics/finance/finances_util.tl` labels income as revenue and
+the two vehicle categories separately. That classification alone does not prove
+whether `calculateBalance` keeps income while filtering maintenance entries. A
+possible exhaustive-category subtraction is therefore a hypothesis, not a passed
+accounting check. Account-chart bucket deltas are also not a replacement: public
+declarations do not establish bucket anchoring or rollover semantics.
+
+Both endpoints require a paused engine and the exact saved, successful service
+assignment. The original company, target company, vehicle, line, depot and stations
+are rechecked. The same helper nonce binds the endpoints. Visited-stop masks are
+raw history, not proof of a trip during this interval or continuous ownership.
+The helper never turns these raw receipts into `serviceAccountingVerified:true`.
 
 Static source does not substitute for a real game run. A disposable-save
 observation must first establish filter semantics: with an interval containing

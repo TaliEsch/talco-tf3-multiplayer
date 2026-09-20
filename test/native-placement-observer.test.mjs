@@ -11,7 +11,7 @@ const panelUrl = new URL("../mod/content/tf3mp_status_panel.script.tl", import.m
 test("native placement observer rev7 uses protected bounded inspection, capture and a scalar acknowledgement", async () => {
   const [source, panel] = await Promise.all([readFile(statusUrl, "utf8"), readFile(panelUrl, "utf8")]);
   for (const marker of [
-    'current.eventSubscriptionsVersion ~= 18',
+    'current.eventSubscriptionsVersion ~= 19',
     'state:subscribeToEvent("builder.proposalCreate")',
     'state:subscribeToEvent("builder.proposalApply")',
     'if count >= 8 then return nil end',

@@ -20,6 +20,7 @@ const EXPECTED_CONTENT = Object.freeze([
   "tf3mp_road_replay_rebuild.lua",
   "tf3mp_road_replay_result.lua",
   "tf3mp_service_command.lua",
+  "tf3mp_service_observation.lua",
   "tf3mp_station_command.lua",
   "tf3mp_station_probe.lua",
   "tf3mp_status.gs.lua",
@@ -62,6 +63,11 @@ export async function validateReviewPackage(root) {
   const forbidden = files.filter((file) => FORBIDDEN_EXTENSIONS.has(path.extname(file).toLowerCase()));
   if (forbidden.length) throw new Error(`forbidden bundled file: ${forbidden[0]}`);
   const gameScript = await readFile(path.join(absoluteRoot, "content", "tf3mp_status.script.tl"), "utf8");
+  const serviceObservationSource=await readFile(path.join(absoluteRoot,'content','tf3mp_service_observation.lua'),'utf8');
+  if(createHash('sha256').update(serviceObservationSource.replace(/\r\n/g,'\n')).digest('hex')!=='5c16102a5fc3f943d1bcbbe0a914b2852560f669ca2a59c8c2545f0f7a5c270f')
+    throw new Error('service observation differs from reviewed read-only source');
+  for(const event of ['tf3mp_phase2_service_observation','tf3mp_get_phase2_service_observation'])
+    if(!gameScript.includes(`state:subscribeToEvent("${event}")`))throw new Error('missing service observation subscription');
   const factsSource = await readFile(path.join(absoluteRoot, 'content', 'tf3mp_proposal_facts.lua'), 'utf8');
   const captureSource = await readFile(path.join(absoluteRoot, 'content', 'tf3mp_road_capture.lua'), 'utf8');
   if (createHash('sha256').update(captureSource.replace(/\r\n/g, '\n')).digest('hex') !== 'e7f7faf92e1374e96ac774f420dca93c509e22d60fec6001f80659dbd20df6d5') {
@@ -139,7 +145,7 @@ export async function validateReviewPackage(root) {
   for (const event of ["tf3mp_engine_probe", "tf3mp_get_engine_receipt", "tf3mp_get_status", "tf3mp_vehicle_command", "tf3mp_get_vehicle_receipt", "tf3mp_company_probe", "tf3mp_get_company_receipt", "tf3mp_finance_probe", "tf3mp_get_finance_receipt"]) {
     if (!gameScript.includes(`state:subscribeToEvent("${event}")`)) throw new Error(`missing script event subscription: ${event}`);
   }
-  if (!gameScript.includes("current.eventSubscriptionsVersion ~= 18")) throw new Error("missing event subscription migration");
+  if (!gameScript.includes("current.eventSubscriptionsVersion ~= 19")) throw new Error("missing event subscription migration");
   for (const event of ['tf3mp_native_road_stop_replay', 'tf3mp_get_native_road_stop_replay']) {
     if (!gameScript.includes(`state:subscribeToEvent("${event}")`)) throw new Error('missing road replay subscription');
   }

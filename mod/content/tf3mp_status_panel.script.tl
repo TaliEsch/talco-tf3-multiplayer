@@ -81,6 +81,8 @@ local phase2StationSent : integer = 0
 local phase2StationReported : integer = 0
 local phase2ServiceSent : integer = 0
 local phase2ServiceReported : integer = 0
+local phase2ServiceObservationSent : integer = 0
+local phase2ServiceObservationReported : integer = 0
 local stationProbeSent : integer = 0
 local stationProbeReported : integer = 0
 local companyProbeReported : integer = 0
@@ -1114,6 +1116,111 @@ local function exchangePhase2Service() : nil
   app.saveUserdata("tf3mp_status_1","phase2_service_receipt",result); phase2ServiceReported=phase2ServiceSent; return nil
 end
 
+-- A read-only start/end capture for the verified disposable service. Keep this
+-- in the regular GUI exchange: userdata is unavailable to restricted timers.
+-- Every accepted receipt is copied field-by-field so no nested engine userdata
+-- can reach the launcher bridge.
+local function exchangePhase2ServiceObservation() : nil
+  if not userdataExists("phase2_service_observation_request") then return nil end
+  -- Defense in depth: this exchange is called only from company_test below,
+  -- but it must remain unavailable if a future caller bypasses that branch.
+  if not userdataExists("bridge") then return nil end
+  local bridge = app.loadUserdata("tf3mp_status_1", "bridge")
+  if bridge.schemaVersion ~= 1 or bridge.mode ~= "company_test" or bridge.nonce ~= bridgeNonce then return nil end
+  local request = app.loadUserdata("tf3mp_status_1", "phase2_service_observation_request")
+  if request.schemaVersion ~= 1 or request.kind ~= "phase2_service_observation" or request.nonce ~= bridgeNonce
+    or (request.action ~= "start" and request.action ~= "end") then return nil end
+  local allowed : table = { schemaVersion=true, kind=true, nonce=true, requestId=true, action=true, originalCompany=true,
+    targetCompany=true, vehicleEntity=true, lineEntity=true, issuedTick=true, expiresTick=true }
+  local count : integer = 0
+  for key, _ in pairs(request) do if allowed[key] ~= true then return nil end; count = count + 1 end
+  if count ~= 11 then return nil end
+  if type(request.nonce) ~= "string" or #request.nonce ~= 32 or not string.match(request.nonce as string, "^[0-9a-f]+$") then return nil end
+  for _, key in ipairs({ "requestId", "originalCompany", "targetCompany", "vehicleEntity", "lineEntity", "issuedTick", "expiresTick" }) do
+    local value = request[key]
+    if type(value) ~= "number" or value ~= value or value < 0 or value > 2147483647 or value % 1 ~= 0 then return nil end
+  end
+  if request.requestId < 1 or request.originalCompany < 1 or request.targetCompany < 1 or request.originalCompany == request.targetCompany
+    or request.vehicleEntity < 1 or request.lineEntity < 1 or request.expiresTick < request.issuedTick or request.expiresTick - request.issuedTick > 300 then return nil end
+  if request.requestId > phase2ServiceObservationSent then
+    -- Consume before the send. An uncertain command is never automatically retried.
+    phase2ServiceObservationSent = request.requestId as integer
+    api.cmd.sendCommand(api.cmd.makeScriptingSendEventCmd("tf3mp_status_1::/tf3mp_status.gs", "tf3mp_engine_bridge", "tf3mp_phase2_service_observation", request))
+  end
+  if phase2ServiceObservationReported == phase2ServiceObservationSent then return nil end
+  local value = api.gui.fireGuiScriptEvent("tf3mp_engine_bridge", "tf3mp_get_phase2_service_observation", {})
+  if type(value) ~= "table" then return nil end
+  local receipt = value as table
+  -- GUI event return values may be a flat receipt or an event-result map.
+  -- Unwrap at most one bounded matching receipt; never export that envelope.
+  if receipt.kind ~= "phase2_service_observation_receipt" then
+    local checked : integer = 0
+    for _, candidate in pairs(receipt) do
+      checked = checked + 1
+      if checked > 64 then break end
+      if type(candidate) == "table" then
+        local item = candidate as table
+        if item.kind == "phase2_service_observation_receipt" and item.nonce == bridgeNonce
+          and item.requestId == phase2ServiceObservationSent and item.action == request.action then receipt = item; break end
+      end
+    end
+  end
+  if receipt.schemaVersion ~= 1 or receipt.kind ~= "phase2_service_observation_receipt" or receipt.nonce ~= bridgeNonce
+    or receipt.requestId ~= phase2ServiceObservationSent or receipt.action ~= request.action
+    or receipt.originalCompany ~= request.originalCompany or receipt.targetCompany ~= request.targetCompany
+    or receipt.vehicleEntity ~= request.vehicleEntity or receipt.lineEntity ~= request.lineEntity
+    or receipt.issuedTick ~= request.issuedTick or receipt.expiresTick ~= request.expiresTick then return nil end
+  local receiptAllowed : table = { schemaVersion=true, kind=true, nonce=true, requestId=true, action=true, outcome=true, code=true,
+    originalCompany=true, targetCompany=true, vehicleEntity=true, lineEntity=true, issuedTick=true, expiresTick=true, tickCount=true,
+    updateCount=true, gameTime=true, startGameTime=true, startUpdateCount=true, endGameTime=true, endUpdateCount=true,
+    accountNetWindowStart=true, accountNetWindowEnd=true, accountNet=true, intervalNet=true, intervalMaintenanceVehicle=true,
+    intervalMaintenanceInfrastructure=true, intervalMaintenanceOther=true, intervalMaintenanceVehicleMaintenance=true,
+    startVisitedMask=true, endVisitedMask=true, startStopIndex=true, endStopIndex=true }
+  local receiptCount : integer = 0
+  for key, _ in pairs(receipt) do if receiptAllowed[key] ~= true then return nil end; receiptCount = receiptCount + 1 end
+  local outcomes : table = { raw_start_captured=true, raw_end_captured=true, rejected=true }
+  local codes : table = { RAW_START_CAPTURED=true, RAW_END_CAPTURED=true, INVALID_REQUEST=true, HELD_ENGINE_REQUIRED=true,
+    CLOCK_UNAVAILABLE=true, REQUEST_OUTSIDE_WINDOW=true, ORIGINAL_COMPANY_CHANGED=true, COMPANY_MISSING=true,
+    COMPANY_PHASE2_FAULT=true, SERVICE_RECEIPT_UNVERIFIED=true, SERVICE_RECEIPT_CHANGED=true, BOUND_ENTITY_MISSING=true,
+    TARGET_OWNERSHIP_CHANGED=true, VEHICLE_LINE_CHANGED=true, TWO_STOP_LINE_REQUIRED=true, INVALID_LINE_STOP=true,
+    INVALID_VISIT_HISTORY=true, INVALID_VISITED_STOP=true, STATE_UNAVAILABLE=true, STATE_PERSIST_FAILED=true,
+    ACCOUNT_BALANCE_UNAVAILABLE=true, OBSERVATION_ALREADY_STARTED=true,
+    OBSERVATION_NOT_STARTED=true, OBSERVATION_ALREADY_FINISHED=true, OBSERVATION_BINDING_CHANGED=true,
+    SIMULATION_DID_NOT_ADVANCE=true, OBSERVED_ROUTE_CHANGED=true, INTERVAL_BALANCE_UNAVAILABLE=true,
+    OBSERVATION_UNAVAILABLE=true }
+  if receiptCount ~= 32 or type(receipt.outcome) ~= "string" or outcomes[receipt.outcome] ~= true
+    or type(receipt.code) ~= "string" or #receipt.code < 1 or #receipt.code > 64
+    or not string.match(receipt.code as string, "^[A-Z_]+$") or codes[receipt.code] ~= true then return nil end
+  if (receipt.outcome == "raw_start_captured" and receipt.code ~= "RAW_START_CAPTURED")
+    or (receipt.outcome == "raw_end_captured" and receipt.code ~= "RAW_END_CAPTURED")
+    or (receipt.outcome == "rejected" and (receipt.code == "RAW_START_CAPTURED" or receipt.code == "RAW_END_CAPTURED")) then return nil end
+  local result : table = { schemaVersion=1, kind="phase2_service_observation_receipt", nonce=bridgeNonce,
+    requestId=phase2ServiceObservationSent, action=request.action, outcome=receipt.outcome, code=receipt.code }
+  for _, key in ipairs({ "originalCompany", "targetCompany", "vehicleEntity", "lineEntity", "issuedTick", "expiresTick", "tickCount", "updateCount", "startUpdateCount", "endUpdateCount" }) do
+    local item = receipt[key]
+    if type(item) ~= "number" or item ~= item or item < 0 or item > 2147483647 or item % 1 ~= 0 then return nil end
+    result[key] = item
+  end
+  for _, key in ipairs({ "startVisitedMask", "endVisitedMask" }) do
+    local item = receipt[key]
+    if type(item) ~= "number" or item ~= item or item < 0 or item > 3 or item % 1 ~= 0 then return nil end
+    result[key] = item
+  end
+  for _, key in ipairs({ "startStopIndex", "endStopIndex" }) do
+    local item = receipt[key]
+    if type(item) ~= "number" or item ~= item or (item ~= 0 and item ~= 1) then return nil end
+    result[key] = item
+  end
+  for _, key in ipairs({ "gameTime", "startGameTime", "endGameTime", "accountNetWindowStart", "accountNetWindowEnd", "accountNet", "intervalNet", "intervalMaintenanceVehicle", "intervalMaintenanceInfrastructure", "intervalMaintenanceOther", "intervalMaintenanceVehicleMaintenance" }) do
+    local item = receipt[key]
+    if type(item) ~= "number" or item ~= item or item == math.huge or item == -math.huge or math.abs(item) > 9007199254740991 or item % 1 ~= 0 then return nil end
+    result[key] = item
+  end
+  app.saveUserdata("tf3mp_status_1", "phase2_service_observation_receipt", result)
+  phase2ServiceObservationReported = phase2ServiceObservationSent
+  return nil
+end
+
 local function exchangePhase2Funding() : nil
   if not userdataExists("phase2_funding_request") then return nil end
   local request = app.loadUserdata("tf3mp_status_1", "phase2_funding_request")
@@ -1396,6 +1503,8 @@ local function exchangeTelemetry(tickCount : integer, updateCount : integer) : s
     phase2StationReported = 0
     phase2ServiceSent = 0
     phase2ServiceReported = 0
+    phase2ServiceObservationSent = 0
+    phase2ServiceObservationReported = 0
     stationProbeSent = 0
     stationProbeReported = 0
     companyProbeReported = 0
@@ -1497,6 +1606,8 @@ local function exchangeTelemetry(tickCount : integer, updateCount : integer) : s
     if not stationOk then return "station outcome unknown / do not retry" end
     local serviceOk = pcall(exchangePhase2Service)
     if not serviceOk then return "service outcome unknown / do not retry" end
+    local serviceObservationOk = pcall(exchangePhase2ServiceObservation)
+    if not serviceObservationOk then return "service observation unavailable / do not retry" end
     local fundingOk = pcall(exchangePhase2Funding)
     if not fundingOk then return "funding outcome unknown / do not retry" end
     local ok = pcall(exchangeCompanyProbe)
