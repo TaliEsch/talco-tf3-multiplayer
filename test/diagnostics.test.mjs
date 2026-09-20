@@ -2,6 +2,25 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { diagnosticLogger } from "../src/diagnostics.mjs";
 
+test("replay workflow retains bounded launcher artifact identities without secrets", () => {
+  const records=[];
+  const log=diagnosticLogger({write:text=>records.push(JSON.parse(text))});
+  const recordId="b".repeat(32),caseDigest="c".repeat(64);
+  for(const code of ['RECORDING_STARTED','CAPTURE_SAVED','READY_TO_CONFIRM']) {
+    log({event:'road_stop_replay_workflow',code,recordId,caseDigest,nonce:'secret',source:'private'});
+    assert.equal(records.at(-1).recordId,recordId);
+    assert.equal(records.at(-1).caseDigest,caseDigest);
+    assert.equal(records.at(-1).nonce,undefined);
+    assert.equal(records.at(-1).source,undefined);
+  }
+  log({event:'other',recordId,caseDigest});
+  assert.equal(records.at(-1).recordId,undefined);
+  assert.equal(records.at(-1).caseDigest,undefined);
+  log({event:'road_stop_replay_workflow',recordId:'../private',caseDigest:'secret'});
+  assert.equal(records.at(-1).recordId,undefined);
+  assert.equal(records.at(-1).caseDigest,undefined);
+});
+
 test("station template diagnostic receipts retain approved scalar fields and redact raw evidence", () => {
   let output = "";
   const nonce = "a".repeat(32);

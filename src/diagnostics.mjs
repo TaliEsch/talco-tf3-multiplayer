@@ -2,6 +2,12 @@ export function diagnosticLogger(stream = process.stdout) {
   return (record) => {
     const allowed = new Set(["level", "event", "kind", "code", "hash", "supported", "modId", "revision", "contentFiles", "manifestSha256", "executableFiles", "readyForControlledLoadReview", "bytes", "sha256", "port", "sessionId", "playerId", "hostSequence", "scheduledUpdate", "counter", "tickCount", "updateCount", "status"]);
     const safe = { timestamp: new Date().toISOString() };
+    // Local artifact identities are part of the launcher protocol, not secrets.
+    // Keep them scoped and bounded instead of allowing arbitrary diagnostic data.
+    if (record.event === "road_stop_replay_workflow") {
+      if (typeof record.recordId === "string" && /^[a-f0-9]{32}$/.test(record.recordId)) safe.recordId = record.recordId;
+      if (typeof record.caseDigest === "string" && /^[a-f0-9]{64}$/.test(record.caseDigest)) safe.caseDigest = record.caseDigest;
+    }
     allowed.add("validation");
     allowed.add("recommended");
     allowed.add("gameplayVerified");

@@ -2,6 +2,18 @@
 
 ## Current status — 20 September 2026
 
+### Replay launcher receipt repair
+
+The 20:00 live recording reached `RECORDING_STARTED`, but the diagnostic logger
+removed `recordId` (and would also remove `caseDigest` at subsequent stages).
+The launcher consequently rejected the otherwise successful response. The helper
+now preserves only correctly shaped artifact IDs on the replay workflow event;
+secrets and arbitrary payloads remain redacted. A focused regression checks all
+three launcher handshake stages and malformed/unrelated fields. Full suite:
+706/706 passed outside the child-process-restricted sandbox. This is helper-only:
+restart the helper, not TF3; no mod restaging or launcher rebuild is required.
+Native capture/replay and Phase 2 acceptance remain unverified.
+
 ### Service evidence persisted; company-control API boundary identified
 
 Read-only service receipts now extend the same setup report, with a bounded,
