@@ -1,0 +1,29 @@
+logs/
+*.log
+.env
+session-secret.txt
+node_modules/
+
+# Local builds, diagnostic captures, and packaged distributions.
+dist/
+reports/
+**/bin/
+**/obj/
+*.exe
+*.dll
+*.pdb
+*.zip
+*.dmp
+*.sav
+*.save
+*.sav.lua
+
+# Credentials and machine/session-specific state must never be committed.
+.env.*
+!.env.example
+*.pem
+*.key
+*.pfx
+*.p12
+.DS_Store
+Thumbs.db

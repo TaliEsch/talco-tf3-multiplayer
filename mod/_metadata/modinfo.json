@@ -1,0 +1,15 @@
+{
+  "authors": [
+    {
+      "name": "TF3 Multiplayer Prototype contributors",
+      "role": "CREATOR"
+    }
+  ],
+  "description": "Experimental multiplayer research mod, not working multiplayer. Quiet clock and bridge diagnostics by default. Launcher Debug can explicitly enable a single-host vehicle stop/start experiment that changes the loaded save. Use a disposable save. Remote gameplay synchronization and native-action interception are not implemented.",
+  "name": "TalCo Transport Fever 3 MP mod",
+  "summary": "Bridge diagnostics and an opt-in local vehicle experiment; not working multiplayer.",
+  "tags": [
+    "Script Mod"
+  ],
+  "url": ""
+}

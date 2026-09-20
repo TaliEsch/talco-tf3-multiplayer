@@ -1,0 +1,4 @@
+# Stable source bytes across Windows and Linux checkouts.
+* text=auto eol=lf
+*.png binary
+*.ico binary

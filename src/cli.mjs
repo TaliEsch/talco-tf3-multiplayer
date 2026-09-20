@@ -1,0 +1,275 @@
+import { randomBytes, randomUUID } from "node:crypto";
+import { once } from "node:events";
+import { createInterface } from "node:readline";
+import { startGameBridge } from "./game-bridge.mjs";
+import { startHost } from "./host.mjs";
+import { connectClient } from "./client.mjs";
+import { readGameBuild, describeBuild, sha256File } from "./compatibility.mjs";
+import { diagnosticLogger } from "./diagnostics.mjs";
+import { hashManifest } from "./manifest.mjs";
+import { validateReviewPackage } from "./review-validator.mjs";
+import { processProbeOnce } from "./userdata-ipc.mjs";
+import { downloadSave, startSaveServer } from "./save-transfer.mjs";
+import nodePath from "node:path";
+import { createLocalIntegrationBatch } from "./local-integration-batch.mjs";
+import { createBatchReportWriter } from "./batch-report.mjs";
+import { createLocalCoordinatorRun } from "./local-coordinator-run.mjs";
+import {createPhase2SetupSession} from './phase2-setup-session.mjs';
+
+function options(args) {
+  const result = {};
+  for (let i = 0; i < args.length; i++) if (args[i].startsWith("--")) result[args[i].slice(2)] = args[++i] ?? true;
+  return result;
+}
+const [command, ...rest] = process.argv.slice(2);
+const opt = options(rest);
+const rawLog = diagnosticLogger();
+let integrationBatch = null, batchStarting = false, observedGameHash = null;
+let coordinatorRun=null, coordinatorStarting=false, coordinatorTimer=null;
+let depotPreviewOwnsHelper=false;
+let phase2Setup=null,phase2Starting=false,phase2Timer=null,observedSaveHash=null;
+const log = record => {
+  if(record.event === "game_hash" && /^[a-f0-9]{64}$/.test(record.hash ?? "")) observedGameHash=record.hash;
+  rawLog(record); integrationBatch?.onEvent(record);void phase2Setup?.onEvent(record);
+};
+const sessionSecret = opt.secret ?? process.env.TF3MP_SESSION_SECRET;
+let bridge;
+let hostInstance, vehicleTestActive = false;
+async function enableBridge() {
+  if (opt["bridge-dir"]) {
+    bridge = await startGameBridge({ directory: opt["bridge-dir"], logger: log });
+    log({ level: "info", event: "bridge_waiting" });
+  }
+}
+let stopping = false;
+async function stop() {
+  if (stopping) return;
+  stopping = true;
+  if(coordinatorTimer)clearInterval(coordinatorTimer);
+  if(phase2Timer)clearInterval(phase2Timer);
+  await phase2Setup?.close();
+  if(coordinatorRun)await coordinatorRun.close();
+  if (integrationBatch) await integrationBatch.stop();
+  if (bridge) await bridge.close();
+  process.exit(0);
+}
+process.on("SIGINT", stop);
+process.on("SIGTERM", stop);
+if (command === "host" || command === "join") createInterface({ input: process.stdin }).on("line", line => {
+  if (line.trim() === "stop") stop();
+  else if(line.trim()==='phase2-setup') {
+    if(command!=='host'||!bridge||!hostInstance||vehicleTestActive||integrationBatch||batchStarting||coordinatorRun||coordinatorStarting||phase2Setup||phase2Starting||!observedSaveHash||hostInstance.authority.players().length!==0)
+      rawLog({level:'warn',event:'phase2_setup',code:'FAILED_STOP_HELPER'});
+    else {
+      vehicleTestActive=true;phase2Starting=true;
+      (async()=>{
+        const saveReport=await createBatchReportWriter(nodePath.resolve(import.meta.dirname,'..','reports'));
+        if(stopping)return;
+        phase2Setup=createPhase2SetupSession({bridge,saveReport,logger:rawLog,checkpointHash:observedSaveHash,
+          metadata:{gameHash:observedGameHash,modManifestHash:opt['mod-hash']}});
+        await phase2Setup.start();
+        if(stopping){await phase2Setup.close();return;}
+        phase2Timer=setInterval(()=>{void phase2Setup.poll();},250);
+      })().catch(()=>rawLog({level:'warn',event:'phase2_setup',code:'FAILED_STOP_HELPER'})).finally(()=>{phase2Starting=false;});
+    }
+  }
+  else if(line.trim().startsWith('phase2-setup-confirm ')) {
+    const hash=line.trim().slice('phase2-setup-confirm '.length);
+    if(!phase2Setup||!/^[a-f0-9]{64}$/.test(hash))rawLog({level:'warn',event:'phase2_setup',code:'CONFIRMATION_REQUIRED'});
+    else phase2Setup.confirm(hash).catch(()=>rawLog({level:'warn',event:'phase2_setup',code:'CONFIRMATION_REJECTED_CHECK_STATUS'}));
+  }
+  else if(phase2Setup||phase2Starting)rawLog({level:'warn',event:'phase2_setup',code:'SETUP_OWNS_HELPER_STOP_TO_EXIT'});
+  else if(depotPreviewOwnsHelper) rawLog({level:'warn',event:'depot_preview',code:'STOP_HELPER_TO_EXIT_PREVIEW'});
+  else if(line.trim()==='station-template-probe') {
+    if(command!=='host'||!bridge||!hostInstance||vehicleTestActive||integrationBatch||batchStarting||coordinatorRun||coordinatorStarting||hostInstance.authority.players().length!==0)
+      rawLog({level:'warn',event:'station_template_result',code:'FRESH_SOLO_HOST_REQUIRED'});
+    else {
+      vehicleTestActive=true;depotPreviewOwnsHelper=true;
+      bridge.requestStationTemplateProbe().catch(()=>rawLog({level:'warn',event:'station_template_result',code:'PROBE_UNAVAILABLE_NO_RETRY'}));
+    }
+  }
+  else if(line.trim()==='depot-preview') {
+    if(command!=='host'||!bridge||!hostInstance||vehicleTestActive||integrationBatch||batchStarting||coordinatorRun||coordinatorStarting||hostInstance.authority.players().length!==0)
+      rawLog({level:'warn',event:'depot_preview',code:'FRESH_SOLO_HOST_REQUIRED'});
+    else {
+      vehicleTestActive=true;depotPreviewOwnsHelper=true;
+      bridge.beginDepotPreview().catch(()=>rawLog({level:'warn',event:'depot_preview',code:'PREVIEW_UNAVAILABLE_STOP_HELPER'}));
+    }
+  }
+  else if(coordinatorRun||coordinatorStarting) rawLog({level:"warn",event:"coordinator_local_run",code:"RUN_OWNS_HELPER_STOP_TO_EXIT"});
+  else if(line.trim()==="coordinator-run-confirmed"||line.trim().startsWith("coordinator-run-confirmed ")) {
+    const args=line.trim().split(/\s+/);
+    const selectInGame=args.length===1;
+    let secondCompany=Number(args[1]),vehicleEntity=Number(args[2]);
+    let localCompany=bridge?.engineObservation.sample?.companyEntity;
+    if(!selectInGame&&(args.length!==3||![secondCompany,vehicleEntity,localCompany].every(n=>Number.isSafeInteger(n)&&n>=0&&n<=2147483647)||secondCompany===localCompany))
+      rawLog({level:"warn",event:"coordinator_local_run",code:"VERIFIED_COMPANY_AND_VEHICLE_REQUIRED"});
+    else if(command!=="host"||!bridge||!hostInstance||vehicleTestActive||integrationBatch||batchStarting||hostInstance.authority.players().length!==0)
+      rawLog({level:"warn",event:"coordinator_local_run",code:"FRESH_SOLO_HOST_REQUIRED"});
+    else {
+      vehicleTestActive=true;coordinatorStarting=true;
+      (async()=>{
+        const saveReport=await createBatchReportWriter(nodePath.resolve(import.meta.dirname,"..","reports"));
+        if(stopping)return;
+        if(selectInGame){
+          await bridge.beginCoordinatorSelection();
+          rawLog({level:"info",event:"coordinator_local_run",code:"SELECT_OWN_VEHICLE_USE_FOR_SYNC_TEST"});
+          const deadline=Date.now()+120000;
+          for(;;){
+            if(stopping)return;
+            const setup=bridge.coordinatorSetup;
+            if(setup.inspection!=='pending'&&setup.inspection!=='inspected'){
+              rawLog({level:"warn",event:"coordinator_local_run",code:"LOAD_DISPOSABLE_SAVE_WITH_EXISTING_TEST_COMPANY"});return;
+            }
+            if(setup.inspection==='inspected'&&setup.vehicleEntity!==null){
+              localCompany=setup.companyEntity;secondCompany=setup.secondCompanyEntity;vehicleEntity=setup.vehicleEntity;break;
+            }
+            if(Date.now()>=deadline)throw new Error('SELECTION_TIMEOUT');
+            await new Promise(resolve=>setTimeout(resolve,250));
+          }
+        }
+        coordinatorRun=await createLocalCoordinatorRun({directory:opt["bridge-dir"],bridge,playerId:"local",
+          companies:new Map([["local",localCompany],["receipt-mirror",secondCompany]]),vehicleEntity,
+          logger:rawLog,saveReport,metadata:{gameHash:observedGameHash,modManifestHash:opt["mod-hash"]}});
+        if(stopping){await coordinatorRun.close();return;}
+        coordinatorTimer=setInterval(()=>{void coordinatorRun.poll();},250);
+      })().catch(()=>rawLog({level:"warn",event:"coordinator_local_run",code:"SETUP_FAILED_STOP_HELPER_NO_RETRY"}))
+        .finally(()=>{coordinatorStarting=false;});
+    }
+  }
+  else if (line.trim() === "integration-batch-confirmed") {
+    if (command !== "host" || !bridge || !hostInstance || vehicleTestActive || batchStarting || integrationBatch || hostInstance.authority.players().length !== 0) rawLog({level:"warn",event:"integration_batch",code:"FRESH_SOLO_HOST_REQUIRED"});
+    else {
+      vehicleTestActive=true; batchStarting=true; // Lock admission before asynchronous report setup.
+      createBatchReportWriter(nodePath.resolve(import.meta.dirname,"..","reports")).then(saveReport => {
+        if(stopping) return;
+        integrationBatch=createLocalIntegrationBatch({bridge,logger:rawLog,saveReport,metadata:{gameHash:observedGameHash,modManifestHash:opt["mod-hash"]}});
+        integrationBatch.start();
+      }).catch(() => rawLog({level:"warn",event:"integration_batch",code:"REPORT_SETUP_FAILED_RESTART_HELPER"})).finally(() => {batchStarting=false;});
+    }
+  }
+  else if (line.trim() === "integration-batch-controls-confirmed") {
+    try { if(!integrationBatch) throw new Error(); integrationBatch.confirmControls(); }
+    catch { rawLog({level:"warn",event:"integration_batch",code:"NOT_WAITING_FOR_CONTROL_CONFIRMATION"}); }
+  }
+  else if (line.trim() === "integration-batch-controls-failed") integrationBatch?.rejectControls();
+  else if (batchStarting || integrationBatch) rawLog({level:"warn",event:"integration_batch",code:"BATCH_OWNS_DIAGNOSTICS_STOP_TO_EXIT"});
+  else if (["pause-test-confirmed", "pause-test-scheduled-confirmed", "combined-test-confirmed"].includes(line.trim())) {
+    if (command !== "host" || !hostInstance || !bridge) log({ level: "warn", event: "pause_test_failed", code: "HOST_REQUIRED" });
+    else if (vehicleTestActive || hostInstance.authority.players().length !== 0) log({ level: "warn", event: "pause_test_failed", code: "FRESH_SOLO_HOST_REQUIRED" });
+    else {
+      vehicleTestActive = true; // Admission remains closed until helper restart.
+      bridge.requestPauseTest({ scheduled: line.trim() !== "pause-test-confirmed", withVehicle: line.trim() === "combined-test-confirmed" }).catch(error => log({ level: "warn", event: "pause_test_failed",
+        code: ["OBSERVATION_REQUIRED", "NORMAL_SPEED_REQUIRED", "PAUSE_TEST_BUSY_OR_USED"].includes(error.message) ? error.message : "OUTCOME_UNKNOWN_RESUME_MANUALLY" }));
+    }
+  }
+  else if (line.trim() === "pause-test-release") {
+    if (command === "host" && bridge) bridge.releasePauseTest().catch(error => log({ level: "warn", event: error.message === "RELEASE_SPEED_CONTROLS_FIRST" ? "control_test_waiting" : error.message === "HELD_VEHICLE_ACTION_REQUIRED" ? "combined_test_waiting" : "pause_test_failed", code: ["HELD_VEHICLE_ACTION_REQUIRED", "RELEASE_SPEED_CONTROLS_FIRST"].includes(error.message) ? error.message : "NOT_HELD_OR_UNKNOWN_RESUME_MANUALLY" }));
+  }
+  else if (["control-test-confirmed", "control-test-release"].includes(line.trim())) {
+    if (command !== "host" || !bridge || !hostInstance || !vehicleTestActive || hostInstance.authority.players().length !== 0) log({ level: "warn", event: "control_test_failed", code: "SOLO_HELD_TEST_REQUIRED" });
+    else bridge.requestControlTest({ release: line.trim() === "control-test-release" }).catch(error => log({ level: "warn", event: "control_test_failed", code: ["HELD_TEST_REQUIRED", "CONTROL_TEST_ALREADY_USED", "CONTROL_NOT_LOCKED"].includes(error.message) ? error.message : "CONTROL_REQUEST_FAILED_STOP_HELPER" }));
+  }
+  else if (line.trim() === "company-inspect") {
+    if (!bridge) log({ level: "warn", event: "company_inspection_result", code: "BRIDGE_OFFLINE" });
+    else bridge.inspectCompanies().catch(error => log({ level: "warn", event: "company_inspection_result",
+      code: ["OBSERVATION_REQUIRED", "INSPECTION_BUSY"].includes(error.message) ? error.message : "INSPECTION_UNAVAILABLE" }));
+  }
+  else if (["company-test-create-confirmed", "finance-test-confirmed"].includes(line.trim())) {
+    const finance = line.trim() === "finance-test-confirmed";
+    const event = finance ? "finance_test_result" : "company_test_result";
+    if (command !== "host" || !hostInstance || !bridge) log({ level: "warn", event, code: "HOST_REQUIRED" });
+    else if (vehicleTestActive || hostInstance.authority.players().length !== 0) log({ level: "warn", event, code: "FRESH_SOLO_HOST_REQUIRED" });
+    else {
+      vehicleTestActive = true; // Close remote admission synchronously for the helper lifetime.
+      bridge.requestCompanyTest({ finance }).catch(error => log({ level: "warn", event,
+        code: ["OBSERVATION_REQUIRED", "COMPANY_TEST_BUSY_OR_USED", "RUN_SIMULATION_FIRST", "CLOCK_LIMIT"].includes(error.message) ? error.message : "OUTCOME_UNKNOWN_DO_NOT_RETRY" }));
+    }
+  }
+  else if (line.trim() === "vehicle-test-disable") {
+    if (bridge) bridge.disableVehicleTest().catch(() => log({ level: "warn", event: "vehicle_test_rejected", code: "DISABLE_FAILED_CHECK_GAME" }));
+  }
+  else if (line.trim() === "vehicle-test-enable" || /^vehicle-test-scheduled-enable(?: (20|40|60))?$/.test(line.trim())) {
+    if (command !== "host" || !hostInstance || !bridge) log({ level: "warn", event: "vehicle_test_rejected", code: "HOST_REQUIRED" });
+    else if (vehicleTestActive) log({ level: "info", event: "vehicle_test_already_enabled" });
+    else if (hostInstance.authority.players().length !== 0) log({ level: "warn", event: "vehicle_test_rejected", code: "SOLO_HOST_REQUIRED" });
+    else {
+      // Close the admission gate synchronously, before asynchronous bridge publication.
+      // Keep it closed even after failure: restart the helper to allow remote joining.
+      vehicleTestActive = true;
+      bridge.enableVehicleTest({ scheduled: line.trim().startsWith("vehicle-test-scheduled-enable"), leadUpdates: Number(line.trim().split(" ")[1] ?? 60) }).catch(error => log({ level: "warn", event: "vehicle_test_rejected",
+        code: ["BRIDGE_OFFLINE", "VEHICLE_TEST_BUSY"].includes(error.message) ? error.message : "BRIDGE_WRITE_FAILED" }));
+    }
+  }
+  else if (line.trim() === "engine-probe" || line.trim() === "timing-probe") {
+    if (!bridge) log({ level: "warn", event: "engine_probe_rejected", code: "BRIDGE_OFFLINE" });
+    else bridge.requestEngineProbe({ scheduled: line.trim() === "timing-probe" }).catch(error => log({ level: "warn", event: "engine_probe_rejected",
+      code: ["BRIDGE_OFFLINE", "ENGINE_PROBE_BUSY", "BAD_SCHEDULE"].includes(error.message) ? error.message : "BRIDGE_WRITE_FAILED" }));
+  }
+}).on("close", () => { stop(); });
+
+if (command === "hash-game") {
+  const path = opt.exe ?? "E:\\Steam\\steamapps\\common\\Transport Fever 3\\TransportFever3.exe";
+  const hash = await sha256File(path);
+  const compatibility = describeBuild(hash);
+  log({ level: compatibility.recommended ? "info" : "warn", event: "game_hash", ...compatibility });
+} else if (command === "hash-mod") {
+  const path = opt.path ?? "mod";
+  log({ level: "info", event: "mod_manifest_hash", hash: await hashManifest(path) });
+} else if (command === "review") {
+  log({ level: "info", event: "review_validation", ...(await validateReviewPackage(opt.path ?? "mod")) });
+} else if (command === "host") {
+  if (!sessionSecret || !opt["mod-hash"]) throw new Error("host requires TF3MP_SESSION_SECRET (or --secret) and --mod-hash");
+  const exe = opt.exe ?? "E:\\Steam\\steamapps\\common\\Transport Fever 3\\TransportFever3.exe";
+  const buildHash = await readGameBuild(exe);
+  log({ level: describeBuild(buildHash).recommended ? "info" : "warn", event: "game_hash", ...describeBuild(buildHash) });
+  const hostSessionId = opt.session ?? randomUUID();
+  const expiresAt = opt.expires ? Number(opt.expires) : null;
+  if (expiresAt !== null && (!Number.isSafeInteger(expiresAt) || expiresAt <= Date.now())) throw new Error("--expires must be a future Unix timestamp in milliseconds");
+  let requiredSave = null;
+  if (opt.save) {
+    const transfer = await startSaveServer({ secret: sessionSecret, sessionId: hostSessionId, saveFile: opt.save, bind: opt.bind, port: opt["save-port"] ? Number(opt["save-port"]) : undefined, expiresAt, logger: log });
+    requiredSave = { bytes: transfer.bytes, sha256: transfer.sha256 };
+    observedSaveHash=transfer.sha256;
+    log({ level: "info", event: "save_transfer_listening", bytes: transfer.bytes, sha256: transfer.sha256, port: transfer.port });
+  }
+  const instance = startHost({ secret: sessionSecret, sessionId: hostSessionId, bind: opt.bind, port: opt.port ? Number(opt.port) : undefined, buildHash, modManifestHash: opt["mod-hash"], requiredSave, expiresAt, logger: log, admissionAllowed: () => !vehicleTestActive });
+  hostInstance = instance;
+  await once(instance.server, "listening");
+  await enableBridge();
+  log({ level: "info", event: "host_listening", sessionId: instance.sessionId });
+} else if (command === "join") {
+  if (!sessionSecret) throw new Error("join requires TF3MP_SESSION_SECRET (or --secret)");
+  for (const required of ["session", "name", "mod-hash"]) if (!opt[required]) throw new Error(`join requires --${required}`);
+  const buildHash = await readGameBuild(opt.exe ?? "E:\\Steam\\steamapps\\common\\Transport Fever 3\\TransportFever3.exe");
+  log({ level: describeBuild(buildHash).recommended ? "info" : "warn", event: "game_hash", ...describeBuild(buildHash) });
+  await enableBridge();
+  let testSent = false, saveStarted = false;
+  connectClient({ secret: sessionSecret, sessionId: opt.session, host: opt.host, port: opt.port ? Number(opt.port) : undefined, displayName: opt.name, buildHash, modManifestHash: opt["mod-hash"], onMessage: (message, context) => {
+    if (message.kind === "session_ended") stop();
+    log({ level: "info", event: "message", kind: message.kind, code: message.payload?.code, payload: message.payload });
+    if (message.kind === "admitted" && opt["test-message"] && !testSent) {
+      testSent = true;
+      context.send("test", { value: String(opt["test-message"]) });
+    }
+    if (message.kind === "admitted" && opt["save-dir"] && !saveStarted) {
+      saveStarted = true;
+      downloadSave({ secret: sessionSecret, sessionId: opt.session, host: opt.host, port: opt["save-port"] ? Number(opt["save-port"]) : undefined, destinationDir: opt["save-dir"] })
+        .then((result) => {
+          if (!message.payload.save || result.bytes !== message.payload.save.bytes || result.sha256 !== message.payload.save.sha256) throw new Error("control/save channel metadata mismatch");
+          log({ level: "info", event: "save_received", bytes: result.bytes, sha256: result.sha256 });
+          context.send("save_ready", { bytes: result.bytes, sha256: result.sha256 });
+        })
+        .catch((error) => { log({ level: "error", event: "save_receive_failed", code: error.code ?? "SAVE_TRANSFER_FAILED" }); context.socket.destroy(); });
+    }
+  } });
+} else if (command === "generate-secret") {
+  process.stdout.write(`${randomBytes(32).toString("hex")}\n`);
+} else if (command === "probe-ipc") {
+  if (!opt.dir) throw new Error("probe-ipc requires --dir with an absolute dedicated userdata directory");
+  const result = await processProbeOnce(opt.dir);
+  log({ level: "info", event: "userdata_probe_response", counter: result.probe.counter, nonce: result.probe.nonce, responseFile: `inbox_${result.probe.counter}.lua` });
+} else {
+  process.stderr.write("Usage: node src/cli.mjs <host|join|hash-game|hash-mod|review|generate-secret|probe-ipc> [options]\nHost save: --save <absolute.sav> [--save-port 37334]; client pull: --save-dir <absolute-directory>\n");
+  process.exitCode = 2;
+}

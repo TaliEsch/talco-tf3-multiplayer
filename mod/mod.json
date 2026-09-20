@@ -1,0 +1,13 @@
+{
+  "dependencies": null,
+  "incompatibilities": null,
+  "modId": "tf3mp_status_1",
+  "options": null,
+  "params": null,
+  "preRunScript": { "fileName": "" },
+  "postRunScript": { "fileName": "" },
+  "revision": 1,
+  "runScript": { "fileName": "" },
+  "severityAdd": "None",
+  "severityRemove": "None"
+}

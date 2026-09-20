@@ -1,0 +1,21 @@
+{
+  "name": "tf3-multiplayer-prototype",
+  "version": "0.6.1",
+  "private": true,
+  "type": "module",
+  "description": "Experimental encrypted direct-connect lockstep foundation for Transport Fever 3",
+  "license": "MIT",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "scripts": {
+    "test:local-session": "node tools/test-local-session.mjs",
+    "check": "node --check src/cli.mjs && node --test --test-isolation=none \"test/*.test.mjs\"",
+    "test": "node --test --test-isolation=none \"test/*.test.mjs\"",
+    "host": "node src/cli.mjs host",
+    "join": "node src/cli.mjs join",
+    "hash-game": "node src/cli.mjs hash-game",
+    "hash-mod": "node src/cli.mjs hash-mod",
+    "review": "node src/cli.mjs review --path mod"
+  }
+}

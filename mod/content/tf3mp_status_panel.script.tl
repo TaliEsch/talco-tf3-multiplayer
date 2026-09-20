@@ -1,0 +1,1458 @@
+local react = ug_require "::/gui/main/react.lua" as React
+local builtin = ug_require "::/gui/main/builtin.lua" as Builtin
+local engine_react_util = ug_require "::/gui/main/engine_react_util.tl" as EngineReactUtil
+local game_bar_widgets = ug_require "::/gui/game_bar/game_bar_widgets.tl" as GameBarWidgets
+local game_react_globals = ug_require "::/gui/main/game_react_globals.tl" as GameReactGlobals
+local native_controls = ug_require "tf3mp_status_1::/tf3mp_native_controls.script.tl" as table
+
+local record Tf3MpPanelState
+  tickCount : integer
+  updateCount : integer
+end
+
+-- Engine-state timers run with restricted APIs. Keep this callback read-only:
+-- app userdata access here causes TF3 to reload the entire UI repeatedly.
+local bridgeNonce = ""
+local bridgeCounter : integer = 0
+local lastAck : integer = -1
+local missedAcks : integer = 0
+local bridgeFailed = false
+local stepCount : integer = 0
+local placementRouteChecked = false
+local placementRouteSteps : integer = 0
+local placementRouteAttempts : integer = 0
+
+-- Same regular GUI callback context as the already-working receipt reads.
+-- No recursive dispatch from a game-script guiUpdate; no world mutation.
+local function checkPlacementRoute() : nil
+  if placementRouteChecked then return nil end
+  placementRouteSteps = placementRouteSteps + 1
+  if placementRouteSteps % 60 ~= 0 then return nil end
+  placementRouteAttempts = placementRouteAttempts + 1
+  if placementRouteAttempts == 1 then
+    pcall(function()
+      log.message("{\"event\":\"native_placement_observer_ready\",\"observerRevision\":6,\"limitPerStage\":8,\"passive\":true,\"gameplayVerified\":false}")
+    end)
+  end
+  local ok, value = pcall(function() : any
+    return api.gui.fireGuiScriptEvent("tf3mp_placement_observer", "tf3mp_placement_observer_selftest", {})
+  end)
+  local delivered = false
+  if ok and type(value) == "table" then
+    local ack = value as table
+    delivered = ack.kind == "placement_observer_ack" and ack.observerRevision == 6 and ack.passive == true
+  end
+  -- Positive control: the established status read, not a gameplay request.
+  -- Retry only these read-only diagnostics; never retry uncertain mutations.
+  local controlOk, controlValue = pcall(function() : any
+    return api.gui.fireGuiScriptEvent("tf3mp_engine_bridge", "tf3mp_get_status", {})
+  end)
+  local controlDelivered = false
+  if controlOk and type(controlValue) == "table" then
+    local control = controlValue as table
+    controlDelivered = type(control.status) == "string"
+  end
+  placementRouteChecked = delivered or placementRouteAttempts >= 12
+  pcall(function()
+    log.message("{\"event\":\"native_placement_observer_selftest\",\"observerRevision\":6,\"delivered\":" .. tostring(delivered)
+      .. ",\"attempt\":" .. tostring(placementRouteAttempts) .. ",\"final\":" .. tostring(placementRouteChecked)
+      .. ",\"returnType\":\"" .. type(value) .. "\",\"controlDelivered\":" .. tostring(controlDelivered)
+      .. ",\"callSucceeded\":" .. tostring(ok) .. ",\"synthetic\":true,\"passive\":true,\"gameplayVerified\":false}")
+  end)
+  return nil
+end
+local lastProbe : integer = 0
+local probeReported : integer = 0
+local probeFailed = false
+local probeResult = "diagnostics"
+local vehiclePhaseKey = ""
+local companyProbeSent : integer = 0
+local phase2FundingSent : integer = 0
+local phase2FundingReported : integer = 0
+local phase2DepotSent : integer = 0
+local phase2DepotReported : integer = 0
+local phase2VehicleSent : integer = 0
+local phase2VehicleReported : integer = 0
+local phase2StationSent : integer = 0
+local phase2StationReported : integer = 0
+local phase2ServiceSent : integer = 0
+local phase2ServiceReported : integer = 0
+local stationProbeSent : integer = 0
+local stationProbeReported : integer = 0
+local companyProbeReported : integer = 0
+local companyInspectionSent : integer = 0
+local pausePhaseSent = ""
+local snapshotSent : integer = 0
+local haltSent : integer = 0
+local watchdogSent : integer = 0
+local coordinationSent = ""
+local bindingSent = ""
+local preparationSent = ""
+local executionSent = ""
+local pendingExecution : table = {}
+local pendingCheckpoint : table = {}
+local checkpointSent = ""
+local releaseSent = ""
+local pendingPauseDelivery : table = {}
+-- GUI-only pending delivery, never stored in GameScriptState or a save.
+local pendingVehicleDelivery : table = {}
+
+-- USERDATA EXCHANGE BEGIN: only invoked by the protected regular onStep callback.
+-- Temporary GUI diagnostic only: this does not restrict construction or provide
+-- a multiplayer authority boundary. Never set GameSpeedPause (it can resume).
+local controlFlags : table = {}
+local controlOriginal : any = nil
+local controlOwned = false
+local controlNonce = ""
+local controlFinished = false
+local controlSent = ""
+local function restoreSpeedControls() : nil
+  if controlOwned then
+    if controlFlags.GameSpeedControl == true then controlFlags.GameSpeedControl = controlOriginal end
+    controlOwned = false
+  end
+  controlFinished = true
+  return nil
+end
+
+local function userdataExists(name : string) : boolean
+  for _, file in ipairs(app.getAllUserdata("tf3mp_status_1")) do
+    if file == name or file == name .. ".lua" then return true end
+  end
+  return false
+end
+
+local function exchangeHalt() : nil
+  if not userdataExists("halt_request") or missedAcks > 10 then return nil end
+  local request = app.loadUserdata("tf3mp_status_1", "halt_request")
+  if request.schemaVersion ~= 1 or request.kind ~= "halt_request" or request.nonce ~= bridgeNonce then return nil end
+  for _, key in ipairs({ "requestId", "companyEntity", "issuedTick", "expiresTick" }) do
+    local v = request[key]
+    if type(v) ~= "number" or v < 0 or v > 2147483647 or v % 1 ~= 0 then return nil end
+  end
+  if request.requestId < 1 or request.expiresTick ~= request.issuedTick + 300 then return nil end
+  if request.requestId > haltSent then
+    haltSent = request.requestId as integer -- Consume before delivery; no retry.
+    api.cmd.sendCommand(api.cmd.makeScriptingSendEventCmd("tf3mp_status_1::/tf3mp_status.gs", "tf3mp_engine_bridge", "tf3mp_halt", {
+      schemaVersion = 1, kind = "halt_request", nonce = bridgeNonce, requestId = haltSent,
+      companyEntity = request.companyEntity, issuedTick = request.issuedTick, expiresTick = request.expiresTick,
+    }))
+  end
+  if request.requestId ~= haltSent then return nil end
+  local value = api.gui.fireGuiScriptEvent("tf3mp_engine_bridge", "tf3mp_get_halt_receipt", {})
+  if type(value) ~= "table" then return nil end
+  local receipt = value as table
+  if receipt.kind ~= "halt_receipt" then
+    local checked : integer = 0
+    for _, candidate in pairs(receipt) do
+      checked = checked + 1
+      if checked > 64 then break end
+      if type(candidate) == "table" then
+        local item = candidate as table
+        if item.kind == "halt_receipt" and item.nonce == bridgeNonce and item.requestId == haltSent then receipt = item; break end
+      end
+    end
+  end
+  if receipt.schemaVersion ~= 1 or receipt.kind ~= "halt_receipt" or receipt.nonce ~= bridgeNonce or receipt.requestId ~= haltSent then return nil end
+  local result : table = { schemaVersion = 1, kind = "halt_receipt", nonce = bridgeNonce }
+  for _, key in ipairs({ "requestId", "companyEntity", "tickCount", "updateCount", "speedup" }) do
+    local v = receipt[key]
+    if type(v) ~= "number" or v < 0 or v > 2147483647 or v % 1 ~= 0 then return nil end
+    result[key] = v
+  end
+  if receipt.outcome ~= "halted" and receipt.outcome ~= "expired" and receipt.outcome ~= "context_changed" and receipt.outcome ~= "already_attempted" and receipt.outcome ~= "outcome_unknown" then return nil end
+  result.outcome = receipt.outcome
+  app.saveUserdata("tf3mp_status_1", "halt_receipt", result)
+  return nil
+end
+
+local function exchangeBinding() : nil
+  if missedAcks <= 10 and lastAck >= 0 and bindingSent == "" and userdataExists("coordination_request") then
+    local request = app.loadUserdata("tf3mp_status_1", "coordination_request")
+    if request.schemaVersion ~= 1 or request.nonce ~= bridgeNonce or request.operation ~= "bindSession" then return nil end
+    if type(request.playerCount) ~= "number" or request.playerCount < 2 or request.playerCount > 4 or request.playerCount % 1 ~= 0 then return nil end
+    local payload : table = { schemaVersion = 1, nonce = bridgeNonce, operation = "bindSession", playerCount = request.playerCount }
+    for _, key in ipairs({ "roundId", "operationId", "localPlayerId" }) do
+      if type(request[key]) ~= "string" or #request[key] < 1 or #request[key] > 128 or not string.match(request[key] as string, "^[A-Za-z0-9_.:-]+$") then return nil end
+      payload[key] = request[key]
+    end
+    for i = 1, request.playerCount as integer do
+      local playerKey = "player" .. tostring(i)
+      local companyKey = "company" .. tostring(i)
+      local player = request[playerKey]
+      local company = request[companyKey]
+      if type(player) ~= "string" or #player < 1 or #player > 128 or not string.match(player as string, "^[A-Za-z0-9_.:-]+$") then return nil end
+      if type(company) ~= "number" or company < 0 or company > 2147483647 or company % 1 ~= 0 then return nil end
+      payload[playerKey] = player; payload[companyKey] = company
+    end
+    local count : integer = 0
+    for key, _ in pairs(request) do if payload[key] == nil then return nil end; count = count + 1 end
+    if count ~= 7 + 2 * request.playerCount then return nil end
+    bindingSent = request.operationId as string
+    api.cmd.sendCommand(api.cmd.makeScriptingSendEventCmd("tf3mp_status_1::/tf3mp_status.gs", "tf3mp_engine_bridge", "tf3mp_bind_session", payload))
+  end
+  if bindingSent == "" or coordinationSent ~= "" then return nil end
+  local value = api.gui.fireGuiScriptEvent("tf3mp_engine_bridge", "tf3mp_get_binding_receipt", {})
+  if type(value) ~= "table" then return nil end
+  local receipt = value as table
+  if receipt.operationId ~= bindingSent then
+    local checked : integer = 0
+    for _, candidate in pairs(receipt) do
+      checked = checked + 1
+      if checked > 64 then break end
+      if type(candidate) == "table" then
+        local item = candidate as table
+        if item.nonce == bridgeNonce and item.operationId == bindingSent then receipt = item; break end
+      end
+    end
+  end
+  if receipt.schemaVersion ~= 1 or receipt.nonce ~= bridgeNonce or receipt.operationId ~= bindingSent or receipt.operation ~= "bindSession" or receipt.status ~= "ok" then return nil end
+  if type(receipt.roundId) ~= "string" or #receipt.roundId < 1 or #receipt.roundId > 128 or not string.match(receipt.roundId as string, "^[A-Za-z0-9_.:-]+$") then return nil end
+  if type(receipt.held) ~= "boolean" or type(receipt.updateCount) ~= "number" or receipt.updateCount < 0 or receipt.updateCount > 2147483647 or receipt.updateCount % 1 ~= 0 then return nil end
+  app.saveUserdata("tf3mp_status_1", "coordination_receipt", {
+    schemaVersion = 1, nonce = bridgeNonce, operationId = bindingSent, roundId = receipt.roundId,
+    operation = "bindSession", status = "ok", updateCount = receipt.updateCount, held = receipt.held,
+  })
+  return nil
+end
+
+local function dispatchCheckpointAtUpdate() : nil
+  if pendingCheckpoint.nonce == nil then return nil end
+  local request = pendingCheckpoint
+  local clock = api.engine.getComponent(api.engine.util.getWorld(), api.type.ComponentType.GAME_TIME) as Engine.Component.GameTime
+  if clock.updateCount < request.updateCount - 1 then return nil end
+  pendingCheckpoint = {}
+  if missedAcks > 10 or lastAck < 0 or coordinationSent ~= "" or not userdataExists("bridge") or not userdataExists("coordination_request") then return nil end
+  local config = app.loadUserdata("tf3mp_status_1", "bridge")
+  if config.mode ~= "watchdog_test" or config.nonce ~= bridgeNonce or request.nonce ~= bridgeNonce then return nil end
+  local live = app.loadUserdata("tf3mp_status_1", "coordination_request")
+  local count : integer = 0
+  for key, value in pairs(live) do if request[key] ~= value then return nil end; count = count + 1 end
+  if count ~= (request.checkpointHash == nil and 6 or 7) then return nil end
+  api.cmd.sendCommand(api.cmd.makeScriptingSendEventCmd("tf3mp_status_1::/tf3mp_status.gs", "tf3mp_engine_bridge", "tf3mp_hold_checkpoint", request))
+  return nil
+end
+
+local function exchangeCheckpoint() : nil
+  if missedAcks <= 10 and lastAck >= 0 and checkpointSent == "" and userdataExists("coordination_request") then
+    local request = app.loadUserdata("tf3mp_status_1", "coordination_request")
+    if request.schemaVersion ~= 1 or request.nonce ~= bridgeNonce or request.operation ~= "holdCheckpoint" then return nil end
+    local payload : table = { schemaVersion = 1, nonce = bridgeNonce, operation = "holdCheckpoint" }
+    for _, key in ipairs({ "roundId", "operationId" }) do
+      if type(request[key]) ~= "string" or #request[key] < 1 or #request[key] > 128 or not string.match(request[key] as string, "^[A-Za-z0-9_.:-]+$") then return nil end
+      payload[key] = request[key]
+    end
+    if type(request.updateCount) ~= "number" or request.updateCount < 0 or request.updateCount > 2147483647 or request.updateCount % 1 ~= 0 then return nil end
+    if request.checkpointHash ~= nil and (type(request.checkpointHash) ~= "string" or #request.checkpointHash ~= 64 or not string.match(request.checkpointHash as string, "^[0-9a-f]+$")) then return nil end
+    payload.updateCount = request.updateCount; payload.checkpointHash = request.checkpointHash
+    local count : integer = 0
+    for key, _ in pairs(request) do if payload[key] == nil then return nil end; count = count + 1 end
+    if count ~= (request.checkpointHash == nil and 6 or 7) then return nil end
+    checkpointSent = request.operationId as string
+    pendingCheckpoint = payload
+  end
+  if checkpointSent == "" or preparationSent ~= "" or coordinationSent ~= "" then return nil end
+  local value = api.gui.fireGuiScriptEvent("tf3mp_engine_bridge", "tf3mp_get_checkpoint_receipt", {})
+  if type(value) ~= "table" then return nil end
+  local receipt = value as table
+  if receipt.operationId ~= checkpointSent then
+    local checked : integer = 0
+    for _, candidate in pairs(receipt) do
+      checked = checked + 1
+      if checked > 64 then break end
+      if type(candidate) == "table" then
+        local item = candidate as table
+        if item.nonce == bridgeNonce and item.operationId == checkpointSent then receipt = item; break end
+      end
+    end
+  end
+  if receipt.schemaVersion ~= 1 or receipt.nonce ~= bridgeNonce or receipt.operationId ~= checkpointSent or receipt.operation ~= "holdCheckpoint" then return nil end
+  if type(receipt.roundId) ~= "string" or #receipt.roundId < 1 or #receipt.roundId > 128 or not string.match(receipt.roundId as string, "^[A-Za-z0-9_.:-]+$") then return nil end
+  if (receipt.status ~= "ok" and receipt.status ~= "unknown") or type(receipt.held) ~= "boolean" then return nil end
+  if type(receipt.updateCount) ~= "number" or receipt.updateCount < 0 or receipt.updateCount > 2147483647 or receipt.updateCount % 1 ~= 0 then return nil end
+  local result : table = { schemaVersion = 1, nonce = bridgeNonce, operationId = checkpointSent, roundId = receipt.roundId,
+    operation = "holdCheckpoint", status = receipt.status, updateCount = receipt.updateCount, held = receipt.held }
+  if receipt.status == "ok" then
+    if receipt.snapshotVersion ~= 1 or type(receipt.companyCount) ~= "number" or receipt.companyCount < 2 or receipt.companyCount > 4 or receipt.companyCount % 1 ~= 0 then return nil end
+    result.snapshotVersion = 1; result.companyCount = receipt.companyCount
+    for i = 1, receipt.companyCount as integer do
+      local entity = receipt["company" .. tostring(i)]
+      local balance = receipt["balance" .. tostring(i)]
+      local negative = receipt["negative" .. tostring(i)]
+      if type(entity) ~= "number" or entity < 0 or entity > 2147483647 or entity % 1 ~= 0 then return nil end
+      if type(balance) ~= "number" or balance < 0 or balance > 9007199254740991 or balance % 1 ~= 0 or (negative ~= 0 and negative ~= 1) then return nil end
+      result["company" .. tostring(i)] = entity; result["balance" .. tostring(i)] = balance; result["negative" .. tostring(i)] = negative
+    end
+  end
+  app.saveUserdata("tf3mp_status_1", "coordination_receipt", result)
+  return nil
+end
+
+local function exchangeRelease() : nil
+  if not userdataExists("coordination_request") then return nil end
+  local liveRequest = app.loadUserdata("tf3mp_status_1", "coordination_request")
+  if liveRequest.operation ~= "release" or liveRequest.nonce ~= bridgeNonce then return nil end
+  if missedAcks <= 10 and lastAck >= 0 and releaseSent ~= liveRequest.operationId and coordinationSent == "" then
+    local request = app.loadUserdata("tf3mp_status_1", "coordination_request")
+    if request.schemaVersion ~= 1 or request.nonce ~= bridgeNonce or request.operation ~= "release" then return nil end
+    local payload : table = { schemaVersion = 1, nonce = bridgeNonce, operation = "release" }
+    for _, key in ipairs({ "roundId", "operationId" }) do
+      if type(request[key]) ~= "string" or #request[key] < 1 or #request[key] > 128 or not string.match(request[key] as string, "^[A-Za-z0-9_.:-]+$") then return nil end
+      payload[key] = request[key]
+    end
+    if type(request.updateCount) ~= "number" or request.updateCount < 0 or request.updateCount > 2147483647 or request.updateCount % 1 ~= 0 then return nil end
+    payload.updateCount = request.updateCount
+    local expectedCount : integer = 6
+    if request.speedup ~= nil then
+      if request.speedup ~= 1 and request.speedup ~= 2 and request.speedup ~= 4 then return nil end
+      payload.speedup = request.speedup
+      expectedCount = 7
+    end
+    local count : integer = 0
+    for key, _ in pairs(request) do if payload[key] == nil then return nil end; count = count + 1 end
+    if count ~= expectedCount then return nil end
+    releaseSent = request.operationId as string
+    api.cmd.sendCommand(api.cmd.makeScriptingSendEventCmd("tf3mp_status_1::/tf3mp_status.gs", "tf3mp_engine_bridge", "tf3mp_release_checkpoint", payload))
+  end
+  if releaseSent == "" or coordinationSent ~= "" then return nil end
+  local value = api.gui.fireGuiScriptEvent("tf3mp_engine_bridge", "tf3mp_get_release_receipt", {})
+  if type(value) ~= "table" then return nil end
+  local receipt = value as table
+  if receipt.operationId ~= releaseSent then
+    local checked : integer = 0
+    for _, candidate in pairs(receipt) do
+      checked = checked + 1
+      if checked > 64 then break end
+      if type(candidate) == "table" then
+        local item = candidate as table
+        if item.nonce == bridgeNonce and item.operationId == releaseSent then receipt = item; break end
+      end
+    end
+  end
+  if receipt.schemaVersion ~= 1 or receipt.nonce ~= bridgeNonce or receipt.operationId ~= releaseSent or receipt.operation ~= "release" then return nil end
+  if type(receipt.roundId) ~= "string" or #receipt.roundId < 1 or #receipt.roundId > 128 or not string.match(receipt.roundId as string, "^[A-Za-z0-9_.:-]+$") then return nil end
+  if (receipt.status ~= "ok" and receipt.status ~= "unknown") or type(receipt.held) ~= "boolean" then return nil end
+  if type(receipt.updateCount) ~= "number" or receipt.updateCount < 0 or receipt.updateCount > 2147483647 or receipt.updateCount % 1 ~= 0 then return nil end
+  local result : table = {
+    schemaVersion = 1, nonce = bridgeNonce, operationId = releaseSent, roundId = receipt.roundId,
+    operation = "release", status = receipt.status, updateCount = receipt.updateCount, held = receipt.held,
+  }
+  if liveRequest.speedup ~= nil then
+    if type(receipt.speedup) ~= "number" then return nil end
+    result.speedup = receipt.speedup
+  end
+  app.saveUserdata("tf3mp_status_1", "coordination_receipt", result)
+  return nil
+end
+
+local function exchangePreparation() : nil
+  if not userdataExists("coordination_request") then return nil end
+  local liveRequest = app.loadUserdata("tf3mp_status_1", "coordination_request")
+  if liveRequest.operation ~= "prepare" or liveRequest.nonce ~= bridgeNonce then return nil end
+  if missedAcks <= 10 and lastAck >= 0 and preparationSent ~= liveRequest.operationId and coordinationSent == "" then
+    local request = app.loadUserdata("tf3mp_status_1", "coordination_request")
+    if request.schemaVersion ~= 1 or request.nonce ~= bridgeNonce or request.operation ~= "prepare" or request.protocolVersion ~= 2 or request.commandType ~= "vehicle.setRunning" or type(request.running) ~= "boolean" then return nil end
+    local payload : table = { schemaVersion = 1, nonce = bridgeNonce, operation = "prepare", protocolVersion = 2, commandType = "vehicle.setRunning", running = request.running }
+    for _, key in ipairs({ "roundId", "operationId", "originPlayerId", "requestMessageId" }) do
+      if type(request[key]) ~= "string" or #request[key] < 1 or #request[key] > 128 or not string.match(request[key] as string, "^[A-Za-z0-9_.:-]+$") then return nil end
+      payload[key] = request[key]
+    end
+    for _, key in ipairs({ "hostSequence", "scheduledUpdate", "companyEntity", "entity", "clientSequence" }) do
+      local value = request[key]
+      if type(value) ~= "number" or value < 0 or value > 2147483647 or value % 1 ~= 0 then return nil end
+      payload[key] = value
+    end
+    if request.hostSequence < 1 or request.clientSequence < 1 then return nil end
+    local count : integer = 0
+    for key, _ in pairs(request) do if payload[key] == nil then return nil end; count = count + 1 end
+    if count ~= 15 then return nil end
+    preparationSent = request.operationId as string
+    api.cmd.sendCommand(api.cmd.makeScriptingSendEventCmd("tf3mp_status_1::/tf3mp_status.gs", "tf3mp_engine_bridge", "tf3mp_prepare_command", payload))
+  end
+  if preparationSent == "" or coordinationSent ~= "" then return nil end
+  local value = api.gui.fireGuiScriptEvent("tf3mp_engine_bridge", "tf3mp_get_preparation_receipt", {})
+  if type(value) ~= "table" then return nil end
+  local receipt = value as table
+  if receipt.operationId ~= preparationSent then
+    local checked : integer = 0
+    for _, candidate in pairs(receipt) do
+      checked = checked + 1
+      if checked > 64 then break end
+      if type(candidate) == "table" then
+        local item = candidate as table
+        if item.nonce == bridgeNonce and item.operationId == preparationSent then receipt = item; break end
+      end
+    end
+  end
+  if receipt.schemaVersion ~= 1 or receipt.nonce ~= bridgeNonce or receipt.operationId ~= preparationSent or receipt.operation ~= "prepare" then return nil end
+  if type(receipt.roundId) ~= "string" or #receipt.roundId < 1 or #receipt.roundId > 128 or not string.match(receipt.roundId as string, "^[A-Za-z0-9_.:-]+$") then return nil end
+  if (receipt.status ~= "ok" and receipt.status ~= "unknown") or type(receipt.held) ~= "boolean" then return nil end
+  for _, key in ipairs({ "updateCount", "ownerCompanyEntity" }) do
+    local value = receipt[key]
+    if type(value) ~= "number" or value < 0 or value > 2147483647 or value % 1 ~= 0 then return nil end
+  end
+  app.saveUserdata("tf3mp_status_1", "coordination_receipt", {
+    schemaVersion = 1, nonce = bridgeNonce, operationId = preparationSent, roundId = receipt.roundId,
+    operation = "prepare", status = receipt.status, updateCount = receipt.updateCount, held = receipt.held, ownerCompanyEntity = receipt.ownerCompanyEntity,
+  })
+  return nil
+end
+
+local function dispatchExecutionAtUpdate() : nil
+  if pendingExecution.nonce == nil then return nil end
+  local request = pendingExecution
+  local value = api.gui.fireGuiScriptEvent("tf3mp_engine_bridge", "tf3mp_get_execution_barrier", {})
+  if type(value) ~= "table" then return nil end
+  local barrier = value as table
+  if barrier.operationId ~= request.operationId then
+    local checked : integer = 0
+    for _, candidate in pairs(barrier) do
+      checked = checked + 1
+      if checked > 64 then break end
+      if type(candidate) == "table" then
+        local item = candidate as table
+        if item.operationId == request.operationId and item.nonce == bridgeNonce then barrier = item; break end
+      end
+    end
+  end
+  if barrier.phase ~= "held" or barrier.operationId ~= request.operationId or barrier.nonce ~= bridgeNonce
+    or barrier.roundId ~= request.roundId or barrier.hostSequence ~= request.hostSequence
+    or barrier.scheduledUpdate ~= request.scheduledUpdate then return nil end
+  local clock = api.engine.getComponent(api.engine.util.getWorld(), api.type.ComponentType.GAME_TIME) as Engine.Component.GameTime
+  pendingExecution = {} -- No retry, including exceptions or uncertain delivery.
+  if clock.updateCount ~= request.scheduledUpdate then return nil end
+  if missedAcks > 10 or lastAck < 0 or coordinationSent ~= "" or not userdataExists("bridge") or not userdataExists("coordination_request") then return nil end
+  local config = app.loadUserdata("tf3mp_status_1", "bridge")
+  if config.mode ~= "watchdog_test" or config.nonce ~= bridgeNonce or request.nonce ~= bridgeNonce then return nil end
+  local live = app.loadUserdata("tf3mp_status_1", "coordination_request")
+  local count : integer = 0
+  for key, value in pairs(live) do if request[key] ~= value then return nil end; count = count + 1 end
+  if count ~= 15 then return nil end
+  api.cmd.sendCommand(api.cmd.makeScriptingSendEventCmd("tf3mp_status_1::/tf3mp_status.gs", "tf3mp_engine_bridge", "tf3mp_execute_command", request))
+  return nil
+end
+
+local function exchangeExecution() : nil
+  if not userdataExists("coordination_request") then return nil end
+  local liveRequest = app.loadUserdata("tf3mp_status_1", "coordination_request")
+  if liveRequest.operation ~= "executeHeld" or liveRequest.nonce ~= bridgeNonce then return nil end
+  if missedAcks <= 10 and lastAck >= 0 and executionSent ~= liveRequest.operationId and coordinationSent == "" then
+    local request = app.loadUserdata("tf3mp_status_1", "coordination_request")
+    if request.schemaVersion ~= 1 or request.nonce ~= bridgeNonce or request.operation ~= "executeHeld" or request.protocolVersion ~= 2 or request.commandType ~= "vehicle.setRunning" or type(request.running) ~= "boolean" then return nil end
+    local payload : table = { schemaVersion = 1, nonce = bridgeNonce, operation = "executeHeld", protocolVersion = 2, commandType = "vehicle.setRunning", running = request.running }
+    for _, key in ipairs({ "roundId", "operationId", "originPlayerId", "requestMessageId" }) do
+      if type(request[key]) ~= "string" or #request[key] < 1 or #request[key] > 128 or not string.match(request[key] as string, "^[A-Za-z0-9_.:-]+$") then return nil end
+      payload[key] = request[key]
+    end
+    for _, key in ipairs({ "hostSequence", "scheduledUpdate", "companyEntity", "entity", "clientSequence" }) do
+      local value = request[key]
+      if type(value) ~= "number" or value < 0 or value > 2147483647 or value % 1 ~= 0 then return nil end
+      payload[key] = value
+    end
+    if request.hostSequence < 1 or request.clientSequence < 1 then return nil end
+    local count : integer = 0
+    for key, _ in pairs(request) do if payload[key] == nil then return nil end; count = count + 1 end
+    if count ~= 15 then return nil end
+    executionSent = request.operationId as string
+    pendingExecution = payload -- Transient GUI delivery, never persisted executable work.
+    api.cmd.sendCommand(api.cmd.makeScriptingSendEventCmd("tf3mp_status_1::/tf3mp_status.gs", "tf3mp_engine_bridge", "tf3mp_arm_execution_hold", payload))
+  end
+  if executionSent == "" or coordinationSent ~= "" then return nil end
+  local value = api.gui.fireGuiScriptEvent("tf3mp_engine_bridge", "tf3mp_get_execution_receipt", {})
+  if type(value) ~= "table" then return nil end
+  local receipt = value as table
+  if receipt.operationId ~= executionSent then
+    local checked : integer = 0
+    for _, candidate in pairs(receipt) do
+      checked = checked + 1
+      if checked > 64 then break end
+      if type(candidate) == "table" then
+        local item = candidate as table
+        if item.nonce == bridgeNonce and item.operationId == executionSent then receipt = item; break end
+      end
+    end
+  end
+  if receipt.schemaVersion ~= 1 or receipt.nonce ~= bridgeNonce or receipt.operationId ~= executionSent or receipt.operation ~= "executeHeld" then return nil end
+  if type(receipt.roundId) ~= "string" or #receipt.roundId < 1 or #receipt.roundId > 128 or not string.match(receipt.roundId as string, "^[A-Za-z0-9_.:-]+$") then return nil end
+  if (receipt.status ~= "ok" and receipt.status ~= "unknown") or type(receipt.held) ~= "boolean" then return nil end
+  if type(receipt.updateCount) ~= "number" or receipt.updateCount < 0 or receipt.updateCount > 2147483647 or receipt.updateCount % 1 ~= 0 then return nil end
+  local payload : table = {schemaVersion = 1, nonce = bridgeNonce, operationId = executionSent, roundId = receipt.roundId,
+    operation = "executeHeld", status = receipt.status, updateCount = receipt.updateCount, held = receipt.held}
+  if receipt.status == "ok" then
+    for _, key in ipairs({ "snapshotVersion", "hostSequence", "entity", "ownerCompanyEntity", "stopFlag", "balance", "negative" }) do
+      local number = receipt[key]
+      if type(number) ~= "number" or number < 0 or number > 9007199254740991 or number % 1 ~= 0 then return nil end
+      payload[key] = number
+    end
+  end
+  app.saveUserdata("tf3mp_status_1", "coordination_receipt", payload)
+  return nil
+end
+
+local function exchangeCoordinationHalt() : nil
+  if missedAcks <= 10 and lastAck >= 0 and coordinationSent == "" and userdataExists("coordination_request") then
+    local request = app.loadUserdata("tf3mp_status_1", "coordination_request")
+    local count : integer = 0
+    for key, _ in pairs(request) do
+      if key ~= "schemaVersion" and key ~= "nonce" and key ~= "roundId" and key ~= "operationId" and key ~= "operation" then return nil end
+      count = count + 1
+    end
+    if count ~= 5 or request.schemaVersion ~= 1 or request.nonce ~= bridgeNonce or request.operation ~= "halt" then return nil end
+    for _, key in ipairs({ "roundId", "operationId" }) do
+      if type(request[key]) ~= "string" or #request[key] < 1 or #request[key] > 128 or not string.match(request[key] as string, "^[A-Za-z0-9_.:-]+$") then return nil end
+    end
+    coordinationSent = request.operationId as string -- No retry after uncertain event delivery.
+    api.cmd.sendCommand(api.cmd.makeScriptingSendEventCmd("tf3mp_status_1::/tf3mp_status.gs", "tf3mp_engine_bridge", "tf3mp_coordination", {
+      schemaVersion = 1, nonce = bridgeNonce, roundId = request.roundId, operationId = coordinationSent, operation = "halt",
+    }))
+  end
+  if coordinationSent == "" then return nil end
+  local value = api.gui.fireGuiScriptEvent("tf3mp_engine_bridge", "tf3mp_get_coordination_receipt", {})
+  if type(value) ~= "table" then return nil end
+  local receipt = value as table
+  if receipt.operationId ~= coordinationSent then
+    local checked : integer = 0
+    for _, candidate in pairs(receipt) do
+      checked = checked + 1
+      if checked > 64 then break end
+      if type(candidate) == "table" then
+        local item = candidate as table
+        if item.nonce == bridgeNonce and item.operationId == coordinationSent then receipt = item; break end
+      end
+    end
+  end
+  if receipt.schemaVersion ~= 1 or receipt.nonce ~= bridgeNonce or receipt.operationId ~= coordinationSent or receipt.operation ~= "halt" then return nil end
+  if type(receipt.roundId) ~= "string" or #receipt.roundId < 1 or #receipt.roundId > 128 or not string.match(receipt.roundId as string, "^[A-Za-z0-9_.:-]+$") then return nil end
+  if receipt.status ~= "ok" and receipt.status ~= "unknown" then return nil end
+  if type(receipt.held) ~= "boolean" or type(receipt.updateCount) ~= "number" or receipt.updateCount < 0 or receipt.updateCount > 2147483647 or receipt.updateCount % 1 ~= 0 then return nil end
+  app.saveUserdata("tf3mp_status_1", "coordination_receipt", {
+    schemaVersion = 1, nonce = bridgeNonce, operationId = coordinationSent, roundId = receipt.roundId,
+    operation = "halt", status = receipt.status, updateCount = receipt.updateCount, held = receipt.held,
+  })
+  return nil
+end
+
+local function exchangeWatchdog() : nil
+  -- Helper loss blocks ALL new arm/renew delivery, not read-only evidence of
+  -- an already armed engine lease. Its autonomous stop must remain observable.
+  if missedAcks <= 10 and lastAck >= 0 and userdataExists("watchdog_request") then
+    local request = app.loadUserdata("tf3mp_status_1", "watchdog_request")
+    if request.schemaVersion ~= 1 or request.kind ~= "watchdog_request" or request.nonce ~= bridgeNonce then return nil end
+    if request.phase ~= "arm" and request.phase ~= "renew" then return nil end
+    for _, key in ipairs({ "requestId", "companyEntity", "issuedTick", "expiresTick" }) do
+      local value = request[key]
+      if type(value) ~= "number" or value < 0 or value > 2147483647 or value % 1 ~= 0 then return nil end
+    end
+    if request.requestId < 1 or request.expiresTick ~= request.issuedTick + 100 then return nil end
+    if request.requestId > watchdogSent then
+      watchdogSent = request.requestId as integer -- Consume before dispatch, never retry.
+      api.cmd.sendCommand(api.cmd.makeScriptingSendEventCmd("tf3mp_status_1::/tf3mp_status.gs", "tf3mp_engine_bridge", "tf3mp_watchdog", {
+        schemaVersion = 1, kind = "watchdog_request", nonce = bridgeNonce, phase = request.phase,
+        requestId = watchdogSent, companyEntity = request.companyEntity, issuedTick = request.issuedTick, expiresTick = request.expiresTick,
+      }))
+    end
+  end
+  if watchdogSent < 1 then return nil end
+  -- Keep observing after the helper removes the arm file. Removal is not disarm.
+  local value = api.gui.fireGuiScriptEvent("tf3mp_engine_bridge", "tf3mp_get_watchdog_receipt", {})
+  if type(value) ~= "table" then return nil end
+  local receipt = value as table
+  if receipt.kind ~= "watchdog_receipt" then
+    local checked : integer = 0
+    for _, candidate in pairs(receipt) do
+      checked = checked + 1
+      if checked > 64 then break end
+      if type(candidate) == "table" then
+        local item = candidate as table
+        if item.kind == "watchdog_receipt" and item.nonce == bridgeNonce and item.requestId == watchdogSent then receipt = item; break end
+      end
+    end
+  end
+  if receipt.schemaVersion ~= 1 or receipt.kind ~= "watchdog_receipt" or receipt.nonce ~= bridgeNonce or receipt.requestId ~= watchdogSent then return nil end
+  local result : table = { schemaVersion = 1, kind = "watchdog_receipt", nonce = bridgeNonce }
+  for _, key in ipairs({ "requestId", "companyEntity", "issuedTick", "expiresTick", "lastTick", "tickCount", "updateCount", "speedup" }) do
+    local n = receipt[key]
+    if type(n) ~= "number" or n < 0 or n > 2147483647 or n % 1 ~= 0 then return nil end
+    result[key] = n
+  end
+  if receipt.phase ~= "active" and receipt.phase ~= "stopping" and receipt.phase ~= "stopped" then return nil end
+  if receipt.outcome ~= "armed" and receipt.outcome ~= "renewed" and receipt.outcome ~= "outcome_unknown" and receipt.outcome ~= "handler_failed" and receipt.outcome ~= "halted" then return nil end
+  if receipt.reason ~= "none" and receipt.reason ~= "expired" and receipt.reason ~= "clock_reset" and receipt.reason ~= "context_changed" then return nil end
+  result.phase = receipt.phase; result.outcome = receipt.outcome; result.reason = receipt.reason
+  app.saveUserdata("tf3mp_status_1", "watchdog_receipt", result)
+  return nil
+end
+
+local function exchangeSpeedControls() : nil
+  if not userdataExists("bridge") or not userdataExists("control_request") or missedAcks > 10 then
+    if controlOwned then restoreSpeedControls() end
+    return nil
+  end
+  local config = app.loadUserdata("tf3mp_status_1", "bridge")
+  local request = app.loadUserdata("tf3mp_status_1", "control_request")
+  if request.schemaVersion ~= 1 or request.kind ~= "control_request" or request.nonce ~= bridgeNonce
+    or config.nonce ~= bridgeNonce or #bridgeNonce ~= 32
+    or (request.phase ~= "acquire" and request.phase ~= "release") then
+    if controlOwned then restoreSpeedControls() end
+    return nil
+  end
+  if controlNonce ~= bridgeNonce then
+    restoreSpeedControls()
+    controlNonce = bridgeNonce
+    controlFinished = false
+    controlSent = ""
+  end
+  local flags = game_react_globals.getDisableFeatures() as table
+  local outcome = "unavailable"
+  if request.phase == "release" then
+    if controlOwned and flags == controlFlags and flags.GameSpeedControl == true then
+      restoreSpeedControls()
+      if native_controls.release(bridgeNonce) then outcome = "released" else outcome = "conflict" end
+    elseif controlSent == "release:released" then
+      return nil
+    else
+      restoreSpeedControls()
+      outcome = "conflict"
+    end
+  elseif controlOwned then
+    if flags ~= controlFlags or flags.GameSpeedControl ~= true or flags.GameSpeedPause == true then
+      restoreSpeedControls()
+      outcome = "conflict"
+    else
+      if native_controls.pollReady(bridgeNonce) then outcome = "acquired"
+      elseif controlSent == "acquire:acquired" then restoreSpeedControls(); outcome = "conflict"
+      else return nil end -- No receipt until the original manager has unmounted.
+    end
+  elseif not controlFinished then
+    controlFinished = true -- Never reacquire after a failure in this helper.
+    local speed = api.engine.getComponent(api.engine.util.getWorld(), api.type.ComponentType.GAME_SPEED) as Engine.Component.GameSpeed
+    if speed.speedup ~= 0 or flags.GameSpeedControl == true or flags.GameSpeedPause == true then
+      outcome = "conflict"
+    else
+      controlFlags = flags
+      controlOriginal = flags.GameSpeedControl
+      controlOwned = true -- Own before changing so protected cleanup can restore.
+      flags.GameSpeedControl = true
+      if game_react_globals.getDisableFeatures() == flags and flags.GameSpeedControl == true and native_controls.arm(bridgeNonce) then return nil -- Wait for native-view transition acknowledgement.
+      else restoreSpeedControls() end
+    end
+  else
+    return nil
+  end
+  local key = request.phase .. ":" .. outcome
+  if key ~= controlSent then
+    app.saveUserdata("tf3mp_status_1", "control_receipt", {
+      schemaVersion = 1, kind = "control_receipt", nonce = bridgeNonce, phase = request.phase, outcome = outcome,
+    })
+    controlSent = key
+  end
+  return nil
+end
+
+local function dispatchVehicleAtUpdate() : nil
+  if pendingVehicleDelivery.nonce == nil then return nil end
+  local request = pendingVehicleDelivery
+  local clock = api.engine.getComponent(api.engine.util.getWorld(), api.type.ComponentType.GAME_TIME) as Engine.Component.GameTime
+  -- GUI commands execute on the next simulation step. This timing assumption
+  -- is experimental: the engine rejects both early and late actual arrival.
+  if clock.updateCount < request.scheduledUpdate - 1 and clock.tickCount <= request.expiresTick then return nil end
+  pendingVehicleDelivery = {} -- Consume before I/O or dispatch; no retries.
+  if missedAcks > 10 or not userdataExists("bridge") or not userdataExists("vehicle_command") then return nil end
+  local config = app.loadUserdata("tf3mp_status_1", "bridge")
+  if config.mode ~= "vehicle_test" or config.nonce ~= request.nonce or request.nonce ~= bridgeNonce then return nil end
+  local live = app.loadUserdata("tf3mp_status_1", "vehicle_command")
+  for key, value in pairs(request) do
+    if live[key] ~= value then return nil end
+  end
+  api.cmd.sendCommand(api.cmd.makeScriptingSendEventCmd("tf3mp_status_1::/tf3mp_status.gs", "tf3mp_engine_bridge", "tf3mp_vehicle_command", request))
+  return nil
+end
+
+local function exchangeVehicleTest() : nil
+  if not userdataExists("vehicle_command") then return nil end
+  local request = app.loadUserdata("tf3mp_status_1", "vehicle_command")
+  if (request.schemaVersion ~= 1 and request.schemaVersion ~= 2) or request.kind ~= "vehicle_command" or request.nonce ~= bridgeNonce then return nil end
+  if request.phase ~= "inspect" and request.phase ~= "commit" then return nil end
+  local eventParam : table = { schemaVersion = request.schemaVersion, kind = "vehicle_command", nonce = bridgeNonce, phase = request.phase }
+  for _, key in ipairs({ "actionId", "entity", "stopFlag", "company", "revision", "hostSequence", "scheduledUpdate", "expiresTick" }) do
+    local value = request[key]
+    if type(value) ~= "number" or value < 0 or value > 2147483647 or value % 1 ~= 0 then return nil end
+    eventParam[key] = value
+  end
+  local phaseKey = tostring(request.actionId) .. ":" .. (request.phase as string)
+  if phaseKey ~= vehiclePhaseKey then
+    vehiclePhaseKey = phaseKey -- Mark before dispatch; uncertain sends are not retried.
+    if request.phase == "commit" and request.scheduledUpdate > 0 then
+      pendingVehicleDelivery = eventParam
+    else
+      api.cmd.sendCommand(api.cmd.makeScriptingSendEventCmd("tf3mp_status_1::/tf3mp_status.gs", "tf3mp_engine_bridge", "tf3mp_vehicle_command", eventParam))
+    end
+  end
+  local value = api.gui.fireGuiScriptEvent("tf3mp_engine_bridge", "tf3mp_get_vehicle_receipt", {})
+  if type(value) ~= "table" then return nil end
+  local receipt = value as table
+  if receipt.kind ~= "vehicle_receipt" then
+    local checked : integer = 0
+    for _, candidate in pairs(receipt) do
+      checked = checked + 1
+      if checked > 64 then break end
+      if type(candidate) == "table" then
+        local item = candidate as table
+        if item.kind == "vehicle_receipt" and item.nonce == bridgeNonce and item.actionId == request.actionId then receipt = item; break end
+      end
+    end
+  end
+  if receipt.schemaVersion ~= request.schemaVersion or receipt.kind ~= "vehicle_receipt" or receipt.nonce ~= bridgeNonce or receipt.actionId ~= request.actionId or receipt.phase ~= request.phase then return nil end
+  local result : table = { schemaVersion = receipt.schemaVersion, kind = "vehicle_receipt", nonce = bridgeNonce, phase = receipt.phase }
+  for _, key in ipairs({ "actionId", "entity", "stopFlag", "company", "localPlayer", "revision", "hostSequence", "scheduledUpdate", "tickCount", "updateCount" }) do
+    local numberValue = receipt[key]
+    if type(numberValue) ~= "number" or numberValue < 0 or numberValue > 2147483647 or numberValue % 1 ~= 0 then return nil end
+    result[key] = numberValue
+  end
+  if type(receipt.outcome) ~= "string" or not string.match(receipt.outcome as string, "^[a-z_]+$") then return nil end
+  result.outcome = receipt.outcome
+  app.saveUserdata("tf3mp_status_1", "vehicle_receipt", result)
+  return nil
+end
+
+local function exchangeEngineProbe() : nil
+  if not userdataExists("engine_request") then
+    if lastProbe > probeReported then probeResult = "test ended / see launcher" end
+    return nil
+  end
+  local request = app.loadUserdata("tf3mp_status_1", "engine_request")
+  if request.schemaVersion ~= 1 or (request.kind ~= "engine_probe" and request.kind ~= "scheduled_probe") or request.nonce ~= bridgeNonce or type(request.requestId) ~= "number" then return nil end
+  local requestId = request.requestId as number
+  if requestId < 1 or requestId > 2147483647 or requestId % 1 ~= 0 then return nil end
+  local scheduled = request.kind == "scheduled_probe"
+  if scheduled then
+    if type(request.scheduledUpdate) ~= "number" then return nil end
+    local target = request.scheduledUpdate as number
+    if target < 1 or target > 2147483647 or target % 1 ~= 0 then return nil end
+  end
+  if requestId > lastProbe then
+    -- Mark before dispatch: an uncertain failure must never cause duplicate sends.
+    lastProbe = requestId as integer
+    local eventParam : table = { schemaVersion = 1, nonce = bridgeNonce, requestId = lastProbe }
+    if scheduled then eventParam.scheduledUpdate = request.scheduledUpdate end
+    probeResult = scheduled and "timing test pending" or "engine test pending"
+    api.cmd.sendCommand(api.cmd.makeScriptingSendEventCmd("tf3mp_status_1::/tf3mp_status.gs", "tf3mp_engine_bridge", "tf3mp_engine_probe", eventParam))
+  end
+  if requestId ~= lastProbe or probeReported == lastProbe then return nil end
+  local value = api.gui.fireGuiScriptEvent("tf3mp_engine_bridge", "tf3mp_get_engine_receipt", {})
+  if type(value) ~= "table" then return nil end
+  local receipt = value as table
+  local expectedKind = scheduled and "scheduled_receipt" or "engine_receipt"
+  -- Some GUI event dispatchers collect per-script return values. Accept only
+  -- our exact receipt, whether direct or one level inside that result table.
+  if receipt.kind ~= expectedKind then
+    local checked : integer = 0
+    for _, candidate in pairs(receipt) do
+      checked = checked + 1
+      if checked > 64 then break end
+      if type(candidate) == "table" then
+        local item = candidate as table
+        if item.kind == expectedKind and item.nonce == bridgeNonce and item.requestId == lastProbe then
+          receipt = item
+          break
+        end
+      end
+    end
+  end
+  if receipt.schemaVersion == 1 and receipt.kind == expectedKind and receipt.nonce == bridgeNonce and receipt.requestId == lastProbe then
+    if type(receipt.tickCount) ~= "number" or type(receipt.updateCount) ~= "number" then return nil end
+    local result : table = {
+      schemaVersion = 1, kind = expectedKind, nonce = bridgeNonce,
+      requestId = lastProbe, tickCount = receipt.tickCount, updateCount = receipt.updateCount,
+    }
+    if scheduled then
+      if receipt.scheduledUpdate ~= request.scheduledUpdate or (receipt.outcome ~= "applied" and receipt.outcome ~= "late" and receipt.outcome ~= "clock_reset") then return nil end
+      result.scheduledUpdate = receipt.scheduledUpdate
+      result.outcome = receipt.outcome
+      probeResult = receipt.outcome == "applied" and "timing test passed" or "timing test missed deadline"
+    else
+      probeResult = "engine test passed"
+    end
+    app.saveUserdata("tf3mp_status_1", "engine_receipt", result)
+    probeReported = lastProbe
+  end
+  return nil
+end
+
+local function exchangeStationTemplate() : nil
+  if not userdataExists("station_template_request") then return nil end
+  local request = app.loadUserdata("tf3mp_status_1", "station_template_request")
+  if request.schemaVersion ~= 1 or request.kind ~= "station_template_probe" or request.nonce ~= bridgeNonce then return nil end
+  if type(request.requestId) ~= "number" or request.requestId < 1 or request.requestId > 2147483647 or request.requestId % 1 ~= 0 then return nil end
+  if request.requestId > stationProbeSent then
+    stationProbeSent = request.requestId as integer
+    api.cmd.sendCommand(api.cmd.makeScriptingSendEventCmd("tf3mp_status_1::/tf3mp_status.gs", "tf3mp_engine_bridge", "tf3mp_station_template_probe", request))
+  end
+  if stationProbeReported == stationProbeSent then return nil end
+  local value = api.gui.fireGuiScriptEvent("tf3mp_engine_bridge", "tf3mp_get_station_template", {})
+  if type(value) ~= "table" then return nil end
+  local receipt = value as table
+  if receipt.kind ~= "station_template_receipt" then
+    local checked : integer = 0
+    for _, candidate in pairs(receipt) do
+      checked = checked + 1
+      if checked > 64 then break end
+      if type(candidate) == "table" then
+        local item = candidate as table
+        if item.kind == "station_template_receipt" and item.nonce == bridgeNonce and item.requestId == stationProbeSent then receipt = item; break end
+      end
+    end
+  end
+  if receipt.kind ~= "station_template_receipt" or receipt.nonce ~= bridgeNonce or receipt.requestId ~= stationProbeSent then return nil end
+  app.saveUserdata("tf3mp_status_1", "station_template_receipt", receipt)
+  stationProbeReported = stationProbeSent
+  return nil
+end
+
+local function exchangePhase2Depot() : nil
+  if not userdataExists("phase2_depot_request") then return nil end
+  local request = app.loadUserdata("tf3mp_status_1", "phase2_depot_request")
+  if request.schemaVersion ~= 1 or request.kind ~= "phase2_depot" or request.nonce ~= bridgeNonce or request.confirmed ~= 1 then return nil end
+  if type(request.requestId) ~= "number" or request.requestId < 1 or request.requestId > 2147483647 or request.requestId % 1 ~= 0 then return nil end
+  if request.requestId > phase2DepotSent then
+    phase2DepotSent = request.requestId as integer -- Consume before dispatch; never retry.
+    api.cmd.sendCommand(api.cmd.makeScriptingSendEventCmd("tf3mp_status_1::/tf3mp_status.gs", "tf3mp_engine_bridge", "tf3mp_phase2_depot", request))
+  end
+  if phase2DepotReported == phase2DepotSent then return nil end
+  local value = api.gui.fireGuiScriptEvent("tf3mp_engine_bridge", "tf3mp_get_phase2_depot", {})
+  if type(value) ~= "table" then return nil end
+  local receipt = value as table
+  if receipt.kind ~= "phase2_depot_receipt" then
+    local checked : integer = 0
+    for _, candidate in pairs(receipt) do
+      checked = checked + 1
+      if checked > 64 then break end
+      if type(candidate) == "table" then
+        local item = candidate as table
+        if item.kind == "phase2_depot_receipt" and item.nonce == bridgeNonce and item.requestId == phase2DepotSent then receipt = item; break end
+      end
+    end
+  end
+  if receipt.kind ~= "phase2_depot_receipt" or receipt.nonce ~= bridgeNonce or receipt.requestId ~= phase2DepotSent then return nil end
+  app.saveUserdata("tf3mp_status_1", "phase2_depot_receipt", receipt)
+  phase2DepotReported = phase2DepotSent
+  return nil
+end
+
+-- This runs in the regular protected GUI callback, where userdata is allowed.
+-- Consume before dispatch so an uncertain send is never retried from the panel.
+local function exchangePhase2Vehicle() : nil
+  if not userdataExists("phase2_vehicle_request") then return nil end
+  local request = app.loadUserdata("tf3mp_status_1", "phase2_vehicle_request")
+  if request.schemaVersion ~= 1 or request.kind ~= "phase2_vehicle" or request.nonce ~= bridgeNonce or request.confirmed ~= 1 then return nil end
+  local allowed : table = { schemaVersion=true, kind=true, nonce=true, requestId=true, companyEntity=true, targetCompany=true,
+    depotEntity=true, model=true, confirmed=true, issuedTick=true, expiresTick=true }
+  local count : integer = 0; for key, _ in pairs(request) do if allowed[key] ~= true then return nil end; count = count + 1 end
+  if count ~= 11 or type(request.model) ~= "string" or #request.model < 1 or #request.model > 256
+    or not string.match(request.model as string, "^[A-Za-z0-9_.:/%-]+%.mdl$") then return nil end
+  for _, key in ipairs({ "requestId", "companyEntity", "targetCompany", "depotEntity", "issuedTick", "expiresTick" }) do
+    local value = request[key]; if type(value) ~= "number" or value < 0 or value > 2147483647 or value % 1 ~= 0 then return nil end
+  end
+  if request.requestId < 1 or request.companyEntity < 1 or request.targetCompany < 1 or request.depotEntity < 1
+    or request.companyEntity == request.targetCompany or request.expiresTick ~= request.issuedTick + 300 then return nil end
+  if request.requestId > phase2VehicleSent then
+    phase2VehicleSent = request.requestId as integer
+    local param : table = { schemaVersion=1, kind="phase2_vehicle", nonce=bridgeNonce, requestId=phase2VehicleSent,
+      companyEntity=request.companyEntity, targetCompany=request.targetCompany, depotEntity=request.depotEntity,
+      model=request.model, confirmed=1, issuedTick=request.issuedTick, expiresTick=request.expiresTick }
+    api.cmd.sendCommand(api.cmd.makeScriptingSendEventCmd("tf3mp_status_1::/tf3mp_status.gs", "tf3mp_engine_bridge", "tf3mp_phase2_vehicle", param))
+  end
+  if phase2VehicleReported == phase2VehicleSent then return nil end
+  local value = api.gui.fireGuiScriptEvent("tf3mp_engine_bridge", "tf3mp_get_phase2_vehicle", {})
+  if type(value) ~= "table" then return nil end
+  local receipt = value as table
+  if receipt.kind ~= "phase2_vehicle_receipt" then
+    local checked : integer = 0
+    for _, candidate in pairs(receipt) do
+      checked = checked + 1; if checked > 64 then break end
+      if type(candidate) == "table" then
+        local item = candidate as table
+        if item.kind == "phase2_vehicle_receipt" and item.nonce == bridgeNonce and item.requestId == phase2VehicleSent then receipt = item; break end
+      end
+    end
+  end
+  if receipt.kind ~= "phase2_vehicle_receipt" or receipt.nonce ~= bridgeNonce or receipt.requestId ~= phase2VehicleSent then return nil end
+  local result : table = { schemaVersion=1, kind="phase2_vehicle_receipt", nonce=bridgeNonce, requestId=phase2VehicleSent }
+  for _, key in ipairs({ "companyEntity", "targetCompany", "depotEntity", "tickCount", "updateCount", "vehicleEntity", "vehicleOwner", "depotOwner" }) do
+    local numberValue = receipt[key]
+    if type(numberValue) ~= "number" or numberValue < 0 or numberValue > 2147483647 or numberValue % 1 ~= 0 then return nil end
+    result[key] = numberValue
+  end
+  if type(receipt.chargedCost) ~= "number" or receipt.chargedCost < 0 or receipt.chargedCost > 9007199254740991 or receipt.chargedCost % 1 ~= 0 then return nil end
+  result.chargedCost = receipt.chargedCost
+  for _, name in ipairs({ "originalBefore", "originalAfter", "targetBefore", "targetAfter" }) do
+    local amount, negative = receipt[name], receipt[name .. "Negative"]
+    if type(amount) ~= "number" or amount < 0 or amount > 9007199254740991 or amount % 1 ~= 0 or (negative ~= 0 and negative ~= 1) then return nil end
+    result[name] = amount; result[name .. "Negative"] = negative
+  end
+  if type(receipt.model) ~= "string" or receipt.model ~= request.model or type(receipt.outcome) ~= "string" or type(receipt.code) ~= "string" then return nil end
+  result.model = receipt.model; result.outcome = receipt.outcome; result.code = receipt.code
+  app.saveUserdata("tf3mp_status_1", "phase2_vehicle_receipt", result)
+  phase2VehicleReported = phase2VehicleSent
+  return nil
+end
+
+-- Userdata is permitted only in this protected regular GUI callback. Consume
+-- request ids before dispatch; neither failed sends nor unknown receipts retry.
+local function exchangePhase2Station() : nil
+  if not userdataExists("phase2_station_request") then return nil end
+  local request = app.loadUserdata("tf3mp_status_1", "phase2_station_request")
+  if request.schemaVersion ~= 1 or request.kind ~= "phase2_station" or request.nonce ~= bridgeNonce or request.confirmed ~= 1 then return nil end
+  local allowed : table = { schemaVersion=true, kind=true, nonce=true, requestId=true, companyEntity=true, targetCompany=true,
+    slot=true, resource=true, x=true, y=true, z=true, yaw=true, seed=true, confirmed=true, issuedTick=true, expiresTick=true }
+  local count : integer = 0; for key, _ in pairs(request) do if allowed[key] ~= true then return nil end; count = count + 1 end
+  if count ~= 16 or type(request.resource) ~= "string" or #request.resource < 1 or #request.resource > 256 then return nil end
+  for _, key in ipairs({ "requestId", "companyEntity", "targetCompany", "slot", "seed", "issuedTick", "expiresTick" }) do
+    local value = request[key]; if type(value) ~= "number" or value < 0 or value > 2147483647 or value % 1 ~= 0 then return nil end
+  end
+  if request.requestId < 1 or request.companyEntity < 1 or request.targetCompany < 1 or request.companyEntity == request.targetCompany
+    or (request.slot ~= 1 and request.slot ~= 2) or request.seed < 1 or request.expiresTick ~= request.issuedTick + 300 then return nil end
+  for _, key in ipairs({ "x", "y", "z", "yaw" }) do if type(request[key]) ~= "number" or request[key] ~= request[key] then return nil end end
+  if math.abs(request.x) > 100000 or math.abs(request.y) > 100000 or math.abs(request.z) > 10000 or math.abs(request.yaw) > math.pi then return nil end
+  if request.requestId > phase2StationSent then
+    phase2StationSent = request.requestId as integer
+    api.cmd.sendCommand(api.cmd.makeScriptingSendEventCmd("tf3mp_status_1::/tf3mp_status.gs", "tf3mp_engine_bridge", "tf3mp_phase2_station", request))
+  end
+  if phase2StationReported == phase2StationSent then return nil end
+  local value = api.gui.fireGuiScriptEvent("tf3mp_engine_bridge", "tf3mp_get_phase2_station", {})
+  if type(value) ~= "table" then return nil end
+  local receipt = value as table
+  if receipt.kind ~= "phase2_station_receipt" then
+    local checked : integer = 0
+    for _, candidate in pairs(receipt) do
+      checked = checked + 1; if checked > 64 then break end
+      if type(candidate) == "table" then local item = candidate as table
+        if item.kind == "phase2_station_receipt" and item.nonce == bridgeNonce and item.requestId == phase2StationSent then receipt = item; break end
+      end
+    end
+  end
+  if receipt.schemaVersion ~= 1 or receipt.kind ~= "phase2_station_receipt" or receipt.nonce ~= bridgeNonce or receipt.requestId ~= phase2StationSent then return nil end
+  local result : table = { schemaVersion=1, kind="phase2_station_receipt", nonce=bridgeNonce, requestId=phase2StationSent }
+  for _, key in ipairs({ "companyEntity", "targetCompany", "slot", "tickCount", "updateCount", "constructionEntity", "stationEntity", "constructionOwner", "stationOwner" }) do
+    local numberValue = receipt[key]; if type(numberValue) ~= "number" or numberValue < 0 or numberValue > 2147483647 or numberValue % 1 ~= 0 then return nil end; result[key] = numberValue
+  end
+  if type(receipt.resource) ~= "string" or receipt.resource ~= request.resource or type(receipt.outcome) ~= "string" or type(receipt.code) ~= "string" then return nil end
+  result.resource = receipt.resource; result.outcome = receipt.outcome; result.code = receipt.code
+  for _, key in ipairs({ "constructionMembershipPreserved", "stationMembershipPreserved" }) do if receipt[key] ~= 0 and receipt[key] ~= 1 then return nil end; result[key] = receipt[key] end
+  if type(receipt.chargedCost) ~= "number" or receipt.chargedCost < 0 or receipt.chargedCost > 9007199254740991 or receipt.chargedCost % 1 ~= 0 then return nil end; result.chargedCost = receipt.chargedCost
+  for _, name in ipairs({ "originalBefore", "originalAfter", "targetBefore", "targetAfter" }) do
+    local amount, negative = receipt[name], receipt[name .. "Negative"]
+    if type(amount) ~= "number" or amount < 0 or amount > 9007199254740991 or amount % 1 ~= 0 or (negative ~= 0 and negative ~= 1) then return nil end
+    result[name] = amount; result[name .. "Negative"] = negative
+  end
+  app.saveUserdata("tf3mp_status_1", "phase2_station_receipt", result); phase2StationReported = phase2StationSent
+  return nil
+end
+
+local function exchangePhase2Service() : nil
+  if not userdataExists("phase2_service_request") then return nil end
+  local request=app.loadUserdata("tf3mp_status_1","phase2_service_request")
+  if request.schemaVersion~=1 or request.kind~="phase2_service" or request.nonce~=bridgeNonce or request.confirmed~=1 then return nil end
+  local allowed : table={schemaVersion=true,kind=true,nonce=true,requestId=true,companyEntity=true,targetCompany=true,depotEntity=true,vehicleEntity=true,stationA=true,stationB=true,confirmed=true,issuedTick=true,expiresTick=true}
+  local count : integer=0; for key,_ in pairs(request) do if allowed[key]~=true then return nil end; count=count+1 end; if count~=13 then return nil end
+  for _,key in ipairs({"requestId","companyEntity","targetCompany","depotEntity","vehicleEntity","stationA","stationB","issuedTick","expiresTick"}) do local value=request[key]; if type(value)~="number" or value<0 or value>2147483647 or value%1~=0 then return nil end end
+  if request.requestId<1 or request.companyEntity<1 or request.targetCompany<1 or request.companyEntity==request.targetCompany or request.depotEntity<1 or request.vehicleEntity<1 or request.stationA<1 or request.stationB<1 or request.stationA==request.stationB or request.expiresTick~=request.issuedTick+300 then return nil end
+  if request.requestId>phase2ServiceSent then phase2ServiceSent=request.requestId as integer; api.cmd.sendCommand(api.cmd.makeScriptingSendEventCmd("tf3mp_status_1::/tf3mp_status.gs","tf3mp_engine_bridge","tf3mp_phase2_service",request)) end
+  if phase2ServiceReported==phase2ServiceSent then return nil end
+  local value=api.gui.fireGuiScriptEvent("tf3mp_engine_bridge","tf3mp_get_phase2_service",{}); if type(value)~="table" then return nil end; local receipt=value as table
+  if receipt.kind~="phase2_service_receipt" then local checked : integer=0; for _,candidate in pairs(receipt) do checked=checked+1; if checked>64 then break end; if type(candidate)=="table" then local item=candidate as table; if item.kind=="phase2_service_receipt" and item.nonce==bridgeNonce and item.requestId==phase2ServiceSent then receipt=item; break end end end end
+  if receipt.schemaVersion~=1 or receipt.kind~="phase2_service_receipt" or receipt.nonce~=bridgeNonce or receipt.requestId~=phase2ServiceSent or type(receipt.outcome)~="string" or type(receipt.code)~="string" then return nil end
+  local result : table={schemaVersion=1,kind="phase2_service_receipt",nonce=bridgeNonce,requestId=phase2ServiceSent,outcome=receipt.outcome,code=receipt.code}
+  for _,key in ipairs({"companyEntity","targetCompany","depotEntity","vehicleEntity","stationA","stationB","tickCount","updateCount","lineEntity","lineOwner","vehicleOwner","stationAOwner","stationBOwner"}) do local item=receipt[key]; if type(item)~="number" or item<0 or item>2147483647 or item%1~=0 then return nil end; result[key]=item end
+  app.saveUserdata("tf3mp_status_1","phase2_service_receipt",result); phase2ServiceReported=phase2ServiceSent; return nil
+end
+
+local function exchangePhase2Funding() : nil
+  if not userdataExists("phase2_funding_request") then return nil end
+  local request = app.loadUserdata("tf3mp_status_1", "phase2_funding_request")
+  if request.schemaVersion ~= 1 or request.kind ~= "phase2_funding" or request.nonce ~= bridgeNonce or request.confirmed ~= 1 then return nil end
+  for _, key in ipairs({ "requestId", "companyEntity", "targetCompany", "amount", "issuedTick", "expiresTick" }) do
+    local value = request[key]
+    if type(value) ~= "number" or value < 0 or value > 2147483647 or value % 1 ~= 0 then return nil end
+  end
+  if request.requestId < 1 or request.amount < 1 or request.amount > 1000000 or request.expiresTick ~= request.issuedTick + 300 then return nil end
+  if request.requestId > phase2FundingSent then
+    phase2FundingSent = request.requestId as integer
+    api.cmd.sendCommand(api.cmd.makeScriptingSendEventCmd("tf3mp_status_1::/tf3mp_status.gs", "tf3mp_engine_bridge", "tf3mp_phase2_funding", request))
+  end
+  if phase2FundingReported == phase2FundingSent then return nil end
+  local value = api.gui.fireGuiScriptEvent("tf3mp_engine_bridge", "tf3mp_get_phase2_funding", {})
+  if type(value) ~= "table" then return nil end
+  local receipt = value as table
+  if receipt.kind ~= "phase2_funding_receipt" then
+    local checked : integer = 0
+    for _, candidate in pairs(receipt) do
+      checked = checked + 1
+      if checked > 64 then break end
+      if type(candidate) == "table" then
+        local item = candidate as table
+        if item.kind == "phase2_funding_receipt" and item.nonce == bridgeNonce and item.requestId == phase2FundingSent then receipt = item; break end
+      end
+    end
+  end
+  if receipt.kind ~= "phase2_funding_receipt" or receipt.nonce ~= bridgeNonce or receipt.requestId ~= phase2FundingSent then return nil end
+  app.saveUserdata("tf3mp_status_1", "phase2_funding_receipt", receipt)
+  phase2FundingReported = phase2FundingSent
+  return nil
+end
+
+local function exchangeCompanyProbe() : nil
+  if not userdataExists("company_request") then return nil end
+  local request = app.loadUserdata("tf3mp_status_1", "company_request")
+  if request.schemaVersion ~= 1 or (request.kind ~= "company_probe" and request.kind ~= "finance_probe") or request.nonce ~= bridgeNonce then return nil end
+  local finance = request.kind == "finance_probe"
+  local expectedKind = finance and "finance_receipt" or "company_receipt"
+  for _, key in ipairs({ "requestId", "companyEntity", "issuedTick", "expiresTick" }) do
+    local value = request[key]
+    if type(value) ~= "number" or value < 0 or value > 2147483647 or value % 1 ~= 0 then return nil end
+  end
+  if request.requestId < 1 or request.expiresTick ~= request.issuedTick + 300 then return nil end
+  if request.requestId > companyProbeSent then
+    companyProbeSent = request.requestId as integer -- Consume before dispatch; never retry.
+    api.cmd.sendCommand(api.cmd.makeScriptingSendEventCmd("tf3mp_status_1::/tf3mp_status.gs", "tf3mp_engine_bridge", finance and "tf3mp_finance_probe" or "tf3mp_company_probe", {
+      schemaVersion = 1, nonce = bridgeNonce, requestId = companyProbeSent, companyEntity = request.companyEntity,
+      issuedTick = request.issuedTick, expiresTick = request.expiresTick,
+    }))
+  end
+  if companyProbeReported == companyProbeSent then return nil end
+  local value = api.gui.fireGuiScriptEvent("tf3mp_engine_bridge", finance and "tf3mp_get_finance_receipt" or "tf3mp_get_company_receipt", {})
+  if type(value) ~= "table" then return nil end
+  local receipt = value as table
+  if receipt.kind ~= expectedKind then
+    local checked : integer = 0
+    for _, candidate in pairs(receipt) do
+      checked = checked + 1
+      if checked > 64 then break end
+      if type(candidate) == "table" then
+        local item = candidate as table
+        if item.kind == expectedKind and item.nonce == bridgeNonce and item.requestId == companyProbeSent then receipt = item; break end
+      end
+    end
+  end
+  if receipt.kind ~= expectedKind or receipt.nonce ~= bridgeNonce or receipt.requestId ~= companyProbeSent then return nil end
+  local result : table = {
+    schemaVersion = 1, kind = expectedKind, nonce = bridgeNonce, requestId = companyProbeSent,
+    companyEntity = receipt.companyEntity, newCompanyEntity = receipt.newCompanyEntity, outcome = receipt.outcome,
+    tickCount = receipt.tickCount, updateCount = receipt.updateCount,
+  }
+  if finance then
+    result.stage = receipt.stage
+    for _, name in ipairs({ "originalBefore", "originalCredit", "originalAfter", "targetBefore", "targetCredit", "targetAfter" }) do
+      result[name] = receipt[name]; result[name .. "Negative"] = receipt[name .. "Negative"]
+    end
+  end
+  app.saveUserdata("tf3mp_status_1", expectedKind, result)
+  companyProbeReported = companyProbeSent
+  return nil
+end
+
+-- Read-only: discover the saved test-company marker, then query both engine
+-- entities. Never create a company, switch control or move money here.
+local function exchangeCompanyInspection() : nil
+  if not userdataExists("company_inspect_request") then return nil end
+  local request = app.loadUserdata("tf3mp_status_1", "company_inspect_request")
+  if request.schemaVersion ~= 1 or request.kind ~= "company_inspect" or request.nonce ~= bridgeNonce then return nil end
+  if type(request.requestId) ~= "number" or request.requestId < 1 or request.requestId > 2147483647 or request.requestId % 1 ~= 0 then return nil end
+  if request.requestId <= companyInspectionSent then return nil end
+  companyInspectionSent = request.requestId as integer
+  local result : table = { schemaVersion = 1, kind = "company_inspection", nonce = bridgeNonce, requestId = companyInspectionSent,
+    outcome = "no_test_company", tickCount = 0, updateCount = 0, companyEntity = 0, newCompanyEntity = 0,
+    originalBalance = 0, originalKnown = 0, originalNegative = 0, originalAssets = 0, originalVehicles = 0, originalLines = 0,
+    createdBalance = 0, createdKnown = 0, createdNegative = 0, createdAssets = 0, createdVehicles = 0, createdLines = 0 }
+  local ok = pcall(function()
+    local clock = api.engine.getComponent(api.engine.util.getWorld(), api.type.ComponentType.GAME_TIME) as Engine.Component.GameTime
+    result.tickCount = clock.tickCount
+    result.updateCount = clock.updateCount
+    local value = api.gui.fireGuiScriptEvent("tf3mp_engine_bridge", "tf3mp_get_company_receipt", {})
+    if type(value) ~= "table" then return end
+    local receipt = value as table
+    if receipt.kind ~= "company_receipt" then
+      local checked : integer = 0
+      for _, candidate in pairs(receipt) do
+        checked = checked + 1
+        if checked > 64 then break end
+        if type(candidate) == "table" then
+          local item = candidate as table
+          if item.kind == "company_receipt" and item.outcome == "created" then receipt = item; break end
+        end
+      end
+    end
+    if receipt.kind ~= "company_receipt" or receipt.outcome ~= "created" then return end
+    local original = receipt.companyEntity as integer
+    local created = receipt.newCompanyEntity as integer
+    result.companyEntity = original
+    result.newCompanyEntity = created
+    if original == created or not api.engine.entityExists(original) or not api.engine.entityExists(created) then result.outcome = "company_missing"; return end
+    if api.engine.util.getPlayer() ~= original then result.outcome = "company_changed"; return end
+    for index, entity in ipairs({ original, created }) do
+      local company = api.engine.getComponent(entity, api.type.ComponentType.PLAYER) as Engine.Component.Player
+      if company == nil then result.outcome = "company_missing"; return end
+      local prefix = index == 1 and "original" or "created"
+      local balance = api.engine.util.finance.getPlayersBalance(entity)
+      if balance ~= nil then
+        result[prefix .. "Known"] = 1
+        result[prefix .. "Negative"] = balance < 0 and 1 or 0
+        result[prefix .. "Balance"] = balance < 0 and -balance or balance
+      end
+      local filter : Engine.EntityFilters = { requireOwnedByPlayer = entity }
+      result[prefix .. "Assets"] = #api.engine.getEntitiesWithComponent(api.type.ComponentType.PLAYER_OWNED, filter)
+      result[prefix .. "Vehicles"] = #api.engine.getEntitiesWithComponent(api.type.ComponentType.TRANSPORT_VEHICLE, filter)
+      result[prefix .. "Lines"] = #api.engine.system.lineSystem.getLinesForPlayer(entity)
+    end
+    result.outcome = "inspected"
+  end)
+  if not ok then result.outcome = "read_failed" end
+  app.saveUserdata("tf3mp_status_1", "company_inspection", result)
+  return nil
+end
+
+-- Delay only in GUI memory. Recheck the live request immediately before the
+-- send; the engine independently refuses early/late delivery before pausing.
+local function dispatchPauseAtUpdate() : nil
+  if pendingPauseDelivery.nonce == nil then return nil end
+  local request = pendingPauseDelivery
+  if missedAcks > 10 or not userdataExists("bridge") or not userdataExists("pause_request") then pendingPauseDelivery = {}; return nil end
+  local config = app.loadUserdata("tf3mp_status_1", "bridge")
+  if config.mode ~= "pause_test" or config.nonce ~= request.nonce or request.nonce ~= bridgeNonce then pendingPauseDelivery = {}; return nil end
+  local clock = api.engine.getComponent(api.engine.util.getWorld(), api.type.ComponentType.GAME_TIME) as Engine.Component.GameTime
+  if clock.updateCount < request.scheduledUpdate - 1 and clock.tickCount <= request.expiresTick then return nil end
+  pendingPauseDelivery = {} -- Consume before dispatch, never retry.
+  local live = app.loadUserdata("tf3mp_status_1", "pause_request")
+  for key, value in pairs(request) do
+    if live[key] ~= value then return nil end
+  end
+  api.cmd.sendCommand(api.cmd.makeScriptingSendEventCmd("tf3mp_status_1::/tf3mp_status.gs", "tf3mp_engine_bridge", "tf3mp_pause_probe", request))
+  return nil
+end
+
+local function exchangePauseTest() : nil
+  if not userdataExists("pause_request") then return nil end
+  local request = app.loadUserdata("tf3mp_status_1", "pause_request")
+  if request.schemaVersion ~= 1 or request.kind ~= "pause_probe" or request.nonce ~= bridgeNonce then return nil end
+  if request.phase ~= "pause" and request.phase ~= "check" and request.phase ~= "resume" then return nil end
+  local eventParam : table = { schemaVersion = 1, kind = "pause_probe", nonce = bridgeNonce, phase = request.phase }
+  for _, key in ipairs({ "requestId", "companyEntity", "heldUpdate", "issuedTick", "expiresTick", "scheduledUpdate" }) do
+    local value = request[key]
+    if type(value) ~= "number" or value < 0 or value > 2147483647 or value % 1 ~= 0 then return nil end
+    eventParam[key] = value
+  end
+  local key = tostring(request.requestId) .. ":" .. (request.phase as string)
+  if pausePhaseSent ~= key then
+    pausePhaseSent = key
+    if request.phase == "pause" and request.scheduledUpdate > 0 then
+      pendingPauseDelivery = eventParam
+    else
+      api.cmd.sendCommand(api.cmd.makeScriptingSendEventCmd("tf3mp_status_1::/tf3mp_status.gs", "tf3mp_engine_bridge", "tf3mp_pause_probe", eventParam))
+    end
+  end
+  local value = api.gui.fireGuiScriptEvent("tf3mp_engine_bridge", "tf3mp_get_pause_receipt", {})
+  if type(value) ~= "table" then return nil end
+  local receipt = value as table
+  if receipt.kind ~= "pause_receipt" then
+    local checked : integer = 0
+    for _, candidate in pairs(receipt) do
+      checked = checked + 1
+      if checked > 64 then break end
+      if type(candidate) == "table" then
+        local item = candidate as table
+        if item.kind == "pause_receipt" and item.nonce == bridgeNonce then receipt = item; break end
+      end
+    end
+  end
+  if receipt.kind ~= "pause_receipt" or receipt.nonce ~= bridgeNonce or receipt.requestId ~= request.requestId or receipt.phase ~= request.phase then return nil end
+  local result : table = { schemaVersion = 1, kind = "pause_receipt", nonce = bridgeNonce, phase = request.phase }
+  for _, field in ipairs({ "requestId", "companyEntity", "heldUpdate", "tickCount", "updateCount", "speedup" }) do
+    local numberValue = receipt[field]
+    if type(numberValue) ~= "number" or numberValue < 0 or numberValue > 2147483647 or numberValue % 1 ~= 0 then return nil end
+    result[field] = numberValue
+  end
+  if type(receipt.outcome) ~= "string" or not string.match(receipt.outcome as string, "^[a-z_]+$") then return nil end
+  result.outcome = receipt.outcome
+  app.saveUserdata("tf3mp_status_1", "pause_receipt", result)
+  return nil
+end
+
+local function exchangeHeldSnapshot() : nil
+  if not userdataExists("snapshot_request") then return nil end
+  local request = app.loadUserdata("tf3mp_status_1", "snapshot_request")
+  if request.schemaVersion ~= 1 or request.kind ~= "snapshot_request" or request.nonce ~= bridgeNonce then return nil end
+  local param : table = { schemaVersion = 1, kind = "snapshot_request", nonce = bridgeNonce }
+  for _, key in ipairs({ "requestId", "entity", "companyEntity", "heldUpdate", "issuedTick", "expiresTick" }) do
+    local v = request[key]
+    if type(v) ~= "number" or v < 0 or v > 2147483647 or v % 1 ~= 0 then return nil end
+    param[key] = v
+  end
+  if param.requestId < 1 or param.expiresTick ~= param.issuedTick + 300 then return nil end
+  if param.requestId > snapshotSent then
+    snapshotSent = param.requestId as integer
+    api.cmd.sendCommand(api.cmd.makeScriptingSendEventCmd("tf3mp_status_1::/tf3mp_status.gs", "tf3mp_engine_bridge", "tf3mp_capture_snapshot", param))
+  end
+  local value = api.gui.fireGuiScriptEvent("tf3mp_engine_bridge", "tf3mp_get_snapshot", {})
+  if type(value) ~= "table" then return nil end
+  local receipt = value as table
+  if receipt.kind ~= "held_snapshot" then
+    local checked : integer = 0
+    for _, candidate in pairs(receipt) do
+      checked = checked + 1
+      if checked > 64 then break end
+      if type(candidate) == "table" then
+        local item = candidate as table
+        if item.kind == "held_snapshot" and item.nonce == bridgeNonce then receipt = item; break end
+      end
+    end
+  end
+  if receipt.kind ~= "held_snapshot" or receipt.nonce ~= bridgeNonce or receipt.requestId ~= param.requestId then return nil end
+  local result : table = { schemaVersion = 1, kind = "held_snapshot", nonce = bridgeNonce }
+  for _, key in ipairs({ "requestId", "entity", "companyEntity", "heldUpdate", "tickCount", "updateCount", "speedup", "ownerCompanyEntity", "revision", "stopFlag", "balanceNegative" }) do
+    local v = receipt[key]
+    if type(v) ~= "number" or v < 0 or v > 2147483647 or v % 1 ~= 0 then return nil end
+    result[key] = v
+  end
+  if type(receipt.balance) ~= "number" or receipt.balance < 0 or receipt.balance > 9007199254740991 or receipt.balance % 1 ~= 0 then return nil end
+  if type(receipt.outcome) ~= "string" or not string.match(receipt.outcome as string, "^[a-z_]+$") then return nil end
+  result.balance = receipt.balance; result.outcome = receipt.outcome
+  app.saveUserdata("tf3mp_status_1", "snapshot_receipt", result)
+  return nil
+end
+
+local function exchangeTelemetry(tickCount : integer, updateCount : integer) : string
+  if not userdataExists("bridge") then return "helper offline" end
+  local config = app.loadUserdata("tf3mp_status_1", "bridge")
+  if config.schemaVersion ~= 1 or (config.mode ~= "telemetry" and config.mode ~= "vehicle_test" and config.mode ~= "company_test" and config.mode ~= "pause_test" and config.mode ~= "halt_test" and config.mode ~= "watchdog_test") or type(config.nonce) ~= "string" then
+    return "bridge config invalid"
+  end
+  local nonce = config.nonce as string
+  if #nonce ~= 32 or not string.match(nonce, "^[0-9a-f]+$") then return "bridge config invalid" end
+  if nonce ~= bridgeNonce then
+    bridgeNonce = nonce
+    bridgeCounter = 0
+    lastAck = -1
+    missedAcks = 0
+    lastProbe = 0
+    probeReported = 0
+    probeFailed = false
+    probeResult = "diagnostics"
+    vehiclePhaseKey = ""
+    companyProbeSent = 0
+    phase2FundingSent = 0
+    phase2FundingReported = 0
+    phase2DepotSent = 0
+    phase2DepotReported = 0
+    phase2VehicleSent = 0
+    phase2VehicleReported = 0
+    phase2StationSent = 0
+    phase2StationReported = 0
+    phase2ServiceSent = 0
+    phase2ServiceReported = 0
+    stationProbeSent = 0
+    stationProbeReported = 0
+    companyProbeReported = 0
+    companyInspectionSent = 0
+    pausePhaseSent = ""
+    snapshotSent = 0
+    haltSent = 0
+    watchdogSent = 0
+    coordinationSent = ""
+    bindingSent = ""
+    preparationSent = ""
+    executionSent = ""
+    pendingExecution = {}
+    pendingCheckpoint = {}
+    checkpointSent = ""
+    releaseSent = ""
+    pendingPauseDelivery = {}
+    pendingVehicleDelivery = {}
+  end
+  if userdataExists("ack") then
+    local ack = app.loadUserdata("tf3mp_status_1", "ack")
+    if ack.schemaVersion == 1 and ack.nonce == bridgeNonce and type(ack.counter) == "number" then
+      local counter = ack.counter as number
+      if counter % 1 == 0 and counter > lastAck and counter <= bridgeCounter then
+        lastAck = counter as integer
+        missedAcks = 0
+      end
+    end
+  end
+  bridgeCounter = bridgeCounter + 1
+  missedAcks = missedAcks + 1
+  app.saveUserdata("tf3mp_status_1", "telemetry", {
+    schemaVersion = 1, kind = "telemetry", nonce = bridgeNonce,
+    counter = bridgeCounter, tickCount = tickCount, updateCount = updateCount,
+  })
+  -- Optional read-only observations. No mutation or request dispatch, and no
+  -- userdata I/O from the restricted engine timer. Isolate failures so an
+  -- unsupported component cannot bring down the working status bridge.
+  local observationOk, observationWritten = pcall(function() : boolean
+    local world = api.engine.util.getWorld()
+    local freshClock = api.engine.getComponent(world, api.type.ComponentType.GAME_TIME) as Engine.Component.GameTime
+    local speed = api.engine.getComponent(world, api.type.ComponentType.GAME_SPEED) as Engine.Component.GameSpeed
+    local company = api.engine.util.getPlayer()
+    if not api.engine.entityExists(company) then return false end
+    local balance = api.engine.util.finance.getPlayersBalance(company)
+    local known : integer = 1
+    if balance == nil then balance = 0; known = 0 end
+    local negative : integer = 0
+    if balance < 0 then negative = 1; balance = -balance end
+    app.saveUserdata("tf3mp_status_1", "engine_observation", {
+      schemaVersion = 1, kind = "engine_observation", nonce = bridgeNonce,
+      counter = bridgeCounter, tickCount = freshClock.tickCount, updateCount = freshClock.updateCount,
+      speedup = speed.speedup, companyEntity = company, balanceKnown = known, balanceNegative = negative, balance = balance,
+    })
+    return true
+  end)
+  if not probeFailed then
+    local ok = pcall(exchangeEngineProbe)
+    if not ok then probeFailed = true end
+  end
+  if config.mode == "watchdog_test" then
+    pcall(exchangeBinding)
+    pcall(exchangeCheckpoint)
+    pcall(exchangeRelease)
+    pcall(exchangePreparation)
+    pcall(exchangeExecution)
+    pcall(exchangeCoordinationHalt)
+    local watchdogOk = pcall(exchangeWatchdog)
+    if missedAcks > 10 then return watchdogOk and "helper disconnected / observing engine stop" or "helper disconnected / stop evidence unavailable" end
+    if lastAck < 0 then return "bridge connecting" end
+    return watchdogOk and "LOCAL engine expiry test / ends paused" or "expiry stop unknown / pause manually"
+  end
+  if missedAcks > 10 then return "bridge disconnected" end
+  if lastAck < 0 then return "bridge connecting" end
+  if config.mode == "halt_test" then
+    local haltOk = pcall(exchangeHalt)
+    return haltOk and "LOCAL stop test / see launcher" or "stop outcome unknown / pause manually"
+  end
+  if config.mode == "pause_test" then
+    local snapshotOk = pcall(exchangeHeldSnapshot)
+    if not snapshotOk then return "snapshot unavailable / see launcher" end
+    local ok = pcall(exchangePauseTest)
+    return ok and "LOCAL pause test / see launcher" or "pause test error / resume manually"
+  end
+  local inspectionOk = pcall(exchangeCompanyInspection)
+  if not inspectionOk then return "company inspection unavailable / see launcher" end
+  if config.mode == "company_test" then
+    local stationOk = pcall(exchangeStationTemplate)
+    if not stationOk then return "station inspection unavailable / do not retry" end
+    local depotOk = pcall(exchangePhase2Depot)
+    if not depotOk then return "depot outcome unknown / do not retry" end
+    local vehicleOk = pcall(exchangePhase2Vehicle)
+    if not vehicleOk then return "vehicle outcome unknown / do not retry" end
+    local stationOk = pcall(exchangePhase2Station)
+    if not stationOk then return "station outcome unknown / do not retry" end
+    local serviceOk = pcall(exchangePhase2Service)
+    if not serviceOk then return "service outcome unknown / do not retry" end
+    local fundingOk = pcall(exchangePhase2Funding)
+    if not fundingOk then return "funding outcome unknown / do not retry" end
+    local ok = pcall(exchangeCompanyProbe)
+    return ok and "company test / see launcher / disposable save" or "company test error / do not retry"
+  end
+  if config.mode == "vehicle_test" then
+    local ok = pcall(exchangeVehicleTest)
+    return ok and "LOCAL vehicle test / not multiplayer" or "vehicle test error / see launcher"
+  end
+  if probeFailed then return "bridge connected / engine test failed" end
+  if not observationOk or observationWritten ~= true then return "bridge connected / observation unavailable / see launcher" end
+  return "bridge connected / " .. probeResult
+end
+-- USERDATA EXCHANGE END
+
+local Tf3MpStatusPanel = react.RegisterPluginRecipe(game_bar_widgets.GameBarInfoDisplayExtension, "Tf3MpStatusPanel", function() : TreeNodeId
+  local makeState = function() : Tf3MpPanelState
+    local clock = api.engine.getComponent(api.engine.util.getWorld(), api.type.ComponentType.GAME_TIME) as Engine.Component.GameTime
+    return {
+      tickCount = clock.tickCount,
+      updateCount = clock.updateCount,
+    }
+  end
+
+  local status = engine_react_util.useStepStateTimer(makeState, 0.5)
+  local current = status:old()
+  local bridgeStatus = react.useState("bridge waiting") as ReactStateT<string>
+  -- Unlike onStepTimer, onStep does not enqueue a restricted deferred step.
+  -- TF3's own map editor uses getAllUserdata here. Never move this into makeState.
+  react.onStep(function()
+    checkPlacementRoute()
+    if bridgeFailed then pcall(restoreSpeedControls); return end
+    local checkpointOk = pcall(dispatchCheckpointAtUpdate)
+    if not checkpointOk then
+      pendingCheckpoint = {}
+      bridgeFailed = true
+      bridgeStatus:set("checkpoint delivery unknown / stop helper / do not retry")
+      return
+    end
+    local executionOk = pcall(dispatchExecutionAtUpdate)
+    if not executionOk then
+      pendingExecution = {}
+      bridgeFailed = true
+      bridgeStatus:set("execution delivery unknown / stop helper / do not retry")
+      return
+    end
+    local pauseDeliveryOk = pcall(dispatchPauseAtUpdate)
+    if not pauseDeliveryOk then
+      pendingPauseDelivery = {}
+      bridgeFailed = true
+      bridgeStatus:set("pause delivery failed / stop helper / resume manually")
+      return
+    end
+    local deliveryOk = pcall(dispatchVehicleAtUpdate)
+    if not deliveryOk then
+      pendingVehicleDelivery = {}
+      bridgeFailed = true
+      bridgeStatus:set("scheduled delivery failed / restart helper and UI")
+      return
+    end
+    stepCount = stepCount + 1
+    if stepCount % 30 ~= 0 then return end
+    local ok, result = pcall(function() : string
+      local sample = status:old()
+      return exchangeTelemetry(sample.tickCount, sample.updateCount)
+    end)
+    if not ok then
+      pcall(restoreSpeedControls)
+      bridgeFailed = true
+      bridgeStatus:set("bridge unavailable / file access failed")
+    else
+      bridgeStatus:set(result as string)
+      local controlsOk = pcall(exchangeSpeedControls)
+      if not controlsOk then
+        pcall(restoreSpeedControls)
+        bridgeFailed = true
+        bridgeStatus:set("speed control test failed / stop helper")
+      end
+    end
+  end)
+  react.onUnmount(function() pcall(restoreSpeedControls) end)
+
+  return builtin.BoxLayout {
+    orientation = builtin.type.Orientation.Horizontal,
+    children = {
+      builtin.Component {
+        meta = {
+          tooltip = _("Gameplay is not synchronized. Diagnostics are active by default. Launcher Debug can enable an experimental LOCAL vehicle stop/start test. File access failures disable the bridge until the UI is reopened."),
+        },
+        layout = builtin.BoxLayout {
+          orientation = builtin.type.Orientation.Horizontal,
+          children = {
+            builtin.TextView {
+              meta = { class = "font-scale-headline" },
+              text = _("TF3MP"),
+            },
+            builtin.TextView {
+              meta = { class = "font-scale-headline" },
+              text = "update " .. tostring(current.updateCount) .. " / " .. bridgeStatus:old(),
+            },
+          },
+        },
+      },
+    },
+  }
+end)
+
+return {
+  Tf3MpStatusPanel = Tf3MpStatusPanel,
+}
