@@ -1,5 +1,45 @@
 # TalCo TF3 multiplayer — current delivery plan
 
+## Superseding next critical path — 21 September 2026
+
+The full multiplayer objective remains active. Commit `db22017` establishes a
+real single-game vertical slice through automatic disposable load, exact-build
+simulation observation, authenticated native hold/release, and one reversible
+HostAuthority-sequenced vehicle action with observed restoration. It does not
+establish multiplayer readiness.
+
+Work in this order:
+
+1. Keep live `--profile command` quarantined. Independently review the
+   `0x80000004` crash at admission RVA `0x9D3120`, apply equivalent strict trap
+   ownership to the controller, and qualify a safe semantic command boundary on
+   disposable instances before any suppression experiment.
+2. Implement immutable command capture, origin suppression, host admission for
+   host and participant actions, per-instance entity resolution, exactly-once
+   replay and correlated native postconditions. Cover both stock vehicle-window
+   and bulk-manager paths; do not leave unsynchronized bypasses enabled.
+3. Construct the real production `EngineSessionAdapter` in Host and Join. Reuse
+   the gate's persistent binding, keep transport receipts outside world evidence,
+   and provide a complete hold/release/halt lifecycle that continues receiving
+   control traffic while simulation is paused.
+4. Resolve background synchronization. The game producer now covers six public
+   domains but explicitly lacks RNG/hidden state, so production checkpoint
+   admission fails closed. Either qualify enough deterministic state at matching
+   updates or implement concrete host-authoritative state replication.
+5. Implement coordinated save checkpoints/reload, authenticated redistribution,
+   persistent company assignment, fresh epochs and duplicate barriers after
+   recovery. Never retry unknown mutations or repair balances.
+6. Complete the road loop and native accounting: roads, depots, stops, purchase,
+   assignment, start/stop, sale, lines, construction/purchase costs, operating
+   costs and income, including cross-company rejection.
+7. Only then run two-instance no-input/action/recovery tests, followed by LAN,
+   port-forwarded Internet and four-player acceptance.
+
+Current safety gates are engineering work, not an external blocker. The lack of
+a second controlled machine leaves cross-machine acceptance open, but does not
+justify stopping source/native integration. Exact status, crash evidence and the
+consolidated procedure are in `native-review-handoff.md`.
+
 ## Current priority — native integration, 21 September
 
 The user has authorized a native-first feasibility track, superseding the older

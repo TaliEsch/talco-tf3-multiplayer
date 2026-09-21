@@ -1,5 +1,35 @@
 # Completion audit against the build prompt
 
+## Full-readiness continuation audit — 21 September 2026
+
+The goal is still active and incomplete. Commit `db22017` is not a completion
+claim. It adds real exact-build simulation observation, authenticated native
+hold/release/halt IPC, fail-stop teardown, automatic disposable-save startup,
+game-produced checkpoint domains, and a single-game host-sequenced reversible
+vehicle stop/start proof. The live vehicle proof applied host sequences 1 and 2
+to company 3141/entity 66005 and restored the original running state.
+
+The later command-profile run failed: TF3 crashed with Windows exception
+`0x80000004` at proposed admission RVA `0x9D3120` before discovery or mutation.
+No uncertain action was retried. That profile is now disabled before process
+access; owned 16-thread/missing-DR6/cutoff fixtures pass, but live safety remains
+unqualified. Normal Host/Join also remains deliberately closed because the native
+runtime reports `productionQualified:false` and no production game adapter is
+constructed.
+
+Current verification is 808/808 passing, not 478/478 and not the earlier 756-test
+baseline. Both native builds pass MSVC `/W4 /WX`; mod review passes with 29 files,
+zero executables and manifest
+`80ed637bb9c609d7e990616ebd1797b3571d1d536a39f447779af4b905fe1dc7`.
+
+Unfinished implementation: safe capture/suppression/replay, per-instance identity,
+complete background-state agreement, checkpoint save/reload recovery, production
+Host/Join adapter wiring, separate-company accounting and the full road loop.
+Unperformed acceptance: two TF3 instances, cross-machine, LAN/Internet and four
+players. Therefore the honest verdict is **not multiplayer-ready**. See the
+superseding section of `native-review-handoff.md` for evidence and the single
+consolidated acceptance procedure.
+
 ## Review-ready native qualification batch — 21 September 2026
 
 The supplied TF2 reference clone was verified clean at exact requested/default
@@ -33,7 +63,9 @@ divergence detection is not yet operational.
 
 Integrated verification: the first sandboxed `npm run check` encountered one
 `spawn EPERM` at the owned helper lifecycle subprocess; the permitted rerun passed
-all 478 TAP tests, including that test. The MSVC x64 native build/smoke passed.
+the same test. A fresh count-only reporter on the current suite recorded 756
+passed, 0 failed and 0 skipped/cancelled in 37.7 seconds; the earlier 478 figure
+was an incomplete visible TAP sequence and is corrected here. The MSVC x64 native build/smoke passed.
 The exact installed image matched the non-activating static profile. No launcher
 or mod source changed, so launcher build and mod review were not rerun. TF3 was not
 launched: no qualified observer/hook existed to justify a bounded game run. See

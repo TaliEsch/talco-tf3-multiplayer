@@ -1,5 +1,226 @@
 # Native-integration review handoff — 21 September 2026
 
+## Superseding full-readiness handoff
+
+This section supersedes the older review-batch narrative below. The objective is
+full multiplayer readiness, and that objective is **not complete**. Commit
+`db22017` advances a real single-game vertical slice and fail-closed native
+tooling; it does not provide functioning multi-instance multiplayer.
+
+### What became functional
+
+- A launcher-prepared, exclusive disposable save copy can be hash/size verified,
+  requested through a one-shot userdata record and automatically loaded by TF3.
+  The live run proved the corrected empty `SavegameId.path` behavior and reached
+  `Game is ready`. The final source additionally defers loading until two update
+  callbacks after `mainMenuReady`; that timing repair is source/review tested but
+  was not restaged or live-retested after the later observer crash.
+- The exact installed build was observed on a real simulation thread with four
+  hardware execution sites, 128 hits, stable site order and verified register
+  restoration/detach. This is an observed update boundary, not yet a canonical
+  multiplayer clock.
+- The authenticated native controller held the disposable TF3 process at the
+  observed pre-update boundary, continued answering IPC pings while held,
+  released exactly one iteration and explicitly restored/detached. Abnormal
+  controller exit now uses Windows debugger kill-on-exit as a fail-stop; owned
+  fixtures verify both that path and normal detach.
+- The mod can discover one actually owned transport vehicle without mutation.
+  A real disposable-world slice then routed stop/start through `HostAuthority`,
+  produced host sequences 1 and 2, executed each once, observed updates 5597 and
+  5605, and restored vehicle 66005 for company 3141 to its original running
+  state. This is single-game evidence. Stock UI interception/suppression and
+  cross-instance replay do not exist.
+- The game-side checkpoint producer now emits schema-v2 domain digests for
+  construction/growth proxy state, company finances, topology, vehicles,
+  companies and lines/services. Inaccessible RNG/hidden state is explicitly
+  `unavailable`. Production mailbox admission now refuses incomplete coverage;
+  the legacy company-only path is explicitly `local_diagnostic`.
+- Native IPC, client framing, persistent session binding, Host/Join admission
+  gating, disconnect/halt fencing and diagnostic-only transport are implemented.
+  The current controller advertises `productionQualified:false`, so ordinary
+  Host/Join correctly remains closed rather than mistaking debugger receipts for
+  world evidence.
+
+### Real execution paths
+
+1. `src/startup-load.mjs` creates and verifies a random disposable copy and the
+   exact one-shot request. `mod/content/tf3mp_startup_load.script.lua` consumes
+   that request before calling `app.loadGame`.
+2. `native/runtime_observer.cpp` performs exact-build, mapped-byte-gated
+   observation. The default simulation profile is the only live profile still
+   selectable. `Build-NativeRuntime.ps1` builds it with `/W4 /WX`.
+3. `native/runtime_controller.cpp` owns authenticated native IPC, session
+   binding, hold/release/halt and teardown. `src/native-runtime-client.mjs` is the
+   framed client and `src/native-host-join.mjs` is the fail-closed admission gate.
+4. `src/cli.mjs` requires that native gate for normal Host/Join and offers a
+   non-admitting diagnostic transport mode. This gate is not yet a working
+   gameplay adapter: no production-qualified runtime exists and normal network
+   Host/Join does not construct a per-game `EngineSessionAdapter`.
+5. `mod/content/tf3mp_status_panel.script.tl` exchanges the fixed vehicle
+   discovery/request files. `mod/content/tf3mp_status.script.tl` checks live
+   company ownership/revision, executes one native vehicle command and records a
+   correlated postcondition. `tools/live-vehicle-slice.mjs` drives the local
+   HostAuthority-backed disposable-world proof.
+6. `src/coordinator-checkpoint.mjs`, `src/async-engine-mailbox.mjs` and
+   `src/engine-session-adapter.mjs` decode world evidence and refuse incomplete
+   production coverage. Native transport acknowledgements are always marked
+   `gameWorldReceipt:false`.
+
+### Native qualification and the failed command-profile run
+
+Exact image: SHA-256
+`a4843accd706b9c476c645860e2b68f6488c9b89f33ef97efe00cffb74a47be5`,
+build 40379, commit `377aeda1`.
+
+The live simulation observer and controller results above are qualified only for
+that image. A subsequent command-profile correlation attempt crashed TF3 before
+vehicle discovery or mutation. Windows Error Reporting recorded exception
+`0x80000004` at RVA `0x9D3120`, the proposed admission site. The observer saw
+only 42 background apply-candidate hits and then target exit; the bridge reported
+disconnect and no action receipt. Therefore no uncertain mutation was retried.
+
+The observer previously forwarded a single-step unless DR6 and RIP both matched.
+The owned implementation now classifies exception address, RIP and the armed
+execution slot, reports rejected traps, treats target exit as failure and passes
+16-thread/all-site, missing-DR6 and cutoff/cleanup fixtures. Nevertheless the
+precise live crash mechanism is unproven. Live `--profile command` is quarantined
+before process access, and RVA `0x9D3120` remains unsafe/unqualified. The native
+controller has a related DR6-only classification path that also requires review
+before production use.
+
+Unresolved ABI assumptions include semantic factory/admission boundaries,
+output/callback ownership, command move/destruction rules, safe suppression,
+replay-origin distinction, post-apply result correlation, exception/unwind
+behavior and whether any proposed site is stable under all game workloads.
+
+### TF2 baseline and licence
+
+The supplied TF2 checkout remains pinned at
+`9f99097cb05333db18015da8296b7356c76a1612` and is MIT licensed, copyright 2026
+silver2127. Its concrete replication documentation explicitly excludes vehicle
+stop/start. There is no TF2 stop/start capture, suppression, wire tag or replay
+implementation to port. Its general factory-capture/Add-suppression design and
+per-instance identity rules remain useful proof obligations only. No TF2 code was
+copied in `db22017`; future copied or substantially adapted code must retain the
+TF2 copyright and MIT permission notice.
+
+### Gameplay and state coverage
+
+Single-game verified gameplay is limited to discovery plus one reversible
+vehicle start/stop action for the current company. The request validates company,
+entity, revision, scheduled update, duplicate barrier and observed stop flag.
+This does not cover built-in UI suppression, instance-local entity mapping,
+separate-company native execution, or network replay.
+
+Roads, depots, stops, vehicle purchase/sale, assignment, line editing/removal,
+construction charges, operating costs and income remain experimental contracts
+or isolated tests. Rail, shipping, aviation and all other mutation families are
+unsupported multiplayer scope. Their ordinary native UI actions are not globally
+intercepted, so general multiplayer play must not be enabled.
+
+Schema-v2 compares sorted public entity IDs/revisions and selected public fields
+for the six observable domains listed above. It does not serialize a world and
+does not cover RNG, hidden native state, every town-growth input, cargo queues,
+pathfinder internals, async job order or all economic accumulators. RNG/hidden
+state is explicitly unavailable, which makes the current producer ineligible for
+production checkpoint agreement. No two-instance no-input baseline exists.
+
+### Verification record
+
+- Full regression suite after integration: **808 passed, 0 failed, 0 skipped or
+  cancelled** (`npm run check`, 86.4 seconds). This supersedes both the incorrect
+  478 count and the earlier independently verified 756-test baseline.
+- `Build-NativeRuntime.ps1 -RunSmokeTest`: passed MSVC x64 `/W4 /WX` build and
+  owned observer/controller smoke tests.
+- Observer/controller focused suite: 21/21 passed, including fail-stop and
+  multi-thread single-step stress.
+- `Build-NativeIpc.ps1`: passed MSVC x64 `/W4 /WX` build.
+- Mod review: 29 content files, zero executables, manifest
+  `80ed637bb9c609d7e990616ebd1797b3571d1d536a39f447779af4b905fe1dc7`.
+- `git diff --check`: passed before the implementation commit.
+- Single-game verified: startup direct-path load, simulation observation,
+  controller hold/one-release/teardown, vehicle discovery and reversible
+  host-sequenced stop/start.
+- Isolated/model-tested: native IPC/authentication/fail-stop, Host/Join gating,
+  checkpoint schema/producer parsing, release acknowledgements, duplicate and
+  failure handling, transport/save transfer.
+- Not performed: two simultaneous TF3 instances, cross-machine, Internet,
+  four-player, recovery reload, native economy/ownership across companies.
+
+### Remaining implementation versus acceptance
+
+Implementation still required: a safe qualified command interception boundary;
+copy/suppress/replay and exact result correlation; production wiring from
+Host/Join into one game adapter per process; a canonical cross-instance identity
+map; complete or deliberately authoritative background-state synchronization;
+actual coordinated checkpoint save/reload with fresh epochs; full road-transport
+families and native accounting; prevention of unsupported local mutations.
+
+Acceptance-only work begins only after those paths exist: two local TF3 instances,
+then two machines over LAN, port-forwarded Internet, disconnect/recovery drills
+and four-player soak. Cross-machine and Internet gates remain open because no
+second controlled machine or router environment was available, but they are not
+the current critical blocker—the implementation is not yet ready for them.
+
+There is no external blocker to further source/native investigation. The current
+critical safety gate is engineering evidence: identify why the admission
+breakpoint escaped, qualify a non-crashing capture/suppression boundary, and wire
+it to the production participant lifecycle. Re-enabling the quarantined profile
+requires a deliberate new disposable-game run after independent review; fixture
+success alone is insufficient.
+
+### Consolidated setup and eventual acceptance procedure
+
+Do not use the current normal Host/Join mode for gameplay; it intentionally
+rejects the non-production native runtime. For the next reviewed disposable run:
+
+1. Verify exact game, mod and native hashes; ensure TF3 is closed; stage the
+   reviewed 29-file mod; create a fresh exclusive disposable copy of a known save.
+2. Launch via Steam with
+   `-applaunch 3493540 --script tf3mp_status_1::/tf3mp_startup_load.script.lua`
+   and manually confirm Steam's custom-parameter prompt. Require request
+   consumption and `Game is ready`; never use the original save.
+3. Run only a separately reviewed exact-build native profile. Require mapped-byte
+   validation, no instruction/game-data writes, controlled teardown and a live
+   process after detach. The quarantined command profile is forbidden.
+4. Once a production interceptor exists, start Host with a fresh secret and
+   native pipe/token, advertise the authenticated save, then Join with the same
+   session/build/mod identities. Require distinct company assignments and save
+   hash verification before roster readiness.
+5. At a common held update, require complete world coverage on every instance.
+   Execute host and participant vehicle actions through the same host sequence,
+   verify exactly-once postconditions/ownership/accounting, then exercise the
+   complete road loop.
+6. Force duplicate, out-of-order, missed-deadline, disconnect, mismatch and
+   unknown-outcome cases. Require actual engine halt, no mutation retry, common
+   checkpoint reload, fresh epoch/barriers and held agreement before release.
+7. Repeat on two machines over LAN, then port-forwarded Internet, then four
+   players. Record each evidence tier separately; do not promote a local harness
+   result to cross-machine acceptance.
+
+### Repository and independent review
+
+Branch: `main`. Implementation commit: `db22017` (`Integrate guarded native
+runtime qualification`). Private remote: `origin` at
+`TaliEsch/talco-tf3-multiplayer`; push status is recorded after the documentation
+commit. No release was published. The final source mod was not restaged after the
+loader timing repair and command-profile quarantine.
+
+Independent review should focus on debugger exception forwarding and controller
+DR6 handling; kill-on-exit teardown semantics; command lifetime/output contracts;
+checkpoint digest coverage/collision properties; the missing production
+Host/Join-to-adapter construction; prevention of stock-UI bypasses; and whether
+the single-game vehicle result can be generalized without carrying local entity
+IDs across instances.
+
+**Readiness verdict: not multiplayer-ready.** Real single-game engine observation,
+control and one reversible host-ordered vehicle mutation are now demonstrated,
+but safe command interception/replay, complete background synchronization,
+recovery, separate-company road gameplay and all multi-instance acceptance remain
+unfinished.
+
+## Historical review-batch handoff (superseded where inconsistent above)
+
 ## 1. Objective and delivered scope
 
 Objective: advance TalCo TF3 Multiplayer toward an up-to-four-player,
@@ -170,10 +391,12 @@ construction/line families, recovery, cross-machine behavior and four-player pla
 ## 7. Verification commands and results
 
 - `npm run check`: passed after rerunning with permission for owned helper
-  subprocesses. TAP showed 478/478 tests passing. The first sandboxed run had one
-  `spawn EPERM` in `helper-lifecycle.test.mjs`; the same test passed in the
-  permitted rerun, so this was recorded as an environment denial, not a product
-  failure.
+  subprocesses. A fresh count-only Node test reporter on the current committed
+  suite recorded 756 passed, 0 failed, 0 skipped/cancelled (37.7 seconds). The
+  earlier 478 figure counted an incomplete visible TAP sequence and was wrong.
+  The first sandboxed run had one `spawn EPERM` in
+  `helper-lifecycle.test.mjs`; the same test passed in the permitted rerun, so
+  this was an environment denial, not a product failure.
 - `powershell -NoProfile -ExecutionPolicy Bypass -File .\Build-NativeProbe.ps1 -RunSmokeTest`:
   passed with MSVC x64; malformed/null ABI, owned-memory mismatch and non-TF3 host
   rejection passed; the independently calculated host digest matched.
