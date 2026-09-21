@@ -6,25 +6,46 @@ import {parseRoadStopReadbackEnvelope} from '../src/road-stop-readback.mjs';
 
 const {lua,lauxlib,lualib,to_luastring}=fengari;
 const source=await readFile(new URL('../mod/content/tf3mp_stop_readback.lua',import.meta.url),'utf8');
-function run(mutation=''){
+function nativeNamespace(L, globalName, constants){
+  lua.lua_newuserdata(L,0);
+  lua.lua_newtable(L);
+  lua.lua_pushcfunction(L,state=>{
+    const key=lua.lua_tojsstring(state,2);
+    if(Object.hasOwn(constants,key) && constants[key] !== undefined) lua.lua_pushstring(state,to_luastring(constants[key]));
+    else lua.lua_pushnil(state);
+    return 1;
+  });
+  lua.lua_setfield(L,-2,to_luastring('__index'));
+  lua.lua_setmetatable(L,-2);
+  lua.lua_setglobal(L,to_luastring(globalName));
+}
+function run(mutation='', namespaces={}){
+  const componentConstants=namespaces.component;
+  const edgeConstants=namespaces.edge;
+  const componentType=componentConstants ? 'NativeComponentType' : "{GAME_SPEED='GAME_SPEED',GAME_TIME='GAME_TIME',EDGE_OBJECT='EDGE_OBJECT',PLAYER_OWNED='PLAYER_OWNED',BASE_EDGE='BASE_EDGE'}";
+  const edgeObjectType=edgeConstants ? 'NativeEdgeObjectType' : "{STOP_LEFT='STOP_LEFT',STOP_RIGHT='STOP_RIGHT',SIGNAL='SIGNAL'}";
   const script=`
 local m=(function()${source}end)()
 local reads=0
-local CT={GAME_SPEED='GAME_SPEED',GAME_TIME='GAME_TIME',EDGE_OBJECT='EDGE_OBJECT',PLAYER_OWNED='PLAYER_OWNED',BASE_EDGE='BASE_EDGE'}
+local CT=${componentType}
 local stop={param=.25,transf={{x=1,y=0,z=0,w=0},{x=0,y=1,z=0,w=0},{x=0,y=0,z=1,w=0},{x=4,y=5,z=6,w=1}},edgeObjectConstruction='construction/road_stop.con',params={z='last',[9]='nine',a=true,nested={b=2}}}
 local data={[0]={GAME_SPEED={speedup=0},GAME_TIME={tickCount=77,updateCount=44}},[50]={EDGE_OBJECT=stop,PLAYER_OWNED={player=10}},[60]={BASE_EDGE={objects={{50,'STOP_LEFT'}}}},[51]={PLAYER_OWNED={player=11}}}
-local api={type={ComponentType=CT,enum={EdgeObjectType={STOP_LEFT='STOP_LEFT',STOP_RIGHT='STOP_RIGHT',SIGNAL='SIGNAL'}},Mat4f={cols=function(m,col)return m[col]end}},engine={util={getWorld=function()return 0 end},system={streetSystem={getEdgeForEdgeObject=function(id) if id==50 then return 60 end end}},entityExists=function(id)return data[id]~=nil end,getComponent=function(id,kind) reads=reads+1;return data[id] and data[id][kind] end}}
+local api={type={ComponentType=CT,enum={EdgeObjectType=${edgeObjectType}},Mat4f={cols=function(m,col)return m[col]end}},engine={util={getWorld=function()return 0 end},system={streetSystem={getEdgeForEdgeObject=function(id) if id==50 then return 60 end end}},entityExists=function(id)return data[id]~=nil end,getComponent=function(id,kind) reads=reads+1;return data[id] and data[id][kind] end}}
 local request={schemaVersion=1,nonce=string.rep('a',32),observationId=3,companyEntity=10,resultEntities={50,51},oneWay=false,name='Observed stop'}
 ${mutation}
 local r=m.collect(api,request)
-return r.code,r.json or '',reads
+return r.code,r.json or '',reads,r.field or ''
 `;
   const L=lauxlib.luaL_newstate();lualib.luaL_openlibs(L);try{
+    if(componentConstants) nativeNamespace(L,'NativeComponentType',componentConstants);
+    if(edgeConstants) nativeNamespace(L,'NativeEdgeObjectType',edgeConstants);
     assert.equal(lauxlib.luaL_loadstring(L,to_luastring(script)),lua.LUA_OK,lua.lua_tojsstring(L,-1));
-    assert.equal(lua.lua_pcall(L,0,3,0),lua.LUA_OK,lua.lua_tojsstring(L,-1));
-    return [lua.lua_tojsstring(L,-3),lua.lua_tojsstring(L,-2),lua.lua_tointeger(L,-1)];
+    assert.equal(lua.lua_pcall(L,0,4,0),lua.LUA_OK,lua.lua_tojsstring(L,-1));
+    return [lua.lua_tojsstring(L,-4),lua.lua_tojsstring(L,-3),lua.lua_tointeger(L,-2),lua.lua_tojsstring(L,-1)];
   }finally{lua.lua_close(L);}
 }
+const nativeComponents={GAME_SPEED:'GAME_SPEED',GAME_TIME:'GAME_TIME',EDGE_OBJECT:'EDGE_OBJECT',PLAYER_OWNED:'PLAYER_OWNED',BASE_EDGE:'BASE_EDGE'};
+const nativeEdgeObjects={STOP_LEFT:'STOP_LEFT',STOP_RIGHT:'STOP_RIGHT',SIGNAL:'SIGNAL'};
 test('copies one returned owned stop to bounded deterministic JSON',()=>{
   assert.doesNotMatch(source,/api\.cmd|sendCommand|makeWorldBuildProposalCmd|saveUserdata|io\.|os\./);
   const [code,json]=run(); assert.equal(code,'readback'); assert.ok(Buffer.byteLength(json)<=64*1024);
@@ -37,6 +58,17 @@ test('the Lua snapshot is accepted by the JavaScript native-envelope codec',()=>
   assert.equal(parsed.executionAuthorized,false);
   assert.equal(parsed.snapshot.stopEntity,50);
   assert.equal(parsed.snapshot.params.entries[0].key,9);
+});
+test('reads through actual native userdata component and edge-object enum namespaces',()=>{
+  const [code,json]=run('',{component:nativeComponents,edge:nativeEdgeObjects});
+  assert.equal(code,'readback');
+  assert.equal(JSON.parse(json).left,true);
+});
+test('denies missing or malformed native clock and enum reads without leaking errors',()=>{
+  assert.deepEqual(run('',{component:{...nativeComponents,GAME_TIME:undefined},edge:nativeEdgeObjects}).slice(0,4),['unavailable','',0,'clockComponents']);
+  assert.deepEqual(run('',{component:nativeComponents,edge:{STOP_RIGHT:'STOP_RIGHT'}}).slice(0,4),['unavailable','',7,'attachedEdge']);
+  assert.deepEqual(run('data[0].GAME_SPEED.speedup=1',{component:nativeComponents,edge:nativeEdgeObjects}).slice(0,4),['unavailable','',2,'clockPaused']);
+  assert.deepEqual(run('data[0].GAME_TIME.tickCount=-1',{component:nativeComponents,edge:nativeEdgeObjects}).slice(0,4),['unavailable','',2,'clockValues']);
 });
 test('returns fixed unavailable for request, pause, candidate, edge, and copy boundaries',()=>{
   for(const change of [

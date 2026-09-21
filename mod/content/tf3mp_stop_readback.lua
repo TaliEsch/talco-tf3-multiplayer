@@ -42,23 +42,30 @@ local function exactRequest(request)
 end
 
 local function component(api, id, name)
-  local types = api and api.type and api.type.ComponentType
-  if not entity(id) or type(types) ~= "table" or types[name] == nil
+  local kind = api and api.type and api.type.ComponentType and api.type.ComponentType[name]
+  if not entity(id) or kind == nil
     or not api.engine or type(api.engine.getComponent) ~= "function" then fail() end
-  return api.engine.getComponent(id, types[name])
+  return api.engine.getComponent(id, kind)
 end
 
-local function clock(api)
+local function clock(api, stage)
+  stage("clockWorld")
   if not api or not api.engine or not api.engine.util or type(api.engine.util.getWorld) ~= "function" then fail() end
   local world = api.engine.util.getWorld()
-  if not safeint(world) or world < 0 or world > MAX_INT or not api.type
-    or type(api.type.ComponentType) ~= "table" or api.type.ComponentType.GAME_SPEED == nil
-    or api.type.ComponentType.GAME_TIME == nil or type(api.engine.getComponent) ~= "function" then fail() end
+  if not safeint(world) or world < 0 or world > MAX_INT then fail() end
+  stage("clockComponents")
+  -- Native API namespaces need not be Lua tables. Match the working bridge's
+  -- named constant access; validate the returned data, not the binding wrapper.
+  local types = api.type and api.type.ComponentType
+  local speedType, timeType = types and types.GAME_SPEED, types and types.GAME_TIME
+  if speedType == nil or timeType == nil or type(api.engine.getComponent) ~= "function" then fail() end
   -- World entity zero is valid, unlike ordinary result and company entities.
-  local speed = api.engine.getComponent(world, api.type.ComponentType.GAME_SPEED)
-  local time = api.engine.getComponent(world, api.type.ComponentType.GAME_TIME)
-  if not native(speed) or speed.speedup ~= 0 or not native(time)
-    or not clockint(time.tickCount) or not clockint(time.updateCount) then fail() end
+  local speed = api.engine.getComponent(world, speedType)
+  local time = api.engine.getComponent(world, timeType)
+  stage("clockPaused")
+  if not native(speed) or speed.speedup ~= 0 then fail() end
+  stage("clockValues")
+  if not native(time) or not clockint(time.tickCount) or not clockint(time.updateCount) then fail() end
   return time.updateCount, time.tickCount
 end
 
@@ -155,7 +162,7 @@ end
 local function isStopOnEdge(api, edge, candidate)
   if not native(edge) or not dense(edge.objects, 64) then return false end
   local enum = api.type and api.type.enum and api.type.enum.EdgeObjectType
-  if type(enum) ~= "table" or enum.STOP_LEFT == nil or enum.STOP_RIGHT == nil then fail() end
+  if enum == nil or enum.STOP_LEFT == nil or enum.STOP_RIGHT == nil then fail() end
   local matches, stop, left = 0, false, false
   for _, item in ipairs(edge.objects) do
     if not dense(item, 2) or #item ~= 2 or not entity(item[1]) then return false end
@@ -171,7 +178,7 @@ local function collect(api, request, stage)
   stage("request")
   if not exactRequest(request) then fail() end
   stage("clock")
-  local updateCount, tickCount = clock(api)
+  local updateCount, tickCount = clock(api, stage)
   stage("streetApi")
   if not api.engine or not api.engine.system or not api.engine.system.streetSystem
     or type(api.engine.system.streetSystem.getEdgeForEdgeObject) ~= "function"

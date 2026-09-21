@@ -4,11 +4,13 @@ Revised 20 September 2026 following the user's scope and economy clarification.
 This is the current plan. Historical status is in completion-audit.md and
 archive/roadmap-before-scope-review.md; historical blockers do not override this plan.
 
-21 September update: the first live placed-stop readback failed at apply-result
-copying (native table length zero). A bounded indexed-reader repair and a strictly
-positive documented stop-result-ID fallback are implemented; native readback is
-still unverified. Negative proposal IDs are not live entities. Do not advance to
-replay or Phase 2 acceptance on the strength of the offline checks.
+21 September update: the repaired apply reader reached the read-only engine
+handler in the 07:43 run, then failed at `clock`. Full readback is still unverified.
+The clock/component readers now use named API constants like the working bridge,
+without requiring native namespaces to be Lua tables. Paused-state and numeric
+checks remain mandatory; clock failures have precise stages. Negative proposal
+IDs are not live entities. Do not advance to replay or Phase 2 acceptance on the
+strength of the offline checks.
 
 Current pre-replay status: the 21:09 preview/cancel check is complete. Do not
 repeat it or request a placed stop to investigate the same missing fields.

@@ -2,6 +2,30 @@
 
 ## Current status — 20 September 2026
 
+### 21 September: clock/component namespace compatibility repair
+
+The 07:43:44 UTC apply on manifest `51df5fe7a104eb5c942687880609eda7213e8cdf5134f6622e4822bf98b17c12`
+passed candidate copying and engine request validation. The engine returned
+`READBACK_UNAVAILABLE` at `clock`; no snapshot was exported. Subsequent telemetry
+showed speedup zero, but does not prove the exact state at the failed clock read.
+
+Comparison with the working bridge revealed unnecessary `type(ComponentType)
+== "table"` requirements in the new module. The reader now resolves named
+constants directly under its existing protected call, as the bridge does; the
+same assumption was removed from ordinary component reads and EdgeObjectType.
+The native namespace representation was not logged, so this is a compatibility
+repair with a reproducible userdata regression, not proof of the live root cause.
+
+Clock failures now distinguish world lookup, component access, paused state and
+clock values. Missing constants, failed reads, nonzero speed and invalid counters
+remain failures. No clock values are invented and no execution/replay is enabled.
+
+Root verification: 732/732 checks passed, including actual Lua userdata namespace
+regressions; source review and diff checks passed. Reviewed source manifest:
+`193f495f956db43a75223b4afbf6089a3ab01fbbba1571abb87513ce3f348e66`.
+Not staged yet: TF3 was still running at verification. Live confirmation remains
+required after safe staging; no game launch or live retry was performed.
+
 ### 21 September: apply-reader compatibility repair (live result pending)
 
 The 07:15 UTC native apply on manifest `6a8b13a24361ff3885f82815dac8beafc1b96774cb628c78c62348dc45916a5a`

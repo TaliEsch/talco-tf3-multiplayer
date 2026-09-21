@@ -65,7 +65,7 @@ export async function validateReviewPackage(root) {
   if (forbidden.length) throw new Error(`forbidden bundled file: ${forbidden[0]}`);
   const gameScript = await readFile(path.join(absoluteRoot, "content", "tf3mp_status.script.tl"), "utf8");
   const stopReadbackSource=await readFile(path.join(absoluteRoot,'content','tf3mp_stop_readback.lua'),'utf8');
-  if(createHash('sha256').update(stopReadbackSource.replace(/\r\n/g,'\n')).digest('hex')!=='2f8458eed10f286e56605e34cf5a17e500ad0e90748acbcebefff856dcb9660b')
+  if(createHash('sha256').update(stopReadbackSource.replace(/\r\n/g,'\n')).digest('hex')!=='d3fc865958965a8dc68dff8049f1fdfc7be2f9e73562cb6f0513f54195622a86')
     throw new Error('stop readback differs from reviewed read-only source');
   for(const event of ['tf3mp_stop_readback','tf3mp_get_stop_readback'])
     if(!gameScript.includes(`state:subscribeToEvent("${event}")`))throw new Error('missing stop readback subscription');
