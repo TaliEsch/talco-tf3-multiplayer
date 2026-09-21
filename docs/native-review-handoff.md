@@ -53,6 +53,12 @@ commit provides functioning multi-instance multiplayer.
   evidence of agreement between instances. The original `comp.sav` remained
   byte-for-byte unchanged (87,719,389 bytes, SHA-256
   `ccbf4beb740e53323e06d20890fd029c8e174d3e85efb06801a8b4275c762fb5`).
+- A separate fresh disposable run used `tools/live-watchdog-expiry.mjs` to stop
+  helper renewal while keeping engine observation alive. The lease was armed at
+  tick 57526/update 3238; TF3 itself reached expiry and halted at tick
+  57623/update 3335, then held `speedup:0` and the same update for the stability
+  interval. This qualifies single-game lease-loss engine halting, not coordinated
+  multi-instance failure recovery.
 - Native IPC, client framing, persistent session binding, Host/Join admission
   gating, disconnect/halt fencing and diagnostic-only transport are implemented.
   Authenticated socket clients now expose stable snapshot fanout for verified
@@ -69,8 +75,10 @@ commit provides functioning multi-instance multiplayer.
    that request before calling `app.loadGame`. This path reaches the world but
    violates the verified TF3 main-menu React lifecycle and is diagnostic-only.
 2. `native/runtime_observer.cpp` performs exact-build, mapped-byte-gated
-   observation. The default simulation profile is the only live profile still
-   selectable. `Build-NativeRuntime.ps1` builds it with `/W4 /WX`.
+   observation. The default simulation profile is the only selectable live
+   profile. Both command admission and `action-trace` are fail-closed after the
+   live teardown failures below. `Build-NativeRuntime.ps1` builds it with
+   `/W4 /WX` when Windows Security permits the unsigned diagnostic artifact.
 3. `native/runtime_controller.cpp` owns authenticated native IPC, session
    binding, hold/release/halt and teardown. `src/native-runtime-client.mjs` is the
    framed client and `src/native-host-join.mjs` is the fail-closed admission gate.
@@ -80,6 +88,12 @@ commit provides functioning multi-instance multiplayer.
    Host/Join does not construct a per-game `EngineSessionAdapter`.
    `src/client.mjs` now permits a future adapter to subscribe to authenticated,
    schema-checked host frames while preserving the existing primary handler.
+   `src/authenticated-engine-session.mjs` consumes that fanout after a strict
+   two-to-four-player `coordination_capture`, derives the unique authoritative
+   player/company map, queues at most 16 frames during asynchronous adapter
+   construction, preserves their order and closes transport plus adapter on any
+   rejection. It is not yet invoked by Join CLI and does not manufacture a
+   production binding.
    `src/host-local-participant.mjs` additionally routes a host player's actions
    through that same authenticated loopback client/`HostAuthority` path as a
    remote player, and refuses `beginCoordination` while its injected engine
@@ -137,8 +151,15 @@ replay-origin distinction, post-apply result correlation, exception/unwind
 behavior and whether any proposed site is stable under all game workloads.
 The disabled action-trace implementation can pair nested handler/apply entry and
 return observations by thread, entry RSP and return address in owned fixtures.
-Its exact-build static sites remain non-activating in TF3; fixture pairing does
-not qualify their live ABI or make command capture safe.
+Controlled WinDbg observation established two real handler pairs for the known
+vehicle stop/start and decoded the first eight payload bytes as entity 66005 plus
+high dword `0x201` (stop) / `0x200` (start). It also proved the outer apply
+wrapper runs continuously for background work. However the final detach ended
+in TF3 `0xC0000005` execute-at-zero, and an earlier detach crashed WinDbg's
+engine. The custom observer rebuild was quarantined by Windows Security as
+`Behavior:Win32/DefenseEvasion.A!ml` before its second smoke invocation and was
+not restored or allowlisted. Exact-build sites therefore remain non-activating;
+the evidence narrows the ABI but does not make command capture safe.
 
 ### TF2 baseline and licence
 
@@ -178,15 +199,20 @@ prove determinism. No two-instance no-input baseline exists.
 
 ### Verification record
 
-- Full regression suite after this integration: **830 passed, 0 failed, 0 skipped
-  or cancelled** (`npm run check`, 98.53 seconds). This revalidates the current
-  tree and supersedes the prior 813 result. The independent reviewer did obtain
-  756/756 on the earlier tree; the reported 478/478 was an incomplete TAP count.
-- `Build-NativeRuntime.ps1 -RunSmokeTest`: passed MSVC x64 `/W4 /WX` build and
-  owned observer/controller smoke tests.
-- Observer/controller focused suite: 29/29 passed in 59.72 seconds, including
-  strict trap ownership, 16-thread/missing-DR6 stress, cleanup races, fail-stop
-  real unowned-exception forwarding and bounded action-call pairing.
+- Current exact `npm run check`: **833 discovered, 804 passed, 0 failed, 29
+  skipped** (39.08 seconds). The skipped tests are precisely the native observer/
+  controller executable tests because Windows Security quarantined the rebuilt
+  observer and the stale controller was removed. All 804 non-native tests also
+  passed in a separate explicit run. The last pre-quarantine integration tree
+  passed 830/830 in 98.53 seconds. The independent reviewer did obtain 756/756
+  on its earlier tree; the reported 478/478 was an incomplete TAP count.
+- Current native source passed MSVC x64 `/W4 /WX /Zs` syntax/type checking for
+  both observer and controller. A current executable/smoke run was not performed
+  after the security quarantine; protection was not bypassed.
+- Last pre-quarantine observer/controller focused suite: 29/29 passed in 59.72
+  seconds, including strict trap ownership, 16-thread/missing-DR6 stress,
+  cleanup races, fail-stop real unowned-exception forwarding and bounded
+  action-call pairing. It is historical evidence, not a current binary result.
 - Authenticated network focused suite: 11/11 passed, including a signed
   post-admission coordination frame, primary-before-observer ordering, stable
   fanout, observer fault isolation and lifecycle separation.
@@ -198,7 +224,8 @@ prove determinism. No two-instance no-input baseline exists.
   above, simulation observation,
   controller hold/one-release/teardown, vehicle discovery and reversible
   host-sequenced stop/start, and production-gated public-domain checkpoint
-  capture/hold/release at update 3052.
+  capture/hold/release at update 3052. A separate run verified actual TF3
+  watchdog-expiry halt at update 3335 after helper renewal stopped.
 - Isolated/model-tested: native IPC/authentication/fail-stop, Host/Join gating,
   checkpoint schema/producer parsing, release acknowledgements, duplicate and
   failure handling, transport/save transfer.

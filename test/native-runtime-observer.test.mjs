@@ -163,7 +163,7 @@ test('profile selection refuses unknown profiles, unqualified action tracing and
     assert.deepEqual(result.events, []);
     assert.match(result.stderr, profile === 'guessed' ? /unknown observation profile/ :
       profile === 'command' ? /live command profile disabled/ :
-      profile === 'action-trace' ? /live action-trace profile disabled/ : /unsupported target executable SHA256/);
+      profile === 'action-trace' ? /clean live detach remains unqualified/ : /unsupported target executable SHA256/);
   }
 });
 

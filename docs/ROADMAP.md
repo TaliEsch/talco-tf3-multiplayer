@@ -26,7 +26,22 @@ A corrected disposable launch reached
 observed MainMenu/WindowContainer faults. Automatic load remains implementation
 work, not completed functionality. A fresh ordinary-UI disposable run passed the
 production public-domain checkpoint gate at exact held/released update 3052;
-this is single-game evidence only. Current regression count is 830/830.
+this is single-game evidence only. A separate lease-loss run proved the actual
+TF3 engine halted at update 3335 after helper renewal stopped. The current exact
+suite discovers 833 tests: 804 pass, 0 fail and 29 native executable tests are
+skipped because Windows Security quarantined the rebuilt observer. The prior
+pre-quarantine integration tree passed 830/830; current native source passes
+MSVC `/W4 /WX /Zs` syntax/type checking.
+
+The reviewed handler/apply sites were exercised through bounded WinDbg trials.
+They show continuous autonomous apply traffic, exactly one nested vehicle
+handler pair for each reversible stop/start action, and a first-qword encoding
+of entity 66005 plus high dword `0x201`/`0x200`. This narrowed the next ABI work,
+but did not pass safety: the final detach produced a TF3 execute-at-zero access
+violation, and Windows Security quarantined the rebuilt custom observer as a
+behavioral defense-evasion detection. Do not bypass protection or enable either
+live action/command profile. A clean supported attach/detach mechanism is now a
+required prerequisite to interception work.
 
 Work in this order:
 
@@ -43,6 +58,9 @@ Work in this order:
    transport receipts outside world evidence,
    and provide a complete hold/release/halt lifecycle that continues receiving
    control traffic while simulation is paused.
+   The reusable participant lifecycle now validates the signed two-to-four-
+   company capture, bounds frames while attaching, preserves order and fails
+   closed; Join CLI still needs the real production provider and composition.
 4. Resolve background synchronization. The game producer now reads public
    `Town`/`TownBuilding` growth controls and bounded construction parameters in
    addition to the other public domains. Production admission now requires all

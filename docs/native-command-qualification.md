@@ -246,6 +246,10 @@ or gameplay evidence.
 
 ## Future apply-return correlation contract
 
+This historical four-site proposal includes the quarantined admission site and
+is **not** the next live profile. The handler/apply `action-trace` profile below
+supersedes it for initial observation; admission remains excluded.
+
 The additional return-correlation contract below remains a design. The command
 profile above deliberately selects handler entry as its fourth site and does
 not implement apply-RET pairing. Do not interpret the simulation profile's
@@ -345,9 +349,13 @@ evidence for these instruction boundaries. The handler has code after the
 selected RET, so this is not a claim that every exit path is captured.
 
 Both `kLiveCommandProfileQualified` and `kLiveActionTraceQualified` remain
-`false`. An explicit live `--profile action-trace` request is rejected before
-opening/attaching a target. No TF3 launch or live trace was performed for this
-change. The pinned executable SHA256 remains
+`false`. The command-admission site is unavailable to live observation. The
+independently reviewed handler/apply instruction boundaries produced useful
+live evidence, but the final controlled WinDbg run ended in a target access
+violation during/after detach. Therefore an explicit custom-observer
+`--profile action-trace` request is again rejected before process access. This
+does not enable interception, suppression, command reconstruction or replay.
+The pinned executable SHA256 remains
 `a4843accd706b9c476c645860e2b68f6488c9b89f33ef97efe00cffb74a47be5`.
 The existing exact-file, mapped-header, immutable executable page and 32-byte
 site comparisons apply to the profile; they do not independently qualify safe
@@ -398,8 +406,164 @@ Verification after the review fix: MSVC observer/controller builds passed
 zero skips or failures (46.11 seconds), including three actual debugger nesting-
 cap runs. `git diff --check` passed. No game or multiplayer result is implied.
 
-The next live investigation remains independent review of exception containment
-and this profile, followed by a controlled disposable-game trace under the
-user's existing investigation authorization. Neither profile may be enabled
-merely because fixtures pass. Command admission/suppression, lifetime ownership,
-replay, actual state postconditions and two-instance verification remain open.
+The independent instruction-boundary review is complete, and the bounded live
+trials below resolved command routing plus one eight-byte vehicle payload field.
+Clean live teardown is not qualified. Both custom live profiles remain disabled.
+Command admission/suppression, full payload and lifetime ownership, replay,
+actual native result correlation and two-instance verification remain open.
+
+## Independent instruction/stack review and next observation protocol
+
+Read-only reinspection of the pinned executable and the Windows Application
+event log independently confirmed the following on 21 September. No game was
+launched or attached, and neither live-profile gate was changed by this review.
+The Application Error event at local time `17:36:18` names exception
+`0x80000004`, fault offset `0x9D3120`, PID `0x83C4` (`33732`) and process creation
+time `0x1DD49E55458347B`. That event identifies an escaped SINGLE_STEP; it does
+not contain the debug-register context needed to distinguish the original
+classification hole from a cleanup/race failure.
+
+### Exact instruction and unwind evidence
+
+The existing hash-pinned disassembly helper was rerun on the complete handler
+and apply ranges and the admission prologue. A read-only PE exception-directory
+inspection independently read each containing `RUNTIME_FUNCTION`, its unwind
+header and operation slots. All three records are primary, unchained version-1
+records; their frame-register nibble is zero even where code uses RBP as a local
+address base. Range ends below are exclusive.
+
+| Routine | Runtime range / unwind RVA | Unwind evidence | Stack consequence |
+| --- | --- | --- | --- |
+| Vehicle handler | `[0x9E1710,0x9E18CC)` / `0x3A937B4` | Flags `2` (unwind handler), handler RVA `0x318351F`, prologue size `0x13`, 9 code slots; save RBX at final RSP `+0x330`, allocate `0x300`, push RBP/RSI/RDI/R14/R15 | Body RSP is entry RSP minus `0x328`; `0x9E189C` adds `0x300`, five pops end at `0x9E18A9`, and RET `0x9E18AA` sees the original RSP |
+| Apply wrapper | `[0x9E2380,0x9E26EE)` / `0x3A93360` | Flags `3` (exception/unwind handler), handler RVA `0x3180984`, prologue size `0x2C`, 11 code slots; save RSI/RBX at final RSP `+0xF8/+0xF0`, allocate `0xB0`, push RBP/RDI/R12/R14/R15 | Body RSP is entry RSP minus `0xD8`; `0x9E26D2` computes R11 = RSP + `0xB0`, `0x9E26E2` restores RSP from R11, five pops precede RET `0x9E26ED` |
+| Admission candidate | `[0x9D3120,0x9D347D)` / `0x3A92D98` | Flags `3`, handler RVA `0x3180984`, prologue size `0x27`, 10 code slots; allocate `0x168`, push eight nonvolatile registers | Body RSP is entry RSP minus `0x1A8`; fault RVA is the first PUSH RBP, not an interior instruction selected by a string-reference scan |
+
+Handler-range SHA-256 is
+`24f97630f156d5c9e01ef2c2adefb741172d901e90dc81e56ba0d01f98479ffc`;
+admission-range SHA-256 is
+`9c74c9203e52cf3c8e7ae465c4b37fbe3651bc1cb4c5e385c2428d6b6ba2a39f`.
+The apply digest remains the one recorded above. Hashes establish which code
+was reviewed; unwind flags establish that exception paths exist, not their
+semantic effect or observer safety.
+
+The handler's `entity == -1` branch at `0x9E173A` targets `0x9E18AB`, after
+the selected normal RET. That tail calls an assertion routine at `0x9E18C6`
+and ends in INT3 at `0x9E18CB`. Do not choose `endRva - 1` as the game handler's
+RET: it is an INT3. The fixture-only final-RET discovery algorithm cannot be
+reused for this image. Normal execution sets AL = 1 at `0x9E1892`; that is a
+handler return observation, not a correlated command callback or public-state
+postcondition. The wrapper stores dispatcher AL at entry `+0x30` at
+`0x9E2443`, can store zero on dependency failure at `0x9E2517`, and performs
+further calls before its RET. RAX/AL at the wrapper RET is not that result.
+
+The four existing `action-trace` locations are therefore defensible instruction
+boundaries for a **call/return observation** once debugger containment is
+independently qualified. Same-thread LIFO pairing using original RSP and caller
+return address is supported by the decoded epilogues. It still cannot prove
+command identity: the current emitter reads only the eight-byte `[RSP]`, stores
+register values, and does not copy the pointed-to entity, stopped boolean, tag,
+entry result, dependencies or callback. A matching action's UI timestamp alone
+must not be reported as native semantic capture.
+
+### Controlled live routing and payload evidence; teardown failure
+
+After the review, three stock-UI-loaded disposable-world WinDbg trials were run
+against build 40379, PID 6336. The first idle trace recorded 25 complete apply
+entry/return pairs on thread `0x8454` and no vehicle-handler hit. The ordinary
+apply pair used RSP `0x85af6ff228` and caller return
+`TransportFever3+0x9efdb6`; several repeatable argument shapes and return values
+occurred with no player input. This proves the apply wrapper also carries
+autonomous/background work and cannot itself be classified as a player-command
+boundary.
+
+During a known reversible vehicle stop/start pair, the bridge reported entity
+66005/company 3141 applied once at updates 4332 and 4342 and restored the
+original running state. The trace recorded exactly two handler entry/return
+pairs on the same thread. Each handler was nested inside two apply calls:
+hits `153/154 -> 155/156 -> 157/158` and
+`193/194 -> 195/196 -> 197/198`. Handler RSP was `0x85af6fd068` and caller
+return RVA was `0x9b8e3d`. This is strong call-routing correlation, not yet a
+native receipt.
+
+A final bounded repeat captured only the first 512 readable bytes at handler
+RDX for each already-known reversible action. The first qword was
+`0x00000201000101D5` for stop and `0x00000200000101D5` for restore/start. Thus
+the low 32 bits equal observed entity 66005 (`0x101D5`) and the high 32 bits
+changed from `0x201` to `0x200` with the public stopped boolean. No larger layout
+is claimed: bytes beyond that field differed radically and may be adjacent or
+reused storage.
+
+This trial did **not** pass the safety gate. Windows Error Reporting recorded
+TF3 exception `0xC0000005`, execute violation (`P9=8`), unknown module and fault
+address zero at 20:34:07 during/just after debugger detach; the process exited.
+An earlier detach also crashed WinDbg's `dbgeng.dll` while TF3 survived. The
+original `comp.sav` remained unchanged at 87,719,389 bytes and SHA-256
+`ccbf4beb740e53323e06d20890fd029c8e174d3e85efb06801a8b4275c762fb5`.
+The custom observer rebuild was separately quarantined by Windows Security as
+`Behavior:Win32/DefenseEvasion.A!ml` before its second smoke invocation;
+Windows reported `DidThreatExecute:false`. Protection was not bypassed and the
+quarantined artifact was not restored. These results keep both custom live
+profiles fail-closed until a clean, independently repeatable attach/detach path
+exists.
+
+### Rejected alternatives and bounded sequence
+
+Do not re-enable admission `0x9D3120`, substitute the lambda label at
+`0x9D2B20`, call a native function with a guessed declaration, skip an apply
+body, alter RIP/RSP to synthesize a return, or write component `+0xAC` directly.
+These either repeat an unresolved debugger failure or bypass ownership,
+initialization, callbacks and stop/start side effects. The apply-entry profiler
+label also does not establish that every caller has simulation-thread affinity.
+
+The following staged sequence was the pre-run protocol. It is retained to show
+what was attempted; the action and payload observations passed their correlation
+checks, but the final clean-detach requirement failed. Do not repeat it through
+WinDbg or enable the custom profile until a supported attach/detach mechanism
+has independent target-survival evidence:
+
+1. First complete independent active-loop and teardown exception-containment
+   review, including failures before/after context access, queued traps,
+   first/second chance ownership, new threads and deadline/cap cleanup. Require
+   owned-fixture stress, cutoff, nesting-cap, malformed-pair and foreign-trap
+   cases to pass for the exact newly built observer. This document alone does
+   not qualify or enable either live profile.
+2. Record one launch, image hash, PID/process creation identity and a fresh
+   disposable checkpoint copy. Load through the stock UI lifecycle. Select one
+   known owned vehicle and record public owner/entity/stopped state plus the
+   bridge/session identity. Close other debugger/controller sessions so a second
+   debugger or pre-existing debug registers cannot contaminate the run. Do not
+   run a native hold controller simultaneously with this debugger.
+3. After a separately reviewed live-profile enablement, make an initial idle
+   observation for at most 3 seconds/64 events, preserving all four sites.
+   Verify target survival, original register restoration and actual detach.
+   A cap, orphan, mismatched pair or unrecognized SINGLE_STEP is incomplete
+   evidence; inspect it before another action trial. Attach can legitimately
+   begin inside an existing call, so an initial orphan is not evidence of a
+   corrupted game or permission to manufacture its entry.
+4. Only after the idle result passes, prepare one stock vehicle-window toggle
+   and observe for at most 30 seconds/256 events. Issue the single toggle only
+   after the observer reports validated attachment. Use current public stopped
+   state to choose the intended boolean, then collect public post-state. If the
+   event cap or duration has already ended the observer, do not issue the action
+   as part of that trial. Keep simulation state (paused/running) explicit.
+5. Require intact apply and nested handler pairs on a single thread, their
+   concrete caller RVAs, zero unexplained trap forwarding and successful detach
+   with a live target. Public post-state establishes the intended change only
+   for the public action. This version's trace establishes call routing and
+   teardown only; it cannot certify that a particular native payload caused it.
+6. Restore the vehicle through the normal public action only after confirmed
+   post-state and a clean detach. If execution or target state is unknown, stop
+   and discard/reload the disposable copy; do not retry or compensate a command
+   whose outcome is unknown. No original save is overwritten.
+7. A subsequent reviewed extension may copy the five-byte handler payload at
+   entry, bounded apply entry/tag data, and the apply result while still stopped
+   at its paired RET. Preserve the entry address only for same-thread correlated
+   stopped-event reads, invalidate it on every exception/unmatched return, and
+   never read it asynchronously. Fixture-test read failure, unsupported tags,
+   nesting and lifetime invalidation before another live trial. Only then run
+   separate stop/start cases for stock vehicle-window, bulk-manager and public
+   script paths, paused and running, with callback and public-state correlation.
+
+These steps intentionally leave suppression, queue ownership and replay
+unqualified. An ordinary reversible action plus a clean trace does not prove
+safe cancellation or permission to bypass a native command.

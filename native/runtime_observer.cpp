@@ -140,8 +140,10 @@ const std::array<Site, 4> tf3ActionTraceSites{{
     {"command_apply_entry_candidate", 0x9e2380},
     {"command_apply_return_candidate", 0x9e26ed}
 }};
-// Separate from the quarantined admission profile. Exact-file/code-page checks
-// do not qualify exception containment or safe observation in the live engine.
+// Separate from the quarantined admission profile. Exact-build static review
+// and owned fixtures are not sufficient: a controlled WinDbg payload trace of
+// these sites ended in a target access violation during/after detach. Keep the
+// custom live profile fail-closed until clean detach is independently proven.
 constexpr bool kLiveActionTraceQualified = false;
 
 int ConfiguredTrapSite(const EXCEPTION_RECORD& exception, const CONTEXT& context,
@@ -860,7 +862,7 @@ int Observe(DWORD pid, bool selftest, bool mismatch, unsigned seconds, unsigned 
     Require(selftest || !commandProfile || kLiveCommandProfileQualified,
             "live command profile disabled: admission SINGLE_STEP escape requires owned-fixture and live requalification");
     Require(selftest || !actionTraceProfile || kLiveActionTraceQualified,
-            "live action-trace profile disabled: independent exception-containment and build qualification required");
+            "live action-trace profile disabled: clean live detach remains unqualified");
     PROCESS_INFORMATION fixture{};
     std::wstring path;
     if (selftest) path = ImagePath(GetCurrentProcess());

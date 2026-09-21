@@ -26,6 +26,14 @@ cargo needs, emissions and bounded construction module values. Unsupported
 dynamic values invalidate the complete lane; they are never reduced to a
 key-only digest.
 
+The participant-side authenticated adapter lifecycle is now implemented as a
+bounded composition unit: it waits for the signed coordinator capture, validates
+a unique two-to-four-player company roster containing the admitted player,
+orders frames through asynchronous adapter construction and tears down both
+engine and socket on rejection. Join CLI does not yet supply or invoke a real
+production provider, so this is implemented lifecycle plumbing rather than a
+working participant engine connection.
+
 A fresh ordinary-UI load of disposable save
 `tf3mp_disposable_43b49d368fbbd409ae2614ada7b0c757` then passed the real
 production checkpoint path at exact held/released update 3052. Town/growth,
@@ -35,6 +43,12 @@ unavailable, so `coverage.complete` correctly remained false. This proves one
 game can produce admissible public-world comparison evidence. It does not prove
 two-game agreement or determinism. The original `comp.sav` retained SHA-256
 `ccbf4beb740e53323e06d20890fd029c8e174d3e85efb06801a8b4275c762fb5`.
+
+A second fresh disposable run stopped watchdog renewal while retaining live
+engine observation. TF3 advanced from tick 57526/update 3238 to the confirmed
+lease boundary, halted at tick 57623/update 3335, and remained at
+`speedup:0`/update 3335 for the stability interval. This is real single-game
+engine fail-stop evidence; it does not establish peer coordination or recovery.
 
 Host CLI now has an explicit `--host-local-adapter-module` composition seam. It
 will import only a regular absolute-path provider after live bridge observation,
@@ -59,11 +73,26 @@ unqualified. Normal Host/Join also remains deliberately closed because the nativ
 runtime reports `productionQualified:false` and no production game adapter is
 constructed.
 
-Current verification is 830/830 passing in 98.53 seconds. The independent review
-correctly recorded 756/756 on its earlier tree; 478/478 was an incomplete TAP
-count. The focused observer/controller suite is 29/29 and the
-focused authenticated-network suite is 11/11. Both native builds pass MSVC
-`/W4 /WX`; mod review passes with 29 files,
+The narrower handler/apply investigation then produced genuine routing evidence:
+an idle WinDbg trace saw only continuous background apply pairs; each known
+reversible vehicle action produced one nested handler pair; and the first handler
+qword encoded entity 66005 with high dword `0x201` for stop and `0x200` for
+start. This still failed qualification. The final detach ended in TF3
+`0xC0000005` execute-at-zero, while Windows Security separately quarantined the
+rebuilt custom observer as `Behavior:Win32/DefenseEvasion.A!ml` before its second
+smoke run. Protection was not bypassed. Both live command/action profiles remain
+disabled, and the original save hash remained unchanged.
+
+Current `npm run check` discovered 833 tests: 804 passed, 0 failed and 29 native
+executable tests were skipped because Windows Security quarantined the rebuilt
+observer and the stale controller artifact was removed. A separate explicit
+non-native run also passed 804/804. The last pre-quarantine integration tree
+passed 830/830 in 98.53 seconds. The independent review correctly recorded
+756/756 on its earlier tree; 478/478 was an incomplete TAP count. Current native
+source passes MSVC `/W4 /WX /Zs` syntax/type checking; the last pre-quarantine
+focused observer/controller suite passed 29/29, but was not rerun after the
+quarantine. The focused authenticated-network suite is 11/11. Mod review passes
+with 29 files,
 zero executables and manifest
 `2bc5aed290858033ebd13ce7038bb790cdb00ae1fc0293f29966ccc81e6fa429`.
 
