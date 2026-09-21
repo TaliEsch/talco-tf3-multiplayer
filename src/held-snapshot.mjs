@@ -7,6 +7,7 @@ const receiptFields = "balance,balanceNegative,companyEntity,entity,heldUpdate,k
 // V1 remains readable because the current status script emits it. It is not a
 // world-divergence checkpoint and is marked comparisonReady:false below.
 const domains = ["townsGrowth", "economy", "topology", "vehicles", "companies", "linesServices", "rngHiddenState"];
+const publicDomains = domains.filter(name => name !== "rngHiddenState");
 const v2Fields = [...receiptFields.split(","), ...domains.flatMap(name => [`${name}Status`, `${name}Hash`])].sort().join(",");
 const unavailable = new Set(["unavailable", "unsupported", "read_failed"]);
 const exact = (value, fields) => Object.keys(value).sort().join(",") === fields;
@@ -45,12 +46,14 @@ export function parseHeldSnapshot(source, request) {
       coverage:Object.freeze({kind:"legacy_selected_state",complete:false,missing:[...domains]})};
   }
   const domainState = canonicalDomains(p);
-  const comparisonReady = Object.values(domainState).every(domain => domain.availability === "observed");
+  const complete = Object.values(domainState).every(domain => domain.availability === "observed");
+  const comparisonReady = publicDomains.every(name => domainState[name].availability === "observed")
+    && ["observed", "unavailable"].includes(domainState.rngHiddenState.availability);
   const state = {schemaVersion:2,scope:"held_canonical_world_v2",updateCount:p.updateCount,speedup:0,
     company:{entity:p.companyEntity,balance:p.balanceNegative ? -p.balance : p.balance},
     vehicle:{entity:p.entity,ownerCompanyEntity:p.ownerCompanyEntity,running:p.stopFlag===0},domains:domainState};
   return {receipt:p,state,hash:sha256Canonical(state),comparisonReady,
-    coverage:Object.freeze({kind:"canonical_world",complete:comparisonReady,unavailable:domains.filter(name => domainState[name].availability !== "observed")})};
+    coverage:Object.freeze({kind:"canonical_world",complete,comparisonReady,unavailable:domains.filter(name => domainState[name].availability !== "observed")})};
 }
 
 export function createHeldSnapshotProbe({nonce,entity,companyEntity,heldUpdate,stopFlag,firstRequestId,observe,publish,read,remove,logger,complete,now=Date.now,requireCompleteCoverage=false}) {

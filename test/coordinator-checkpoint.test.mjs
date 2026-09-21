@@ -30,11 +30,12 @@ test('production checkpoint digest includes every game-produced world domain and
   for(const domain of domains)assert.notEqual(decodeCheckpointReceipt({...p,[`${domain}Hash`]:'f'.repeat(64)}).receipt.checkpointHash,first.receipt.checkpointHash);
   const blind={...p,rngHiddenStateStatus:'unavailable',rngHiddenStateHash:'unavailable'};
   const parsed=decodeCheckpointReceipt(blind);
-  assert.equal(parsed.coverage.complete,false);assert.deepEqual(parsed.coverage.unavailable,['rngHiddenState']);
+  assert.equal(parsed.coverage.complete,false);assert.equal(parsed.coverage.comparisonReady,true);
+  assert.deepEqual(parsed.coverage.unavailable,['rngHiddenState']);
   assert.throws(()=>decodeCheckpointReceipt({...blind,rngHiddenStateHash:'read_failed'}));
 });
 
-test('production mailbox fails closed before participant receipt when canonical coverage is incomplete',async()=>{
+test('production mailbox accepts the explicit RNG blind spot but rejects missing public coverage',async()=>{
   const root=await mkdtemp(path.join(os.tmpdir(),'tf3mp-checkpoint-'));
   const dir=path.join(root,'tf3mp_status_1');await mkdir(dir);let mailbox;
   try {
@@ -42,6 +43,10 @@ test('production mailbox fails closed before participant receipt when canonical 
     mailbox=await createAsyncEngineMailbox({directory:dir,nonce:p.nonce,requireCompleteCheckpointCoverage:true});
     await writeFile(path.join(dir,'coordination_receipt.lua'),`function data() return {${Object.entries(p).map(([k,v])=>`${k}=${JSON.stringify(v)},`).join('')}} end`);
     let receipt;await mailbox.poll({receiveEngine:value=>{receipt=value;return false;}});
+    assert.equal(receipt.status,'ok');assert.match(receipt.checkpointHash,/^[a-f0-9]{64}$/);
+    const failed={...p,townsGrowthStatus:'read_failed',townsGrowthHash:'read_failed'};
+    await writeFile(path.join(dir,'coordination_receipt.lua'),`function data() return {${Object.entries(failed).map(([k,v])=>`${k}=${JSON.stringify(v)},`).join('')}} end`);
+    await mailbox.poll({receiveEngine:value=>{receipt=value;return false;}});
     assert.equal(receipt.status,'unknown');assert.equal(receipt.checkpointHash,undefined);
   } finally {await mailbox?.close();await rm(root,{recursive:true,force:true});}
 });
@@ -54,6 +59,20 @@ test('legacy checkpoint scope remains an explicit local diagnostic option',async
     await writeFile(path.join(dir,'coordination_receipt.lua'),`function data() return {${Object.entries(p).map(([k,v])=>`${k}=${JSON.stringify(v)},`).join('')}} end`);
     let receipt;await mailbox.poll({receiveEngine:value=>{receipt=value;return true;}});
     assert.match(receipt.checkpointHash,/^[a-f0-9]{64}$/);
+  } finally {await mailbox?.close();await rm(root,{recursive:true,force:true});}
+});
+
+test('mailbox exposes decoded checkpoint coverage without widening the participant receipt',async()=>{
+  const root=await mkdtemp(path.join(os.tmpdir(),'tf3mp-checkpoint-'));
+  const dir=path.join(root,'tf3mp_status_1');await mkdir(dir);let mailbox,evidence;
+  try {
+    const p=worldFixture();mailbox=await createAsyncEngineMailbox({directory:dir,nonce:p.nonce,
+      onCheckpointEvidence:value=>{evidence=value;}});
+    await writeFile(path.join(dir,'coordination_receipt.lua'),`function data() return {${Object.entries(p).map(([k,v])=>`${k}=${JSON.stringify(v)},`).join('')}} end`);
+    let receipt;await mailbox.poll({receiveEngine:value=>{receipt=value;return true;}});
+    assert.equal(evidence.coverage.complete,true);
+    assert.equal(evidence.state.domains.townsGrowth.digest,'1'.repeat(64));
+    assert.deepEqual(Object.keys(receipt).sort(),['checkpointHash','held','operation','operationId','roundId','schemaVersion','status','updateCount']);
   } finally {await mailbox?.close();await rm(root,{recursive:true,force:true});}
 });
 

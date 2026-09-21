@@ -334,7 +334,72 @@ factory/send path in a separate controlled case. Required results are:
    comparison. Existing static hashes and isolated harness tests do not pass
    those gates.
 
-No runtime action is requested from the user by this report. The next engineering
-task is independent review and owned-process investigation of the SINGLE_STEP
-escape. The live command profile must remain disabled until the failure mode is
-understood and a separate controlled requalification is explicitly authorized.
+## Bounded handler/apply entry-return tracing (21 September implementation)
+
+`native/runtime_observer.cpp` now implements a separate `action-trace` profile
+with four exact-build sites: vehicle handler entry `0x9E1710`, its selected
+normal RET `0x9E18AA`, apply entry `0x9E2380`, and apply RET `0x9E26ED`.
+The handler RET follows its stack restoration and register pops; `[RSP]` at
+these entry/RET sites is the caller return address. Static disassembly is the
+evidence for these instruction boundaries. The handler has code after the
+selected RET, so this is not a claim that every exit path is captured.
+
+Both `kLiveCommandProfileQualified` and `kLiveActionTraceQualified` remain
+`false`. An explicit live `--profile action-trace` request is rejected before
+opening/attaching a target. No TF3 launch or live trace was performed for this
+change. The pinned executable SHA256 remains
+`a4843accd706b9c476c645860e2b68f6488c9b89f33ef97efe00cffb74a47be5`.
+The existing exact-file, mapped-header, immutable executable page and 32-byte
+site comparisons apply to the profile; they do not independently qualify safe
+live debugger exception handling or engine semantics.
+
+The implementation keeps one mixed-kind LIFO stack per thread. A return pairs
+only with the top entry of the same handler/apply kind, identical original RSP,
+and identical successfully read eight-byte caller return address. It records
+entry ordinal, thread, depth, register snapshots, process creation time, image
+hash and local run ID. Each hit also records RIP, DR0–DR3, DR6, DR7 and EFLAGS
+before RF is set and DR6 is cleared, preserving ownership evidence. Addresses
+are local diagnostic evidence. The trace does
+not retain them for asynchronous memory reads or infer command completion from
+RAX. Remote reads are eight bytes per hit, subject to the existing committed,
+readable, non-guard page checks. No target instructions or game data are written.
+
+Orphan returns and identity/read mismatches are explicit. A mismatch invalidates
+all outstanding frames on that thread, with one incomplete record per entry;
+it never searches past a newer call to manufacture a match. Target exceptions,
+thread exit, event/duration limits, interruption and observation failure also
+flush incomplete entries. The cap is 32 frames per thread and 256 total pending
+frames; exceeding it ends observation and restores/detaches. Independent review
+found that throwing at this cap before consuming the owned debug exception could
+forward SINGLE_STEP into the target. The observer now sets `DBG_CONTINUE` and
+installs the RF/DR6 resume context immediately after first-chance ownership is
+established, before accounting or diagnostics can allocate/throw. Evidence still
+uses the original context snapshot. A real four-thread depth-41 recursive fixture
+reaches the cap under the debugger and requires all workers to finish normally
+after restoration/detach; the regression repeats this three times. The selected RET
+need not execute after an unwind or an alternate exit, so incomplete records
+are expected evidence, not permission to reconstruct a successful application.
+
+Owned fixture coverage uses actual hardware breakpoints on four concurrent
+threads executing depth-four alternating recursive handler/apply functions.
+For these fixture functions only, the observer resolves the compiler's optional
+incremental-linker thunk, requires an exact primary runtime-function entry, and
+requires a final `RET` byte at the compiler-described extent. It does not use
+this fixture discovery algorithm on TF3. The ordinary and already-running
+attach cases each exercise 256 traps and 128 paired calls. Separate cases cover
+event-cap incompleteness, armed-failure cleanup, idle timeout and mapped-byte
+rejection. Isolated pairing tests cover orphan returns, mismatched kind/RSP/
+return address, unreadable return addresses and nesting overflow. Those isolated
+records are not TF3 observations. Second-chance SINGLE_STEP rejection remains
+in `OwnedFirstChanceTrapSite`.
+
+Verification after the review fix: MSVC observer/controller builds passed
+`/W4 /WX`; the combined native observer/controller suite passed **29/29**, with
+zero skips or failures (46.11 seconds), including three actual debugger nesting-
+cap runs. `git diff --check` passed. No game or multiplayer result is implied.
+
+The next live investigation remains independent review of exception containment
+and this profile, followed by a controlled disposable-game trace under the
+user's existing investigation authorization. Neither profile may be enabled
+merely because fixtures pass. Command admission/suppression, lifetime ownership,
+replay, actual state postconditions and two-instance verification remain open.

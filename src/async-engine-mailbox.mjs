@@ -91,9 +91,11 @@ export async function isUnpublishedEngineSource(temporary,source) {
   }finally{await pending.close();}
 }
 
-export async function createAsyncEngineMailbox({directory,nonce=randomBytes(16).toString("hex"),requireCheckpointSnapshot=true,requireCompleteCheckpointCoverage=false}) {
+export async function createAsyncEngineMailbox({directory,nonce=randomBytes(16).toString("hex"),requireCheckpointSnapshot=true,
+  requireCompleteCheckpointCoverage=false,onCheckpointEvidence=()=>{}}) {
   if (!/^[0-9a-f]{32}$/.test(nonce)) throw new TypeError("invalid mailbox nonce");
-  if(typeof requireCheckpointSnapshot!=='boolean'||typeof requireCompleteCheckpointCoverage!=='boolean') throw new TypeError('invalid checkpoint evidence option');
+  if(typeof requireCheckpointSnapshot!=='boolean'||typeof requireCompleteCheckpointCoverage!=='boolean'
+    ||typeof onCheckpointEvidence!=='function') throw new TypeError('invalid checkpoint evidence option');
   directory=await requirePlainDirectory(directory);
   const lockPath=path.join(directory,"coordination.lock"), requestPath=path.join(directory,"coordination_request.lua");
   const lock=await open(lockPath,"wx",0o600);
@@ -167,7 +169,8 @@ export async function createAsyncEngineMailbox({directory,nonce=randomBytes(16).
       if(p.operation==='holdCheckpoint'&&p.status==='ok'&&p.snapshotVersion!==undefined) {
         try {
           const checkpoint=decodeCheckpointReceipt(p);
-          p=requireCompleteCheckpointCoverage&&!checkpoint.coverage.complete
+          onCheckpointEvidence(structuredClone(checkpoint));
+          p=requireCompleteCheckpointCoverage&&!checkpoint.coverage.comparisonReady
             ?{...p,status:'unknown'}:checkpoint.receipt;
         } catch {p={...p,status:'unknown'};}
       } else if(requireCheckpointSnapshot&&p.operation==='holdCheckpoint'&&p.status==='ok') {

@@ -4,6 +4,7 @@ import { once } from "node:events";
 import { startHost } from "../src/host.mjs";
 import { connectClient } from "../src/client.mjs";
 import { HostAuthority } from "../src/lockstep.mjs";
+import { connectHostLocalParticipant } from "../src/host-local-participant.mjs";
 
 const BUILD = "b".repeat(64);
 const MODS = "c".repeat(64);
@@ -55,6 +56,148 @@ async function shutdown(server, sockets = []) {
   server.close();
   server.unref();
 }
+
+async function until(predicate) {
+  for (let i = 0; i < 300; i++) { if (predicate()) return; await new Promise(resolve => setTimeout(resolve, 5)); }
+  assert.fail("local participant test timed out");
+}
+
+test("host-local actions use the authenticated client authority path and share host ordering", async () => {
+  const instance = startHost({ legacyModelRelay: true, secret: SECRET, sessionId: "host-local-order", port: 0,
+    buildHash: BUILD, modManifestHash: MODS, getUpdateCount: () => 50, resolveEntityOwner: entity => entity === 71 ? 101 : entity === 72 ? 102 : null });
+  await once(instance.server, "listening");
+  const localMessages = [], remoteMessages = [];
+  const engineBinding = Object.freeze({ source: "injected-test-binding" });
+  let local, remote;
+  try {
+    local = connectHostLocalParticipant({ host: instance, displayName: "Host", engineBinding,
+      createAdapter: input => ({ receive() {}, close() {}, binding: input.engineBinding }),
+      onMessage: message => localMessages.push(message) });
+    remote = connectClient({ secret: SECRET, sessionId: instance.sessionId, port: instance.server.address().port,
+      displayName: "Remote", buildHash: BUILD, modManifestHash: MODS, onMessage: message => remoteMessages.push(message) });
+    await until(() => local.ready && remote.playerId);
+    const localPlayer = localMessages.find(message => message.kind === "admitted").payload.player;
+    instance.authority.bindCompanyEntity(localPlayer.playerId, 101);
+    instance.authority.bindCompanyEntity(remote.playerId, 102);
+    local.connection.send("action_request", { clientSequence: 0, commandType: "vehicle.setRunning", originPlayerId: localPlayer.playerId,
+      targetCompanyEntity: 101, targetEntity: 71, payload: { running: false }, requestedUpdate: 0 });
+    await until(() => localMessages.some(message => message.kind === "command_accepted"));
+    remote.send("action_request", { clientSequence: 0, commandType: "vehicle.setRunning", originPlayerId: remote.playerId,
+      targetCompanyEntity: 102, targetEntity: 72, payload: { running: true }, requestedUpdate: 0 });
+    await until(() => remoteMessages.filter(message => message.kind === "command_accepted").length === 2);
+    const accepted = remoteMessages.filter(message => message.kind === "command_accepted").map(message => message.payload.command);
+    assert.deepEqual(accepted.map(command => command.originPlayerId), [localPlayer.playerId, remote.playerId]);
+    assert.deepEqual(accepted.map(command => command.hostSequence), [1, 2]);
+    assert.equal(local.adapter.binding, engineBinding);
+  } finally {
+    await local?.close();
+    await shutdown(instance.server, remote ? [remote.socket] : []);
+  }
+});
+
+test("host-local adapter attachment is a coordination gate and its closure removes the participant", async () => {
+  const instance = startHost({ secret: SECRET, sessionId: "host-local-lifecycle", port: 0, buildHash: BUILD, modManifestHash: MODS });
+  await once(instance.server, "listening");
+  let resolveAdapter;
+  const localMessages = [];
+  const local = connectHostLocalParticipant({ host: instance, displayName: "Host", engineBinding: Object.freeze({ native: true }),
+    createAdapter: () => new Promise(resolve => { resolveAdapter = resolve; }), onMessage: message => localMessages.push(message) });
+  try {
+    await until(() => localMessages.some(message => message.kind === "admitted"));
+    const player = localMessages.find(message => message.kind === "admitted").payload.player;
+    instance.authority.bindCompanyEntity(player.playerId, 101);
+    assert.throws(() => instance.beginCoordination({ checkpointHash: "d".repeat(64), updateCount: 100 }), error => error.code === "LOCAL_ENGINE_BINDING_REQUIRED");
+    resolveAdapter({ receive() {}, close() {} });
+    await until(() => local.ready);
+    await local.close();
+    await until(() => instance.authority.players().length === 0);
+  } finally {
+    await local.close();
+    await new Promise(resolve => instance.server.close(resolve));
+  }
+});
+
+test("host-local admission callback cannot race the pending adapter coordination gate", async () => {
+  const instance = startHost({ secret: SECRET, sessionId: "host-local-admission-race", port: 0, buildHash: BUILD, modManifestHash: MODS });
+  await once(instance.server, "listening");
+  let resolveAdapter, callbackError;
+  const local = connectHostLocalParticipant({ host: instance, displayName: "Host", engineBinding: Object.freeze({ native: true }),
+    createAdapter: () => new Promise(resolve => { resolveAdapter = resolve; }),
+    onMessage: message => {
+      if (message.kind !== "admitted") return;
+      try { instance.beginCoordination({ checkpointHash: "d".repeat(64), updateCount: 100 }); }
+      catch (error) { callbackError = error; }
+    } });
+  try {
+    await until(() => callbackError);
+    assert.equal(callbackError.code, "LOCAL_ENGINE_BINDING_REQUIRED");
+    resolveAdapter({ receive() {}, close() {} });
+    await until(() => local.ready);
+  } finally {
+    await local.close();
+    await new Promise(resolve => instance.server.close(resolve));
+  }
+});
+
+test("host-local closes an engine adapter that resolves after transport teardown", async () => {
+  const instance = startHost({ secret: SECRET, sessionId: "host-local-late-adapter", port: 0, buildHash: BUILD, modManifestHash: MODS });
+  await once(instance.server, "listening");
+  let resolveAdapter, closed = 0;
+  const local = connectHostLocalParticipant({ host: instance, displayName: "Host", engineBinding: Object.freeze({ native: true }),
+    createAdapter: () => new Promise(resolve => { resolveAdapter = resolve; }) });
+  try {
+    await until(() => typeof resolveAdapter === "function");
+    await local.close();
+    resolveAdapter({ receive() {}, close() { closed++; } });
+    await local.attachment;
+    assert.equal(closed, 1);
+    assert.equal(local.ready, false);
+  } finally {
+    await local.close();
+    await new Promise(resolve => instance.server.close(resolve));
+  }
+});
+
+test("host-local transport connects through the host's explicit loopback bind address", async () => {
+  const instance = startHost({ secret: SECRET, sessionId: "host-local-explicit-bind", bind: "127.0.0.2", port: 0,
+    buildHash: BUILD, modManifestHash: MODS });
+  await once(instance.server, "listening");
+  const local = connectHostLocalParticipant({ host: instance, displayName: "Host", engineBinding: Object.freeze({ native: true }),
+    createAdapter: () => ({ receive() {}, close() {} }) });
+  try { await until(() => local.ready); }
+  finally {
+    await local.close();
+    await new Promise(resolve => instance.server.close(resolve));
+  }
+});
+
+test("host-local registration cannot claim a remote participant and verifies the authoritative save", async () => {
+  const requiredSave = Object.freeze({ bytes: 42, sha256: "e".repeat(64) });
+  const instance = startHost({ secret: SECRET, sessionId: "host-local-save", port: 0, buildHash: BUILD, modManifestHash: MODS, requiredSave });
+  await once(instance.server, "listening");
+  const remote = connectClient({ secret: SECRET, sessionId: instance.sessionId, port: instance.server.address().port,
+    displayName: "Remote", buildHash: BUILD, modManifestHash: MODS });
+  let local;
+  try {
+    await until(() => remote.playerId);
+    assert.throws(() => instance.registerLocalParticipant(remote.playerId, { receive() {} }), error => error.code === "LOCAL_ENGINE_BINDING_REQUIRED");
+    local = connectHostLocalParticipant({ host: instance, displayName: "Host", engineBinding: Object.freeze({ native: true }),
+      verifiedSave: requiredSave, createAdapter: () => ({ receive() {}, close() {} }) });
+    await until(() => local.ready);
+    instance.authority.bindCompanyEntity(remote.playerId, 101);
+    instance.authority.bindCompanyEntity(local.connection.playerId, 102);
+    assert.throws(() => instance.beginCoordination({ checkpointHash: "d".repeat(64), updateCount: 100 }), error => error.code === "SAVE_REQUIRED");
+    remote.send("save_ready", requiredSave);
+    await until(() => {
+      try { instance.beginCoordination({ checkpointHash: "d".repeat(64), updateCount: 100 }); return true; }
+      catch { return false; }
+    });
+  } finally {
+    await local?.close();
+    remote.socket.destroy();
+    await new Promise(resolve => instance.server.close(resolve));
+  }
+});
 
 test("authenticated client is admitted and exchanges test message", async () => {
   const instance = startHost({ legacyModelRelay: true, secret: SECRET, sessionId: "test-session", port: 0, buildHash: BUILD, modManifestHash: MODS });

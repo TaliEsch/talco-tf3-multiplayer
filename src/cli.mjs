@@ -19,6 +19,8 @@ import {beginRoadStopReplayRecording,finishRoadStopReplayRecording,loadRoadStopR
 import {checkRoadStopReplayIdentity} from './road-stop-replay-case.mjs';
 import {openNativeHostJoinGate,resolveNativeHostJoinMode} from './native-host-join.mjs';
 import {prepareDisposableStartupLoad} from './startup-load.mjs';
+import {connectHostLocalParticipant} from './host-local-participant.mjs';
+import {loadHostLocalEngineFactory} from './host-local-cli-seam.mjs';
 
 function options(args) {
   const result = {};
@@ -323,6 +325,25 @@ if (command === "hash-game") {
   hostInstance = instance;
   await once(instance.server, "listening");
   await enableBridge();
+  // Do not synthesize an adapter from the native IPC gate or passive bridge
+  // telemetry. A separately qualified provider is opt-in and must prove its
+  // own live binding, production qualification, and save identity above.
+  const localFactory=await loadHostLocalEngineFactory({modulePath:opt['host-local-adapter-module'],bridge,nativeGate,
+    sessionId:hostSessionId,buildHash,modManifestHash:opt['mod-hash'],requiredSave,logger:log});
+  if(localFactory){
+    const local=connectHostLocalParticipant({host:instance,displayName:opt['host-local-name']??'Host',
+      engineBinding:localFactory.engineBinding,createAdapter:localFactory.createAdapter,verifiedSave:localFactory.verifiedSave,
+      onMessage:(message)=>{
+        if(message.kind==='session_ended')log({level:'warn',event:'host_local_participant_ended',gameplayVerified:false});
+      }});
+    local.attachment.then(()=>{
+      const accepted=local.ready;
+      log({level:accepted?'info':'warn',event:accepted?'host_local_adapter_attached':'host_local_adapter_rejected',
+        ...(accepted?{engineControlVerified:false}:{code:'HOST_LOCAL_ENGINE_ADAPTER_UNAVAILABLE'}),gameplayVerified:false});
+    }).catch(()=>log({level:'warn',event:'host_local_adapter_rejected',
+      code:'HOST_LOCAL_ENGINE_ADAPTER_UNAVAILABLE',gameplayVerified:false}));
+    log({level:'info',event:'host_local_participant_connecting',gameplayVerified:false});
+  }
   log({ level: "info", event: "host_listening", sessionId: instance.sessionId });
 } else if (command === "join") {
   if (!sessionSecret) throw new Error("join requires TF3MP_SESSION_SECRET (or --secret)");

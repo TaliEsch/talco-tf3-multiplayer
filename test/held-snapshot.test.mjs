@@ -22,9 +22,10 @@ test("canonical world v2 covers every required domain and is invariant to receip
   assert.equal(a.comparisonReady,true); assert.deepEqual(a.coverage.unavailable,[]);
   for(const [name,value] of Object.entries(coverage)) assert.notEqual(a.hash,parseHeldSnapshot(lua(canonicalData({[`${name}Hash`]:"f".repeat(64)})),req).hash,`${name} divergence must alter hash`);
 });
-test("canonical v2 represents missing hidden state explicitly and is not comparable",()=>{
+test("canonical v2 remains comparison-ready with only the explicit hidden RNG blind spot",()=>{
   const parsed=parseHeldSnapshot(lua(canonicalData({rngHiddenStateStatus:"unavailable",rngHiddenStateHash:"unavailable"})),req);
-  assert.equal(parsed.comparisonReady,false); assert.deepEqual(parsed.state.domains.rngHiddenState,{availability:"unavailable"});
+  assert.equal(parsed.comparisonReady,true); assert.equal(parsed.coverage.complete,false);
+  assert.deepEqual(parsed.state.domains.rngHiddenState,{availability:"unavailable"});
   assert.deepEqual(parsed.coverage.unavailable,["rngHiddenState"]);
 });
 for(const changes of [

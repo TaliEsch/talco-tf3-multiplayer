@@ -10,13 +10,21 @@ establish multiplayer readiness.
 
 Continuation evidence: the native controller now uses strict tracked-thread,
 exception-address, RIP and execution-slot ownership; cleanup forwards all
-second-chance traps and has a real unowned-exception regression. Authenticated
+second-chance traps and has a real unowned-exception regression. The observer's
+active classifier now also rejects every second-chance event before owned-site
+handling. Authenticated
 client fanout now carries only verified host frames, providing a safe prerequisite
-for later production adapter construction. A corrected disposable launch reached
+for later production adapter construction. The host-local composition routes
+host actions through a real authenticated loopback participant, fails closed
+while its injected adapter attaches, closes late adapter resources, and respects
+explicit bind addresses; the CLI still needs a real production binding factory.
+A corrected disposable launch reached
 `Game is ready`, but TF3's shipped UI source proves the direct `--script`
 `app.loadGame` call bypasses the stock `ProgressPage` React mount and causes the
 observed MainMenu/WindowContainer faults. Automatic load remains implementation
-work, not completed functionality. Current regression count is 813/813.
+work, not completed functionality. A fresh ordinary-UI disposable run passed the
+production public-domain checkpoint gate at exact held/released update 3052;
+this is single-game evidence only. Current regression count is 830/830.
 
 Work in this order:
 
@@ -33,10 +41,13 @@ Work in this order:
    transport receipts outside world evidence,
    and provide a complete hold/release/halt lifecycle that continues receiving
    control traffic while simulation is paused.
-4. Resolve background synchronization. The game producer now covers six public
-   domains but explicitly lacks RNG/hidden state, so production checkpoint
-   admission fails closed. Either qualify enough deterministic state at matching
-   updates or implement concrete host-authoritative state replication.
+4. Resolve background synchronization. The game producer now reads public
+   `Town`/`TownBuilding` growth controls and bounded construction parameters in
+   addition to the other public domains. Production admission now requires all
+   six public domains and allows only explicitly unavailable hidden RNG state;
+   the live single-game producer passed this gate. Compare two instances at the
+   same updates, investigate any baseline divergence, and either qualify enough
+   deterministic state or implement concrete host-authoritative replication.
 5. Implement coordinated save checkpoints/reload, authenticated redistribution,
    persistent company assignment, fresh epochs and duplicate barriers after
    recovery. Never retry unknown mutations or repair balances.

@@ -10,11 +10,37 @@ vehicle stop/start proof. The live vehicle proof applied host sequences 1 and 2
 to company 3141/entity 66005 and restored the original running state.
 
 The continuation batch hardened trap ownership and teardown: accepted traps now
-require a tracked armed thread plus matching exception address, RIP and enabled
+require first-chance status, a tracked armed thread plus matching exception address, RIP and enabled
 execution slot; an owned real-exception regression verifies emergency hold,
 release refusal, responsive control and exact second-chance forwarding. The
 authenticated socket client now exposes stable subscriptions only for verified
 server frames, not local transport/lifecycle notifications.
+
+This integration additionally gives the host a real
+authenticated loopback participant path. Its engine adapter remains mandatory
+and injected: pending attachment blocks coordination, admission callbacks cannot
+race that gate, late adapter resources are closed, and explicit bind addresses
+remain reachable. The checkpoint producer now reads actual public `Town` and
+`TownBuilding` components, including growth controls, distribution weights,
+cargo needs, emissions and bounded construction module values. Unsupported
+dynamic values invalidate the complete lane; they are never reduced to a
+key-only digest.
+
+A fresh ordinary-UI load of disposable save
+`tf3mp_disposable_43b49d368fbbd409ae2614ada7b0c757` then passed the real
+production checkpoint path at exact held/released update 3052. Town/growth,
+economy, topology, vehicles, companies and lines/services were observed and the
+gate returned `comparisonReady:true`; hidden RNG remained explicitly
+unavailable, so `coverage.complete` correctly remained false. This proves one
+game can produce admissible public-world comparison evidence. It does not prove
+two-game agreement or determinism. The original `comp.sav` retained SHA-256
+`ccbf4beb740e53323e06d20890fd029c8e174d3e85efb06801a8b4275c762fb5`.
+
+Host CLI now has an explicit `--host-local-adapter-module` composition seam. It
+will import only a regular absolute-path provider after live bridge observation,
+authenticated production native binding and exact session/build/mod/save checks.
+The repository does not contain a production-qualified provider, so this is
+integration plumbing rather than a claim that ordinary Host mode can control TF3.
 
 A fresh live startup check first exposed that TF3 was selecting a preserved
 same-ID backup from its scanned staging directory. Both backups were moved intact
@@ -33,12 +59,13 @@ unqualified. Normal Host/Join also remains deliberately closed because the nativ
 runtime reports `productionQualified:false` and no production game adapter is
 constructed.
 
-Current verification is 813/813 passing in 88.55 seconds, not 478/478 and not the
-earlier 756-test baseline. The focused observer/controller suite is 25/25 and the
+Current verification is 830/830 passing in 98.53 seconds. The independent review
+correctly recorded 756/756 on its earlier tree; 478/478 was an incomplete TAP
+count. The focused observer/controller suite is 29/29 and the
 focused authenticated-network suite is 11/11. Both native builds pass MSVC
 `/W4 /WX`; mod review passes with 29 files,
 zero executables and manifest
-`80ed637bb9c609d7e990616ebd1797b3571d1d536a39f447779af4b905fe1dc7`.
+`2bc5aed290858033ebd13ce7038bb790cdb00ae1fc0293f29966ccc81e6fa429`.
 
 Unfinished implementation: clean automatic entry into the stock save-load
 lifecycle, safe capture/suppression/replay, per-instance identity,

@@ -134,6 +134,15 @@ const std::array<Site, 4> tf3CommandSites{{
 // SINGLE_STEP escape. Owned fixtures remain available; passing them is not live
 // requalification and must not silently re-enable this gate.
 constexpr bool kLiveCommandProfileQualified = false;
+const std::array<Site, 4> tf3ActionTraceSites{{
+    {"vehicle_handler_entry_candidate", 0x9e1710},
+    {"vehicle_handler_return_candidate", 0x9e18aa},
+    {"command_apply_entry_candidate", 0x9e2380},
+    {"command_apply_return_candidate", 0x9e26ed}
+}};
+// Separate from the quarantined admission profile. Exact-file/code-page checks
+// do not qualify exception containment or safe observation in the live engine.
+constexpr bool kLiveActionTraceQualified = false;
 
 int ConfiguredTrapSite(const EXCEPTION_RECORD& exception, const CONTEXT& context,
                        ULONG64 base, const std::array<Site, 4>& sites) {
@@ -147,6 +156,11 @@ int ConfiguredTrapSite(const EXCEPTION_RECORD& exception, const CONTEXT& context
             (context.Dr7 & (0xfULL << (16 + 4 * i))) == 0) return static_cast<int>(i);
     }
     return -1;
+}
+int OwnedFirstChanceTrapSite(const DEBUG_EVENT& event, const CONTEXT& context,
+                             ULONG64 base, const std::array<Site, 4>& sites) {
+    if (event.dwDebugEventCode != EXCEPTION_DEBUG_EVENT || !event.u.Exception.dwFirstChance) return -1;
+    return ConfiguredTrapSite(event.u.Exception.ExceptionRecord, context, base, sites);
 }
 void EmitTrapDiagnostic(const char* reason, const DEBUG_EVENT& event, const CONTEXT& context) {
     printf("{\"event\":\"trap-diagnostic\",\"reason\":\"%s\",\"threadId\":%lu,\"firstChance\":%lu,"
@@ -191,6 +205,92 @@ struct CommandEvidence {
     bool entryRead = false, tagRead = false, payloadRead = false, dependencyShape = false;
     const char* status = "entry-read-failed";
 };
+struct ActionFrame {
+    size_t kind = 0;
+    ULONG64 rsp = 0, returnAddress = 0;
+    unsigned ordinal = 0;
+    bool readable = false;
+};
+struct ActionPairing {
+    const char* status = "orphan-return";
+    unsigned entryOrdinal = 0;
+    size_t depth = 0;
+    bool paired = false;
+};
+struct ActionTrace {
+    static constexpr size_t kMaxDepth = 32, kMaxFrames = 256;
+    std::map<DWORD, std::vector<ActionFrame>> frames;
+    size_t pending = 0;
+    unsigned paired = 0, orphan = 0, mismatched = 0, incomplete = 0;
+    void Flush(DWORD thread, const char* reason) {
+        const auto found = frames.find(thread);
+        if (found == frames.end()) return;
+        for (const auto& frame : found->second) {
+            ++incomplete;
+            printf("{\"event\":\"action-trace-incomplete\",\"threadId\":%lu,\"entryOrdinal\":%u,"
+                   "\"kind\":\"%s\",\"reason\":\"%s\",\"commandControlQualified\":false}\n",
+                   thread, frame.ordinal, frame.kind == 0 ? "handler" : "apply", reason);
+        }
+        pending -= found->second.size(); frames.erase(found); fflush(stdout);
+    }
+    void FlushAll(const char* reason) { while (!frames.empty()) Flush(frames.begin()->first, reason); }
+    ActionPairing Record(DWORD thread, size_t site, ULONG64 rsp, ULONG64 address, bool readable, unsigned ordinal) {
+        const size_t kind = site / 2;
+        if ((site % 2) == 0) {
+            auto& stack = frames[thread];
+            if (stack.size() >= kMaxDepth || pending >= kMaxFrames) {
+                // A cap ends the trace; never discard an entry and later pair
+                // its return with an older call at a coincidentally reused RSP.
+                printf("{\"event\":\"action-trace-incomplete\",\"threadId\":%lu,\"entryOrdinal\":%u,"
+                       "\"reason\":\"nesting-cap\",\"commandControlQualified\":false}\n", thread, ordinal);
+                ++incomplete;
+                throw std::runtime_error("action trace nesting cap reached");
+            }
+            stack.push_back({kind, rsp, address, ordinal, readable}); ++pending;
+            return {readable ? "entry" : "entry-return-unreadable", ordinal, stack.size(), false};
+        }
+        const auto found = frames.find(thread);
+        if (found == frames.end() || found->second.empty()) { ++orphan; return {}; }
+        const auto frame = found->second.back();
+        const auto depth = found->second.size();
+        if (!readable || !frame.readable || frame.kind != kind || frame.rsp != rsp || frame.returnAddress != address) {
+            ++mismatched;
+            const char* reason = !readable || !frame.readable ? "return-unreadable" : "lifo-mismatch";
+            Flush(thread, reason);
+            return {reason, frame.ordinal, depth, false};
+        }
+        found->second.pop_back(); --pending; ++paired;
+        if (found->second.empty()) frames.erase(found);
+        return {"paired-return", frame.ordinal, depth, true};
+    }
+};
+void EmitActionTraceHit(HANDLE process, ULONG64 base, DWORD imageSize, const Site& site, size_t siteIndex,
+                        DWORD thread, const CONTEXT& context, unsigned ordinal, ULONGLONG start,
+                        ULONG64 creation, const std::string& hash, ActionTrace& trace) {
+    DiagnosticReader reader{process};
+    ULONG64 returnAddress = 0;
+    const bool readable = reader.Read(context.Rsp, &returnAddress, sizeof(returnAddress));
+    const bool inImage = readable && returnAddress >= base && returnAddress - base < imageSize;
+    const auto pairing = trace.Record(thread, siteIndex, context.Rsp, returnAddress, readable, ordinal);
+    printf("{\"event\":\"action-trace-observation\",\"schemaVersion\":1,\"profile\":\"action-trace\","
+           "\"sha256\":\"%s\",\"processCreationTime\":\"%llu\",\"runId\":\"%lu-%llu\","
+           "\"ordinal\":%u,\"elapsedMs\":%llu,\"threadId\":%lu,\"site\":\"%s\",\"rva\":%lu,"
+           "\"kind\":\"%s\",\"phase\":\"%s\",\"mappedSiteVerified\":true,\"rcx\":\"%llx\","
+           "\"rdx\":\"%llx\",\"r8\":\"%llx\",\"r9\":\"%llx\",\"rax\":\"%llx\",\"rsp\":\"%llx\","
+           "\"firstChance\":true,\"rip\":\"%llx\",\"dr0\":\"%llx\",\"dr1\":\"%llx\",\"dr2\":\"%llx\","
+           "\"dr3\":\"%llx\",\"dr6\":\"%llx\",\"dr7\":\"%llx\",\"eflags\":%lu,"
+           "\"returnAddressReadable\":%s,\"returnAddress\":\"%llx\",\"returnAddressClass\":\"%s\",\"returnAddressRva\":%llu,"
+           "\"pairStatus\":\"%s\",\"entryOrdinal\":%u,\"nestingDepth\":%zu,\"paired\":%s,"
+           "\"remoteBytesAttempted\":%zu,\"raxIsCompletion\":false,\"captureComplete\":false,\"commandControlQualified\":false}\n",
+           hash.c_str(), creation, GetCurrentProcessId(), start, ordinal, GetTickCount64() - start, thread, site.name, site.rva,
+           siteIndex < 2 ? "handler" : "apply", siteIndex % 2 ? "return" : "entry", context.Rcx,
+           context.Rdx, context.R8, context.R9, context.Rax, context.Rsp,
+           context.Rip, context.Dr0, context.Dr1, context.Dr2, context.Dr3, context.Dr6, context.Dr7, context.EFlags,
+           readable ? "true" : "false", returnAddress,
+           !readable ? "unreadable" : inImage ? "main-image" : "outside-main-image", inImage ? returnAddress - base : 0,
+           pairing.status, pairing.entryOrdinal, pairing.depth, pairing.paired ? "true" : "false", reader.attempted);
+    fflush(stdout);
+}
 CommandEvidence ReadCommand(DiagnosticReader& reader, ULONG64 entry, ULONG64 directCommand = 0) {
     CommandEvidence result{}; result.entry = entry;
     if (entry) {
@@ -496,7 +596,80 @@ extern "C" __declspec(dllexport) __declspec(noinline) void ObserverFixtureAdmiss
 extern "C" __declspec(dllexport) __declspec(noinline) void ObserverFixtureApply(ULONG64 a, ULONG64 entry) { fixtureSink = a + entry + 17; }
 extern "C" __declspec(dllexport) __declspec(noinline) void ObserverFixtureHandler(ULONG64 a, ULONG64 command) { fixtureSink = a + command + 31; }
 
+// Only our fixture functions disable optimization: one compiler-described
+// epilogue each, recursive mixed kinds, and no tail-call elimination. TF3's
+// sites are independently pinned above and never discovered with this helper.
+#pragma optimize("", off)
+extern "C" __declspec(dllexport) __declspec(noinline) ULONG64 ObserverActionFixtureApply(ULONG64 depth);
+extern "C" __declspec(dllexport) __declspec(noinline) ULONG64 ObserverActionFixtureHandler(ULONG64 depth) {
+    ULONG64 result = depth;
+    if (depth) result += ObserverActionFixtureApply(depth - 1);
+    else Sleep(1);
+    return result + 1;
+}
+extern "C" __declspec(dllexport) __declspec(noinline) ULONG64 ObserverActionFixtureApply(ULONG64 depth) {
+    ULONG64 result = depth;
+    if (depth) result += ObserverActionFixtureHandler(depth - 1);
+    else Sleep(1);
+    return result + 1;
+}
+#pragma optimize("", on)
+
 namespace {
+ULONG64 ActionFixtureEntry(const char* name) {
+    ULONG64 entry = reinterpret_cast<ULONG64>(GetProcAddress(GetModuleHandleW(nullptr), name));
+    std::array<BYTE, 5> code{};
+    Require(entry && ReadRemote(GetCurrentProcess(), entry, code.data(), code.size()), "owned fixture export unavailable");
+    // MSVC incremental links export an ILT rel32 jump. Resolve exactly one
+    // such jump, in our own executable only; never use this for game sites.
+    if (code[0] == 0xe9) {
+        std::int32_t displacement = 0; memcpy(&displacement, code.data() + 1, sizeof(displacement));
+        entry = static_cast<ULONG64>(static_cast<std::int64_t>(entry) + 5 + displacement);
+    }
+    MEMORY_BASIC_INFORMATION page{};
+    Require(VirtualQuery(reinterpret_cast<void*>(entry), &page, sizeof(page)) == sizeof(page) &&
+        page.Type == MEM_IMAGE && page.AllocationBase == GetModuleHandleW(nullptr), "owned fixture entry outside image");
+    return entry;
+}
+ULONG64 ActionFixtureReturn(ULONG64 entry) {
+    DWORD64 base = 0;
+    const auto function = RtlLookupFunctionEntry(entry, &base, nullptr);
+    Require(function && base + function->BeginAddress == entry && function->EndAddress > function->BeginAddress &&
+        function->EndAddress - function->BeginAddress < 4096, "owned action fixture function extent unavailable");
+    const ULONG64 ret = base + function->EndAddress - 1;
+    BYTE opcode = 0;
+    Require(ReadRemote(GetCurrentProcess(), ret, &opcode, 1) && opcode == 0xc3,
+        "owned action fixture does not end with expected RET");
+    return ret;
+}
+int ActionPairingFixture() {
+    ActionTrace trace;
+    Require(trace.Record(1, 0, 0x1000, 0x2000, true, 1).depth == 1, "first action entry failed");
+    Require(trace.Record(2, 2, 0x1000, 0x2000, true, 2).depth == 1, "concurrent action entry failed");
+    Require(trace.Record(1, 2, 0x900, 0x2100, true, 3).depth == 2, "nested action entry failed");
+    Require(trace.Record(1, 3, 0x900, 0x2100, true, 4).entryOrdinal == 3, "nested action return mismatch");
+    Require(trace.Record(2, 3, 0x1000, 0x2000, true, 5).paired, "concurrent action return mismatch");
+    Require(trace.Record(1, 1, 0x1000, 0x2000, true, 6).paired, "outer action return mismatch");
+    Require(!trace.Record(3, 1, 0x1000, 0x2000, true, 7).paired && trace.orphan == 1, "orphan return accepted");
+    // Each identity component must match, and a mismatch must invalidate the
+    // whole nesting stack so the next return cannot inherit a stale pairing.
+    for (unsigned fault = 0; fault < 5; ++fault) {
+        trace.Record(1, 0, 0x1000, 0x2000, fault != 3, 8 + fault * 3);
+        const auto result = trace.Record(1, fault == 0 ? 3 : 1, fault == 1 ? 0x1008 : 0x1000,
+            fault == 2 ? 0x2008 : 0x2000, fault != 4, 9 + fault * 3);
+        Require(!result.paired && trace.pending == 0, "mismatched action return accepted");
+    }
+    for (unsigned i = 0; i < 32; ++i) trace.Record(1, 0, 0x1000 - i * 16, 0x2000, true, 30 + i);
+    bool refused = false;
+    try { trace.Record(1, 0, 0x100, 0x2000, true, 62); }
+    catch (const std::runtime_error&) { refused = true; }
+    Require(refused && trace.pending == 32, "action depth cap not enforced");
+    trace.FlushAll("fixture-end");
+    Require(trace.pending == 0 && trace.paired == 3 && trace.mismatched == 5 && trace.incomplete == 38,
+        "action incomplete accounting mismatch");
+    printf("{\"event\":\"action-pairing-test-passed\",\"paired\":3,\"orphan\":1,\"mismatched\":5,\"incomplete\":38}\n");
+    return 0;
+}
 int TrapClassifierFixture() {
     const ULONG64 base = 0x140000000;
     for (size_t i = 0; i < tf3CommandSites.size(); ++i) {
@@ -506,7 +679,13 @@ int TrapClassifierFixture() {
         context.Dr7 = 0x55; context.Rip = base + tf3CommandSites[i].rva;
         EXCEPTION_RECORD exception{}; exception.ExceptionCode = EXCEPTION_SINGLE_STEP;
         exception.ExceptionAddress = reinterpret_cast<void*>(context.Rip);
+        DEBUG_EVENT event{}; event.dwDebugEventCode = EXCEPTION_DEBUG_EVENT;
+        event.u.Exception.dwFirstChance = 1; event.u.Exception.ExceptionRecord = exception;
         Require(ConfiguredTrapSite(exception, context, base, tf3CommandSites) == static_cast<int>(i), "missing DR6 classification failed");
+        Require(OwnedFirstChanceTrapSite(event, context, base, tf3CommandSites) == static_cast<int>(i), "owned first-chance classification failed");
+        event.u.Exception.dwFirstChance = 0;
+        Require(OwnedFirstChanceTrapSite(event, context, base, tf3CommandSites) == -1, "second-chance exception accepted");
+        event.u.Exception.dwFirstChance = 1;
         context.Dr6 = 1ULL << i;
         Require(ConfiguredTrapSite(exception, context, base, tf3CommandSites) == static_cast<int>(i), "normal trap classification failed");
         auto reject = [&](const CONTEXT& candidate, const EXCEPTION_RECORD& record) {
@@ -529,6 +708,31 @@ int TrapClassifierFixture() {
 LONG CALLBACK RejectLeakedSingleStep(PEXCEPTION_POINTERS exception) {
     if (exception->ExceptionRecord->ExceptionCode == EXCEPTION_SINGLE_STEP) ExitProcess(96);
     return EXCEPTION_CONTINUE_SEARCH;
+}
+unsigned actionFixtureDepth = 3;
+DWORD WINAPI ActionFixtureWorker(void* startEvent) {
+    if (WaitForSingleObject(startEvent, 5000) != WAIT_OBJECT_0) return 97;
+    const ULONG64 expected = (actionFixtureDepth + 1ULL) * (actionFixtureDepth + 2ULL) / 2;
+    for (unsigned i = 0; i < 8; ++i) if (ObserverActionFixtureApply(actionFixtureDepth) != expected) return 98;
+    return 0;
+}
+int ActionFixture(bool depthCap = false) {
+    actionFixtureDepth = depthCap ? 40 : 3;
+    if (!AddVectoredExceptionHandler(1, RejectLeakedSingleStep)) return 98;
+    Handle startEvent(CreateEventW(nullptr, TRUE, FALSE, nullptr));
+    if (!startEvent.value) return 99;
+    std::array<HANDLE, 4> workers{};
+    for (auto& worker : workers) {
+        worker = CreateThread(nullptr, 0, ActionFixtureWorker, startEvent.value, 0, nullptr);
+        if (!worker) return 91;
+    }
+    Sleep(500);
+    if (!SetEvent(startEvent.value)) return 92;
+    if (WaitForMultipleObjects(static_cast<DWORD>(workers.size()), workers.data(), TRUE, 10000) != WAIT_OBJECT_0) return 93;
+    bool passed = true;
+    for (HANDLE worker : workers) { DWORD code = 999; passed = GetExitCodeThread(worker, &code) && code == 0 && passed; CloseHandle(worker); }
+    Sleep(300);
+    return passed ? 0 : 94;
 }
 DWORD WINAPI CommandStressWorker(void* startEvent) {
     if (WaitForSingleObject(startEvent, 5000) != WAIT_OBJECT_0) return 97;
@@ -651,9 +855,12 @@ void EmitHit(HANDLE process, ULONG64 base, const Site& site, DWORD thread, const
     fflush(stdout);
 }
 int Observe(DWORD pid, bool selftest, bool mismatch, unsigned seconds, unsigned maxHits, bool idle = false, bool attachFixture = false,
-            bool failAfterHit = false, bool commandProfile = false, bool stressFixture = false, bool missingDr6Fixture = false) {
+            bool failAfterHit = false, bool commandProfile = false, bool stressFixture = false, bool missingDr6Fixture = false,
+            bool actionTraceProfile = false, bool actionCapFixture = false) {
     Require(selftest || !commandProfile || kLiveCommandProfileQualified,
             "live command profile disabled: admission SINGLE_STEP escape requires owned-fixture and live requalification");
+    Require(selftest || !actionTraceProfile || kLiveActionTraceQualified,
+            "live action-trace profile disabled: independent exception-containment and build qualification required");
     PROCESS_INFORMATION fixture{};
     std::wstring path;
     if (selftest) path = ImagePath(GetCurrentProcess());
@@ -667,7 +874,7 @@ int Observe(DWORD pid, bool selftest, bool mismatch, unsigned seconds, unsigned 
                 "target executable name mismatch");
         Require(WaitForSingleObject(initial.value, 0) == WAIT_TIMEOUT, "target already exited");
     }
-    auto sites = commandProfile ? tf3CommandSites : tf3Sites;
+    auto sites = actionTraceProfile ? tf3ActionTraceSites : commandProfile ? tf3CommandSites : tf3Sites;
     if (selftest) {
         const ULONG64 selfBase = reinterpret_cast<ULONG64>(GetModuleHandleW(nullptr));
         const std::array<ULONG64, 4> simulationAddresses{{reinterpret_cast<ULONG64>(&ObserverFixtureBatch),
@@ -678,10 +885,16 @@ int Observe(DWORD pid, bool selftest, bool mismatch, unsigned seconds, unsigned 
             reinterpret_cast<ULONG64>(&ObserverFixtureHandler)}};
         const auto& addresses = commandProfile ? commandAddresses : simulationAddresses;
         for (size_t i = 0; i < sites.size(); ++i) sites[i].rva = static_cast<DWORD>(addresses[i] - selfBase);
+        if (actionTraceProfile) {
+            const ULONG64 handler = ActionFixtureEntry("ObserverActionFixtureHandler");
+            const ULONG64 apply = ActionFixtureEntry("ObserverActionFixtureApply");
+            const std::array<ULONG64, 4> actionAddresses{{handler, ActionFixtureReturn(handler), apply, ActionFixtureReturn(apply)}};
+            for (size_t i = 0; i < sites.size(); ++i) sites[i].rva = static_cast<DWORD>(actionAddresses[i] - selfBase);
+        }
     }
     Session session;
     if (selftest) {
-        std::wstring command = L"\"" + path + (idle ? L"\" --fixture-idle" : stressFixture ? L"\" --fixture-command-stress" : commandProfile ? L"\" --fixture-command" : L"\" --fixture");
+        std::wstring command = L"\"" + path + (idle ? L"\" --fixture-idle" : actionCapFixture ? L"\" --fixture-action-trace-cap" : actionTraceProfile ? L"\" --fixture-action-trace" : stressFixture ? L"\" --fixture-command-stress" : commandProfile ? L"\" --fixture-command" : L"\" --fixture");
         STARTUPINFOW startup{}; startup.cb = sizeof(startup);
         const DWORD creationFlags = CREATE_NO_WINDOW | (attachFixture ? 0 : DEBUG_ONLY_THIS_PROCESS);
         Require(CreateProcessW(path.c_str(), command.data(), nullptr, nullptr, FALSE, creationFlags,
@@ -709,6 +922,7 @@ int Observe(DWORD pid, bool selftest, bool mismatch, unsigned seconds, unsigned 
     bool initialBreakpointSeen = false;
     std::array<unsigned, 4> siteHits{};
     std::map<DWORD, unsigned> hitThreads;
+    ActionTrace actionTrace;
     const ULONGLONG start = GetTickCount64();
     try {
         while (!interrupted.load() && GetTickCount64() - start < seconds * 1000ULL && hits < maxHits && !session.exited) {
@@ -749,6 +963,7 @@ int Observe(DWORD pid, bool selftest, bool mismatch, unsigned seconds, unsigned 
                 break;
             }
             case EXIT_THREAD_DEBUG_EVENT: {
+                if (actionTraceProfile) actionTrace.Flush(event.dwThreadId, "thread-exited");
                 session.debugThreads.erase(event.dwThreadId);
                 auto found = session.threads.find(event.dwThreadId);
                 if (found != session.threads.end()) { CloseHandle(found->second.handle); session.threads.erase(found); }
@@ -768,31 +983,32 @@ int Observe(DWORD pid, bool selftest, bool mismatch, unsigned seconds, unsigned 
                     // Owned-only fault injection changes the local copy used by
                     // the classifier, never the target's context or memory.
                     if (missingDr6Fixture) context.Dr6 &= ~0xfULL;
-                    bool owned = false;
-                    const int ownedIndex = ConfiguredTrapSite(exception.ExceptionRecord, context, base, sites);
-                    for (size_t i = 0; i < sites.size(); ++i) {
-                        if (ownedIndex == static_cast<int>(i)) {
-                            if ((context.Dr6 & (1ULL << i)) == 0) {
-                                ++missingDr6Hits;
-                                EmitTrapDiagnostic("owned-slot-without-dr6-status", event, context);
-                            }
-                            ++hits; ++siteHits[i]; ++hitThreads[event.dwThreadId];
-                            if (commandProfile) EmitCommandHit(process.value, base, image.nt.OptionalHeader.SizeOfImage, sites[i], i,
-                                event.dwThreadId, context, hits, start, creation, image.hash);
-                            else EmitHit(process.value, base, sites[i], event.dwThreadId, context, hits);
-                            owned = true;
-                        }
-                    }
-                    if (owned) {
-                        // Resume flag suppresses re-trigger at this same instruction;
-                        // neither RIP nor the instruction bytes are altered.
-                        context.EFlags |= 0x10000; context.Dr6 = 0;
-                        context.ContextFlags = CONTEXT_CONTROL | CONTEXT_DEBUG_REGISTERS;
-                        Require(SetThreadContext(found->second.handle, &context) != FALSE, "cannot resume observed instruction");
+                    const int ownedIndex = OwnedFirstChanceTrapSite(event, context, base, sites);
+                    if (ownedIndex >= 0) {
+                        // Consume the classified first-chance trap before any
+                        // diagnostic can allocate or throw (including nesting
+                        // caps). Cleanup must never forward our own exception.
                         session.disposition = DBG_CONTINUE;
+                        CONTEXT resume = context;
+                        resume.EFlags |= 0x10000; resume.Dr6 = 0;
+                        resume.ContextFlags = CONTEXT_CONTROL | CONTEXT_DEBUG_REGISTERS;
+                        Require(SetThreadContext(found->second.handle, &resume) != FALSE, "cannot resume observed instruction");
+                        const size_t i = static_cast<size_t>(ownedIndex);
+                        if ((context.Dr6 & (1ULL << i)) == 0) {
+                            ++missingDr6Hits;
+                            EmitTrapDiagnostic("owned-slot-without-dr6-status", event, context);
+                        }
+                        ++hits; ++siteHits[i]; ++hitThreads[event.dwThreadId];
+                        if (actionTraceProfile) EmitActionTraceHit(process.value, base, image.nt.OptionalHeader.SizeOfImage, sites[i], i,
+                            event.dwThreadId, context, hits, start, creation, image.hash, actionTrace);
+                        else if (commandProfile) EmitCommandHit(process.value, base, image.nt.OptionalHeader.SizeOfImage, sites[i], i,
+                            event.dwThreadId, context, hits, start, creation, image.hash);
+                        else EmitHit(process.value, base, sites[i], event.dwThreadId, context, hits);
                         if (failAfterHit) throw std::runtime_error("owned fixture forced failure after armed observation");
                     } else EmitTrapDiagnostic("forwarded-unrecognized-single-step", event, context);
                 }
+                if (actionTraceProfile && session.disposition == DBG_EXCEPTION_NOT_HANDLED)
+                    actionTrace.Flush(event.dwThreadId, "target-exception");
                 if (session.disposition == DBG_EXCEPTION_NOT_HANDLED && !exception.dwFirstChance) {
                     printf("{\"event\":\"unhandled-target-exception\",\"code\":%lu}\n", exception.ExceptionRecord.ExceptionCode);
                     throw std::runtime_error("target has an unhandled exception; observer does not suppress it");
@@ -808,8 +1024,11 @@ int Observe(DWORD pid, bool selftest, bool mismatch, unsigned seconds, unsigned 
             Require(ContinueDebugEvent(event.dwProcessId, event.dwThreadId, session.disposition) != FALSE, "cannot continue debug event");
             session.pending = false;
         }
+        if (actionTraceProfile) actionTrace.FlushAll(hits >= maxHits ? "event-cap" : session.exited ? "target-exited" :
+            interrupted.load() ? "interrupted" : "duration-cap");
         Require(session.Clean(), "hardware-register restoration or detach failed");
     } catch (...) {
+        if (actionTraceProfile) actionTrace.FlushAll("observation-failure");
         const bool clean = session.Clean();
         fprintf(stderr, "cleanup_restored_and_detached=%s\n", clean ? "true" : "false");
         if (selftest) {
@@ -827,7 +1046,10 @@ int Observe(DWORD pid, bool selftest, bool mismatch, unsigned seconds, unsigned 
         DWORD exitCode = 999;
         fixturePassed = WaitForSingleObject(fixtureProcess.value, 10000) == WAIT_OBJECT_0 &&
             GetExitCodeProcess(fixtureProcess.value, &exitCode) && exitCode == 0;
-        if (stressFixture) fixturePassed = fixturePassed && hits == (maxHits < 1280 ? maxHits : 1280) &&
+        if (actionTraceProfile && !idle) fixturePassed = fixturePassed && hits == maxHits &&
+            (maxHits < 256 || (hitThreads.size() == 4 && actionTrace.paired == 128 && actionTrace.incomplete == 0 &&
+                              actionTrace.orphan == 0 && actionTrace.mismatched == 0));
+        else if (stressFixture) fixturePassed = fixturePassed && hits == (maxHits < 1280 ? maxHits : 1280) &&
             (maxHits < 1280 || hitThreads.size() == 16) && (!missingDr6Fixture || missingDr6Hits == hits);
         else if (idle) fixturePassed = fixturePassed && hits == 0;
         else {
@@ -835,6 +1057,9 @@ int Observe(DWORD pid, bool selftest, bool mismatch, unsigned seconds, unsigned 
             for (unsigned count : siteHits) fixturePassed = fixturePassed && count > 0;
         }
     }
+    if (actionTraceProfile) printf("{\"event\":\"action-trace-summary\",\"paired\":%u,\"orphan\":%u,\"mismatched\":%u,"
+        "\"incomplete\":%u,\"commandControlQualified\":false}\n",
+        actionTrace.paired, actionTrace.orphan, actionTrace.mismatched, actionTrace.incomplete);
     printf("{\"event\":\"complete\",\"hits\":%u,\"observedThreadCount\":%zu,\"siteHits\":[%u,%u,%u,%u],"
            "\"restoredAndDetached\":%s,\"targetExited\":%s,\"targetExitCode\":%lu,\"missingDr6Hits\":%u,\"fixturePassed\":%s,\"simulationControlQualified\":false,"
            "\"commandControlQualified\":false,\"captureComplete\":false,\"stopReason\":\"%s\"}\n",
@@ -853,6 +1078,41 @@ int wmain(int argc, wchar_t** argv) {
         if (argc == 2 && wcscmp(argv[1], L"--fixture-idle") == 0) return Fixture(true);
         if (argc == 2 && wcscmp(argv[1], L"--fixture-command") == 0) return CommandFixture();
         if (argc == 2 && wcscmp(argv[1], L"--fixture-command-stress") == 0) return CommandStressFixture();
+        if (argc == 2 && wcscmp(argv[1], L"--fixture-action-trace") == 0) return ActionFixture();
+        if (argc == 2 && wcscmp(argv[1], L"--fixture-action-trace-cap") == 0) return ActionFixture(true);
+        if (argc == 2 && wcscmp(argv[1], L"--self-test-action-pairing") == 0) return ActionPairingFixture();
+        if (argc == 2) {
+            const std::wstring mode = argv[1];
+            const bool action = mode == L"--self-test-action-trace" || mode == L"--self-test-action-trace-attach" ||
+                mode == L"--self-test-action-trace-cutoff" || mode == L"--self-test-action-trace-timeout" ||
+                mode == L"--self-test-action-trace-mismatch" || mode == L"--self-test-action-trace-armed-failure" ||
+                mode == L"--self-test-action-trace-cap";
+            if (action) {
+                const bool mismatch = mode == L"--self-test-action-trace-mismatch";
+                const bool armedFailure = mode == L"--self-test-action-trace-armed-failure";
+                const bool idle = mode == L"--self-test-action-trace-timeout";
+                const bool depthCap = mode == L"--self-test-action-trace-cap";
+                try {
+                    const int result = Observe(0, true, mismatch, idle ? 1 : 5,
+                        mode == L"--self-test-action-trace-cutoff" ? 5 : 256, idle,
+                        mode == L"--self-test-action-trace-attach", armedFailure, false, false, false, true, depthCap);
+                    Require(!mismatch && !armedFailure && !depthCap, "action trace rejection fixture unexpectedly accepted");
+                    return result;
+                } catch (const std::exception& error) {
+                    const std::string message = error.what();
+                    if (depthCap && message.find("action trace nesting cap reached") != std::string::npos) {
+                        printf("{\"event\":\"nesting-cap-test-passed\",\"fixtureExitedNormally\":true}\n"); return 0;
+                    }
+                    if (mismatch && message.find("mapped observation bytes mismatch") != std::string::npos) {
+                        printf("{\"event\":\"mismatch-test-passed\",\"hardwareBreakpointsArmed\":0}\n"); return 0;
+                    }
+                    if (armedFailure && message.find("owned fixture forced failure after armed observation") != std::string::npos) {
+                        printf("{\"event\":\"armed-failure-test-passed\",\"fixtureExitedNormally\":true}\n"); return 0;
+                    }
+                    throw;
+                }
+            }
+        }
         if (argc == 2 && wcscmp(argv[1], L"--self-test-trap-classifier") == 0) return TrapClassifierFixture();
         if (argc == 2 && wcscmp(argv[1], L"--self-test-command-stress") == 0) return Observe(0, true, false, 10, 2048, false, false, false, true, true);
         if (argc == 2 && wcscmp(argv[1], L"--self-test-command-stress-attach") == 0) return Observe(0, true, false, 10, 2048, false, true, false, true, true);
@@ -884,15 +1144,18 @@ int wmain(int argc, wchar_t** argv) {
             }
             throw std::runtime_error("mismatch fixture was unexpectedly accepted");
         }
-        bool commandProfile = false;
+        bool commandProfile = false, actionTraceProfile = false;
         if (argc == 9) {
             Require(wcscmp(argv[7], L"--profile") == 0 &&
-                (wcscmp(argv[8], L"command") == 0 || wcscmp(argv[8], L"simulation") == 0), "unknown observation profile");
+                (wcscmp(argv[8], L"command") == 0 || wcscmp(argv[8], L"simulation") == 0 ||
+                 wcscmp(argv[8], L"action-trace") == 0), "unknown observation profile");
             commandProfile = wcscmp(argv[8], L"command") == 0;
+            actionTraceProfile = wcscmp(argv[8], L"action-trace") == 0;
         }
         if ((argc != 7 && argc != 9) || wcscmp(argv[1], L"--pid") != 0 || wcscmp(argv[3], L"--seconds") != 0 || wcscmp(argv[5], L"--hits") != 0)
-            throw std::runtime_error("usage: TF3RuntimeObserver --pid <explicit PID> --seconds <1..30> --hits <1..256> [--profile simulation|command]; or --self-test[-command]");
-        return Observe(Number(argv[2], 1, MAXDWORD), false, false, Number(argv[4], 1, 30), Number(argv[6], 1, 256), false, false, false, commandProfile);
+            throw std::runtime_error("usage: TF3RuntimeObserver --pid <explicit PID> --seconds <1..30> --hits <1..256> [--profile simulation|command|action-trace]; or --self-test[-command|-action-trace]");
+        return Observe(Number(argv[2], 1, MAXDWORD), false, false, Number(argv[4], 1, 30), Number(argv[6], 1, 256),
+            false, false, false, commandProfile, false, false, actionTraceProfile);
     } catch (const std::exception& error) {
         fprintf(stderr, "observer_error: %s\n", error.what()); return 2;
     }

@@ -2,6 +2,7 @@ import { sha256Canonical } from './canonical.mjs';
 const uint=n=>Number.isSafeInteger(n)&&n>=0&&n<=2147483647;
 const hash=value=>typeof value==='string'&&/^[a-f0-9]{64}$/.test(value);
 const domains=['townsGrowth','economy','topology','vehicles','companies','linesServices','rngHiddenState'];
+const publicDomains=domains.filter(domain=>domain!=='rngHiddenState');
 const unavailable=new Set(['unavailable','unsupported','read_failed']);
 
 // Local engine receipt -> adapter receipt. This is a selected company/clock
@@ -30,10 +31,16 @@ export function decodeCheckpointReceipt(p) {
     }
   if(Object.keys(p).sort().join(',')!==keys.sort().join(',')||new Set(companies.map(c=>c.companyEntity)).size!==companies.length) throw new Error('INVALID_CHECKPOINT_FIELDS');
   companies.sort((a,b)=>a.companyEntity-b.companyEntity);
-  const comparisonReady=p.snapshotVersion===2&&Object.values(coverage).every(value=>value.availability==='observed');
+  const complete=p.snapshotVersion===2&&Object.values(coverage).every(value=>value.availability==='observed');
+  // TF3 build 40379 exposes no public RNG-state reader. A checkpoint is still
+  // meaningful for comparison when every public world domain is observed and
+  // that one blind spot is represented explicitly (never as read_failed).
+  const comparisonReady=p.snapshotVersion===2
+    &&publicDomains.every(domain=>coverage[domain].availability==='observed')
+    &&['observed','unavailable'].includes(coverage.rngHiddenState.availability);
   const state=p.snapshotVersion===1
     ?{schemaVersion:1,scope:'held_company_balances_v1',updateCount:p.updateCount,speedup:0,companies}
     :{schemaVersion:2,scope:'held_canonical_world_v2',updateCount:p.updateCount,speedup:0,companies,domains:coverage};
-  return {state,coverage:{complete:comparisonReady,unavailable:p.snapshotVersion===1?[...domains]:domains.filter(domain=>coverage[domain].availability!=='observed')},
+  return {state,coverage:{complete,comparisonReady,unavailable:p.snapshotVersion===1?[...domains]:domains.filter(domain=>coverage[domain].availability!=='observed')},
     receipt:{...Object.fromEntries(common.map(k=>[k,p[k]])),checkpointHash:sha256Canonical(state)}};
 }

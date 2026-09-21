@@ -5,17 +5,21 @@ import { AsyncSessionParticipant } from './async-session-participant.mjs';
 // common save/build identity and actual control coverage before remote admission.
 // No synthetic engine receipts, automatic game launch, or automatic retry.
 export async function createEngineSessionAdapter({directory,bridge,playerId,companies,
-  send,disconnect,healthy,controlsReady,now=Date.now,nativeRuntime=null,checkpointEvidenceScope='production'}) {
+  send,disconnect,healthy,controlsReady,now=Date.now,nativeRuntime=null,checkpointEvidenceScope='production',
+  onCheckpointEvidence=()=>{}}) {
   if(!bridge||typeof bridge.startCoordinationLease!=='function'
-    ||![send,disconnect,healthy,controlsReady,now].every(f=>typeof f==='function')) throw new TypeError('INVALID_ADAPTER_OPTIONS');
+    ||![send,disconnect,healthy,controlsReady,now,onCheckpointEvidence].every(f=>typeof f==='function')) throw new TypeError('INVALID_ADAPTER_OPTIONS');
   if(nativeRuntime!==null&&(!nativeRuntime||typeof nativeRuntime.sessionId!=='string'||!/^[A-Za-z0-9_.:-]{1,128}$/.test(nativeRuntime.sessionId)
     ||!['host','participant'].includes(nativeRuntime.role)||typeof nativeRuntime.client?.requireCapability!=='function'
     ||typeof nativeRuntime.client?.bindSession!=='function'||typeof nativeRuntime.client?.control!=='function'
     ||typeof nativeRuntime.client?.on!=='function'||typeof nativeRuntime.client?.off!=='function'
     ||typeof nativeRuntime.logger!=='function')) throw new TypeError('INVALID_NATIVE_RUNTIME_ADAPTER_OPTIONS');
   if(!['production','local_diagnostic'].includes(checkpointEvidenceScope))throw new TypeError('INVALID_CHECKPOINT_EVIDENCE_SCOPE');
+  let checkpointEvidence=null;
   const mailbox=await createAsyncEngineMailbox({directory,nonce:bridge.nonce,
-    requireCompleteCheckpointCoverage:checkpointEvidenceScope==='production'});
+    requireCompleteCheckpointCoverage:checkpointEvidenceScope==='production',onCheckpointEvidence:evidence=>{
+      checkpointEvidence=structuredClone(evidence);onCheckpointEvidence(structuredClone(evidence));
+    }});
   let participant,lease,closed=false,lastCounter=-1,polling=null,closing=null,nativeHaltIssued=false;
   const stopRenewal=()=>lease?.stop();
   // Native IPC is a session fence only. Its debugger/qualification receipts do
@@ -94,6 +98,7 @@ export async function createEngineSessionAdapter({directory,bridge,playerId,comp
     get haltState(){return participant.haltState;},
     get fault(){return participant.fault;},
     get faultEvidence(){return participant.faultEvidence;},
+    get checkpointEvidence(){return checkpointEvidence===null?null:structuredClone(checkpointEvidence);},
     receive(kind,payload){
       if(!check())return false;
       if(!lease.active){participant.halt('ENGINE_LEASE_NOT_ACTIVE');return false;}

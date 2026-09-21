@@ -35,10 +35,22 @@ tooling; it does not provide functioning multi-instance multiplayer.
   state. This is single-game evidence. Stock UI interception/suppression and
   cross-instance replay do not exist.
 - The game-side checkpoint producer now emits schema-v2 domain digests for
-  construction/growth proxy state, company finances, topology, vehicles,
+  public town and town-building development state, company finances, topology, vehicles,
   companies and lines/services. Inaccessible RNG/hidden state is explicitly
-  `unavailable`. Production mailbox admission now refuses incomplete coverage;
-  the legacy company-only path is explicitly `local_diagnostic`.
+  `unavailable`. Production mailbox admission requires all six public domains
+  and permits only that explicit hidden-state absence; any unavailable or failed
+  public domain is rejected. The legacy company-only path is explicitly
+  `local_diagnostic`.
+- A fresh ordinary-UI load of disposable save
+  `tf3mp_disposable_43b49d368fbbd409ae2614ada7b0c757` passed the production
+  checkpoint gate at exact held/released update 3052. All six public domains
+  were observed, `comparisonReady:true`, hidden RNG remained explicitly
+  unavailable, and checkpoint hash
+  `57b5d6d7aa55af8e42bb27991867fea7986d108c2b3e2d7f671019fb13564f8d`
+  was correlated through the hold receipt. This is one real game only; it is not
+  evidence of agreement between instances. The original `comp.sav` remained
+  byte-for-byte unchanged (87,719,389 bytes, SHA-256
+  `ccbf4beb740e53323e06d20890fd029c8e174d3e85efb06801a8b4275c762fb5`).
 - Native IPC, client framing, persistent session binding, Host/Join admission
   gating, disconnect/halt fencing and diagnostic-only transport are implemented.
   Authenticated socket clients now expose stable snapshot fanout for verified
@@ -66,15 +78,32 @@ tooling; it does not provide functioning multi-instance multiplayer.
    Host/Join does not construct a per-game `EngineSessionAdapter`.
    `src/client.mjs` now permits a future adapter to subscribe to authenticated,
    schema-checked host frames while preserving the existing primary handler.
+   `src/host-local-participant.mjs` additionally routes a host player's actions
+   through that same authenticated loopback client/`HostAuthority` path as a
+   remote player, and refuses `beginCoordination` while its injected engine
+   adapter is still attaching. Registration precedes admission-observer delivery,
+   late-resolving adapters are closed, and explicit host bind addresses are used
+   for the loopback connection. It does not construct an adapter, create engine
+   receipts, mark the native gate qualified, or waive production checkpoint
+   coverage. The remaining binding inputs are still a real per-game
+   `EngineSessionAdapter` factory, verified native player-to-company creation,
+   native world/control evidence and an observed comparison-ready checkpoint.
+   `src/host-local-cli-seam.mjs` and `--host-local-adapter-module` now expose that
+   composition from host mode, but only for an explicit regular-file provider
+   that receives the already-authenticated native binding/live bridge and returns
+   a production-qualified engine binding, adapter factory and exact save proof.
+   No such real provider exists yet; there is no mock/default fallback.
 5. `mod/content/tf3mp_status_panel.script.tl` exchanges the fixed vehicle
    discovery/request files. `mod/content/tf3mp_status.script.tl` checks live
    company ownership/revision, executes one native vehicle command and records a
    correlated postcondition. `tools/live-vehicle-slice.mjs` drives the local
    HostAuthority-backed disposable-world proof.
 6. `src/coordinator-checkpoint.mjs`, `src/async-engine-mailbox.mjs` and
-   `src/engine-session-adapter.mjs` decode world evidence and refuse incomplete
-   production coverage. Native transport acknowledgements are always marked
-   `gameWorldReceipt:false`.
+   `src/engine-session-adapter.mjs` decode world evidence and refuse production
+   comparison unless every public domain is observed; hidden RNG must either be
+   observed or explicitly unavailable. `tools/live-checkpoint-capture.mjs`
+   exercises that exact gate against a running game. Native transport
+   acknowledgements are always marked `gameWorldReceipt:false`.
 
 ### Native qualification and the failed command-profile run
 
@@ -89,9 +118,10 @@ vehicle discovery or mutation. Windows Error Reporting recorded exception
 only 42 background apply-candidate hits and then target exit; the bridge reported
 disconnect and no action receipt. Therefore no uncertain mutation was retried.
 
-The observer and controller now classify exception address, RIP, tracked/armed
+The observer and controller now classify first-chance status, exception address, RIP, tracked/armed
 thread identity and the matching enabled execution slot; TF and DR6 BD/BS/BT
-causes are rejected. Teardown records strict per-thread ownership evidence,
+causes are rejected. An owned-looking second-chance exception is never consumed.
+Teardown records strict per-thread ownership evidence,
 consumes at most one qualifying queued first-chance trap and always forwards
 second chance. An owned negative fixture proves an unowned trap remains held,
 release is refused, control stays responsive and shutdown delivers the exception
@@ -103,6 +133,10 @@ Unresolved ABI assumptions include semantic factory/admission boundaries,
 output/callback ownership, command move/destruction rules, safe suppression,
 replay-origin distinction, post-apply result correlation, exception/unwind
 behavior and whether any proposed site is stable under all game workloads.
+The disabled action-trace implementation can pair nested handler/apply entry and
+return observations by thread, entry RSP and return address in owned fixtures.
+Its exact-build static sites remain non-activating in TF3; fixture pairing does
+not qualify their live ABI or make command capture safe.
 
 ### TF2 baseline and licence
 
@@ -129,34 +163,40 @@ or isolated tests. Rail, shipping, aviation and all other mutation families are
 unsupported multiplayer scope. Their ordinary native UI actions are not globally
 intercepted, so general multiplayer play must not be enabled.
 
-Schema-v2 compares sorted public entity IDs/revisions and selected public fields
-for the six observable domains listed above. It does not serialize a world and
-does not cover RNG, hidden native state, every town-growth input, cargo queues,
+Schema-v2 now compares sorted `Town` and `TownBuilding` IDs plus public growth
+controls, distribution weights, cargo needs, emissions, construction identity
+and bounded recursively canonicalized module parameters. Unsupported dynamic
+module values fail the whole lane instead of producing a lossy match. The other
+domains compare sorted public entity IDs/revisions and selected public fields.
+It does not serialize a world and does not cover RNG, hidden native state, cargo queues,
 pathfinder internals, async job order or all economic accumulators. RNG/hidden
-state is explicitly unavailable, which makes the current producer ineligible for
-production checkpoint agreement. No two-instance no-input baseline exists.
+state is explicitly unavailable. That residual uncertainty is accepted only as
+an explicit blind spot after all six public domains are observed; it does not
+prove determinism. No two-instance no-input baseline exists.
 
 ### Verification record
 
-- Full regression suite after this integration: **813 passed, 0 failed, 0 skipped
-  or cancelled** (`npm run check`, 88.55 seconds). This supersedes the prior 808
-  result, the incorrect 478 count and the independently verified 756 baseline.
+- Full regression suite after this integration: **830 passed, 0 failed, 0 skipped
+  or cancelled** (`npm run check`, 98.53 seconds). This revalidates the current
+  tree and supersedes the prior 813 result. The independent reviewer did obtain
+  756/756 on the earlier tree; the reported 478/478 was an incomplete TAP count.
 - `Build-NativeRuntime.ps1 -RunSmokeTest`: passed MSVC x64 `/W4 /WX` build and
   owned observer/controller smoke tests.
-- Observer/controller focused suite: 25/25 passed in 36.00 seconds, including
+- Observer/controller focused suite: 29/29 passed in 59.72 seconds, including
   strict trap ownership, 16-thread/missing-DR6 stress, cleanup races, fail-stop
-  and real unowned-exception forwarding.
+  real unowned-exception forwarding and bounded action-call pairing.
 - Authenticated network focused suite: 11/11 passed, including a signed
   post-admission coordination frame, primary-before-observer ordering, stable
   fanout, observer fault isolation and lifecycle separation.
 - `Build-NativeIpc.ps1`: passed MSVC x64 `/W4 /WX` build.
 - Mod review: 29 content files, zero executables, manifest
-  `80ed637bb9c609d7e990616ebd1797b3571d1d536a39f447779af4b905fe1dc7`.
+  `2bc5aed290858033ebd13ce7038bb790cdb00ae1fc0293f29966ccc81e6fa429`.
 - `git diff --check`: passed before the implementation commit.
 - Single-game verified: startup direct-path load with the UI lifecycle faults
   above, simulation observation,
   controller hold/one-release/teardown, vehicle discovery and reversible
-  host-sequenced stop/start.
+  host-sequenced stop/start, and production-gated public-domain checkpoint
+  capture/hold/release at update 3052.
 - Isolated/model-tested: native IPC/authentication/fail-stop, Host/Join gating,
   checkpoint schema/producer parsing, release acknowledgements, duplicate and
   failure handling, transport/save transfer.
@@ -458,16 +498,17 @@ run. No gameplay verification is claimed.
 
 ## 9. Consolidated manual two-machine acceptance procedure
 
-Do not run this until a reviewed build adds a real, fail-closed native observer
-and schema-v2 producer. Use disposable saves and matching exact game/mod/native
-hashes on both machines.
+Do not run this acceptance sequence until a reviewed build adds a qualified
+command interceptor and production Host/Join engine adapter. Use disposable
+saves and matching exact game/mod/native hashes on both machines.
 
 1. Start Host, verify repository-distributed native files and load the same
    disposable checkpoint. Join from machine B and confirm authenticated save
    download/hash, distinct companies and frozen roster.
 2. With no user input, hold both simulations at the same native update. Capture
-   two fresh schema-v2 snapshots per machine. Require every domain observed and
-   identical; repeat across pause and supported speeds for a meaningful interval.
+   two fresh schema-v2 snapshots per machine. Require all public domains observed,
+   every explicit blind spot identical, and matching hashes; repeat across pause
+   and supported speeds for a meaningful interval.
 3. While held, submit one reversible vehicle Start/Stop request from a client.
    Require host admission/sequence, ownership recheck, prepare receipts from both,
    exactly one apply on both at the agreed update, correlated postconditions and
@@ -489,8 +530,11 @@ Passing source tests or a single-instance DLL load is not acceptance.
 
 ## 10. Remaining blockers by impact
 
-1. No qualified TF3 native observation/admission boundary or safe hook ABI.
-2. No live schema-v2 producer; relevant RNG/hidden state observability is unknown.
+1. No qualified TF3 command admission/interception boundary or safe hook ABI;
+   the simulation observer does not provide command capture.
+2. The live schema-v2 producer covers six public domains, but RNG/hidden state
+   remains unavailable and no second instance has tested whether that blind spot
+   permits meaningful lockstep comparison.
 3. No two-instance, no-input TF3 determinism baseline at common native updates.
 4. No exactly-once real TF3 command capture/defer/apply path wired to Host/Join.
 5. No production logical entity mapping or native separate-company accounting
@@ -499,8 +543,8 @@ Passing source tests or a single-instance DLL load is not acceptance.
    execution.
 7. No two-machine, Internet or four-player real-game acceptance.
 
-These are genuine live/native evidence blockers. Additional speculative wrappers
-or launcher UI would not resolve them.
+Items 1-6 are unfinished engineering work, not external blockers. Item 7 remains
+an acceptance gate requiring environments not currently controlled here.
 
 ## 11. Commits and repository status
 

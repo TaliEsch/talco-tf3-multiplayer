@@ -156,13 +156,129 @@ test('command profile preserves attach, timeout, mismatch refusal and armed-fail
   }
 });
 
-test('profile selection refuses unknown profiles and unsupported process hashes before attachment', { skip }, () => {
-  for (const profile of ['command', 'simulation', 'guessed']) {
+test('profile selection refuses unknown profiles, unqualified action tracing and unsupported hashes before attachment', { skip }, () => {
+  for (const profile of ['command', 'action-trace', 'simulation', 'guessed']) {
     const result = run(['--pid', String(process.pid), '--seconds', '1', '--hits', '1', '--profile', profile]);
     assert.equal(result.status, 2);
     assert.deepEqual(result.events, []);
     assert.match(result.stderr, profile === 'guessed' ? /unknown observation profile/ :
-      profile === 'command' ? /live command profile disabled/ : /unsupported target executable SHA256/);
+      profile === 'command' ? /live command profile disabled/ :
+      profile === 'action-trace' ? /live action-trace profile disabled/ : /unsupported target executable SHA256/);
+  }
+});
+
+test('action trace pairs nested mixed calls on four actual threads using matching entry RSP and return address', { skip }, () => {
+  for (const suffix of ['', '-attach']) {
+    const result = run([`--self-test-action-trace${suffix}`]);
+    assert.equal(result.status, 0, result.stderr);
+    const observations = result.events.filter(event => event.event === 'action-trace-observation');
+    assert.equal(observations.length, 256);
+    const stacks = new Map();
+    let maximumDepth = 0;
+    let simultaneousThreads = 0;
+    let returns = 0;
+    for (const event of observations) {
+      assert.equal(event.profile, 'action-trace');
+      assert.equal(event.schemaVersion, 1);
+      assert.match(event.sha256, /^[a-f0-9]{64}$/);
+      assert.match(event.processCreationTime, /^[1-9][0-9]+$/);
+      assert.equal(event.returnAddressReadable, true);
+      assert.equal(event.returnAddressClass, 'main-image');
+      assert.ok(event.returnAddressRva > 0);
+      assert.equal(event.remoteBytesAttempted, 8);
+      assert.equal(event.commandControlQualified, false);
+      assert.equal(event.captureComplete, false);
+      assert.equal(event.raxIsCompletion, false);
+      assert.equal(event.mappedSiteVerified, true);
+      assert.equal(event.firstChance, true);
+      assert.equal(BigInt(`0x${event.dr7}`) & 0xffff00ffn, 0x55n);
+      assert.ok([event.dr0, event.dr1, event.dr2, event.dr3].includes(event.rip));
+      assert.equal(event.eflags & 0x100, 0);
+      assert.equal(BigInt(`0x${event.dr6}`) & 0xe000n, 0n);
+      const stack = stacks.get(event.threadId) ?? [];
+      stacks.set(event.threadId, stack);
+      if (event.phase === 'entry') {
+        assert.equal(event.pairStatus, 'entry');
+        assert.equal(event.paired, false);
+        assert.equal(event.entryOrdinal, event.ordinal);
+        stack.push(event);
+        assert.equal(event.nestingDepth, stack.length);
+        maximumDepth = Math.max(maximumDepth, stack.length);
+        simultaneousThreads = Math.max(simultaneousThreads, [...stacks.values()].filter(frames => frames.length > 0).length);
+      } else {
+        assert.equal(event.pairStatus, 'paired-return');
+        assert.equal(event.paired, true);
+        assert.equal(event.nestingDepth, stack.length);
+        const entry = stack.pop();
+        assert.ok(entry);
+        assert.equal(event.entryOrdinal, entry.ordinal);
+        assert.equal(event.kind, entry.kind);
+        assert.equal(event.rsp, entry.rsp);
+        assert.equal(event.returnAddress, entry.returnAddress);
+        returns++;
+      }
+    }
+    assert.equal(stacks.size, 4);
+    assert.ok([...stacks.values()].every(stack => stack.length === 0));
+    assert.equal(maximumDepth, 4);
+    assert.ok(simultaneousThreads >= 2, 'actual calls overlapped across threads');
+    assert.equal(returns, 128);
+    assert.deepEqual(result.events.at(-2), { event: 'action-trace-summary', paired: 128, orphan: 0,
+      mismatched: 0, incomplete: 0, commandControlQualified: false });
+    assert.equal(result.events.at(-1).restoredAndDetached, true);
+    assert.equal(result.events.at(-1).fixturePassed, true);
+    assert.deepEqual(result.events.at(-1).siteHits, [64, 64, 64, 64]);
+  }
+});
+
+test('action trace labels incomplete calls at cutoff/failure and preserves timeout/mapped-byte rejection', { skip }, () => {
+  for (const suffix of ['cutoff', 'armed-failure', 'timeout', 'mismatch']) {
+    const result = run([`--self-test-action-trace-${suffix}`]);
+    assert.equal(result.status, 0, `${suffix}: ${result.stderr}`);
+    const incomplete = result.events.filter(event => event.event === 'action-trace-incomplete');
+    if (suffix === 'cutoff' || suffix === 'armed-failure') {
+      assert.ok(incomplete.length > 0);
+      assert.ok(incomplete.every(event => event.reason === (suffix === 'cutoff' ? 'event-cap' : 'observation-failure')));
+    }
+    if (suffix === 'mismatch') {
+      assert.deepEqual(result.events, [{ event: 'mismatch-test-passed', hardwareBreakpointsArmed: 0 }]);
+      assert.match(result.stderr, /cleanup_restored_and_detached=true/);
+    } else if (suffix === 'armed-failure') {
+      assert.match(result.stderr, /cleanup_restored_and_detached=true/);
+      assert.equal(result.events.at(-1).fixtureExitedNormally, true);
+    } else {
+      assert.equal(result.events.at(-1).hits, suffix === 'cutoff' ? 5 : 0);
+      assert.equal(result.events.at(-1).fixturePassed, true);
+      assert.equal(result.events.at(-1).restoredAndDetached, true);
+    }
+  }
+});
+
+test('action pairing rejects orphan, wrong kind/RSP/address and unreadable returns with bounded incomplete accounting', { skip }, () => {
+  // This isolates malformed correlation records. The test above independently
+  // exercises the same pairing code against real hardware entry/RET traps.
+  const result = run(['--self-test-action-pairing']);
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(result.events.at(-1), { event: 'action-pairing-test-passed', paired: 3,
+    orphan: 1, mismatched: 5, incomplete: 38 });
+  assert.ok(result.events.some(event => event.reason === 'nesting-cap'));
+  assert.ok(result.events.some(event => event.reason === 'return-unreadable'));
+  assert.ok(result.events.some(event => event.reason === 'lifo-mismatch'));
+});
+
+test('action trace nesting cap consumes its owned hardware exception before unwinding diagnostics', { skip }, () => {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const result = run(['--self-test-action-trace-cap']);
+    assert.equal(result.status, 0, `attempt ${attempt + 1}: ${result.stderr}`);
+    const cap = result.events.filter(event => event.reason === 'nesting-cap');
+    assert.equal(cap.length, 1);
+    const observations = result.events.filter(event => event.event === 'action-trace-observation');
+    assert.ok(observations.length >= 32);
+    assert.ok(observations.some(event => event.nestingDepth === 32));
+    assert.ok(result.events.some(event => event.reason === 'observation-failure'));
+    assert.equal(result.events.some(event => event.event === 'unhandled-target-exception'), false);
+    assert.match(result.stderr, /cleanup_restored_and_detached=true/);
+    assert.deepEqual(result.events.at(-1), { event: 'nesting-cap-test-passed', fixtureExitedNormally: true });
   }
 });
 
@@ -190,7 +306,7 @@ test('sixteen non-current worker threads exercise every armed command site witho
   }
 });
 
-test('trap classification requires exception, instruction and configured execution-slot identity and rejects unrelated stepping', { skip }, () => {
+test('trap classification requires first chance, instruction and configured execution-slot identity and rejects unrelated stepping', { skip }, () => {
   const result = run(['--self-test-trap-classifier']);
   assert.equal(result.status, 0, result.stderr);
   assert.deepEqual(result.events, [{ event: 'trap-classifier-test-passed', sites: 4, unrelatedExceptionsRejected: true }]);

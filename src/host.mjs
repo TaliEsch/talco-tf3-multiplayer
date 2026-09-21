@@ -4,11 +4,17 @@ import { DEFAULT_BIND, DEFAULT_PORT, HELLO_TIMEOUT_MS, MAX_OUTBOUND_BYTES_PER_PE
 import { FrameDecoder, decodeFrame, encodeFrame, makeBody } from "./protocol.mjs";
 import { HostAuthority, ProtocolError } from "./lockstep.mjs";
 import { SessionCoordinator } from "./session-coordinator.mjs";
+import { connectClient } from "./client.mjs";
 
 export function startHost({ secret, sessionId = randomUUID(), bind = DEFAULT_BIND, port = DEFAULT_PORT, buildHash, modManifestHash, requiredSave = null, expiresAt = null, getUpdateCount = () => 0, resolveEntityOwner = () => null, admissionAllowed = () => true, logger = () => {}, legacyModelRelay = false, requireReleaseAck = true }) {
   if (expiresAt !== null && (!Number.isSafeInteger(expiresAt) || expiresAt <= Date.now())) throw new RangeError("session expiry must be a future Unix timestamp in milliseconds");
   const authority = new HostAuthority({ sessionId, buildHash, modManifestHash, resolveEntityOwner });
   const peers = new Set();
+  // Entries are created only by connectLocalParticipant below.  A loopback
+  // socket alone is not proof that the host game has a bound engine adapter.
+  const localParticipants = new Map();
+  const pendingLocalPlayerIds = new Set();
+  let pendingLocalConnections = 0;
   const sessionSeen = new Set();
   let pendingConnections = 0;
   let serverSequence = 0;
@@ -127,7 +133,7 @@ export function startHost({ secret, sessionId = randomUUID(), bind = DEFAULT_BIN
     socket.on("close", () => {
       peers.delete(peer);
       if (peer.pending) { peer.pending = false; pendingConnections--; }
-      if (peer.player) { coordinator.disconnected(peer.player.playerId); authority.remove(peer.player.playerId); broadcast("peer_left", { playerId: peer.player.playerId }); }
+      if (peer.player) { localParticipants.delete(peer.player.playerId); coordinator.disconnected(peer.player.playerId); authority.remove(peer.player.playerId); broadcast("peer_left", { playerId: peer.player.playerId }); }
     });
     socket.on("error", () => {});
   });
@@ -136,9 +142,52 @@ export function startHost({ secret, sessionId = randomUUID(), bind = DEFAULT_BIN
   coordinationTimer.unref();
   server.on("close", () => clearInterval(coordinationTimer));
   server.listen(port, bind);
+  const localEndpoint = () => {
+    if (!server.listening) throw new Error("HOST_NOT_LISTENING");
+    const address = server.address();
+    if (!address || typeof address === "string" || !Number.isSafeInteger(address.port)) throw new Error("HOST_LOCAL_ENDPOINT_UNAVAILABLE");
+    const host = address.address === "0.0.0.0" ? "127.0.0.1" : address.address === "::" ? "::1" : address.address;
+    return { host, port: address.port };
+  };
   return { server, authority, sessionId, coordinator,
+    // This is deliberately a real authenticated loopback client: local host
+    // actions enter the same decoder, identity, save, authority and coordinator
+    // branches as remote actions.  The wrapper in host-local-participant.mjs
+    // supplies the mandatory engine-binding/adapter lifecycle.
+    connectLocalTransport({ displayName, onMessage = () => {} }) {
+      if (typeof displayName !== "string" || typeof onMessage !== "function") throw new TypeError("INVALID_LOCAL_TRANSPORT_OPTIONS");
+      pendingLocalConnections++;
+      let admittedPlayerId = null, settled = false;
+      const settlePendingConnection = () => {
+        if (!settled) { settled = true; pendingLocalConnections--; }
+      };
+      return connectClient({ secret, sessionId, ...localEndpoint(), displayName, buildHash, modManifestHash,
+        onMessage(message, context) {
+          if (message.kind === "admitted" && typeof message.payload?.player?.playerId === "string") {
+            admittedPlayerId = message.payload.player.playerId;
+            pendingLocalPlayerIds.add(admittedPlayerId);
+            settlePendingConnection();
+          } else if (message.kind === "session_ended") {
+            settlePendingConnection();
+            if (admittedPlayerId) pendingLocalPlayerIds.delete(admittedPlayerId);
+          }
+          onMessage(message, context);
+        } });
+    },
+    registerLocalParticipant(playerId, attachment) {
+      if (typeof playerId !== "string" || !authority.players().some(player => player.playerId === playerId)
+        || !pendingLocalPlayerIds.has(playerId) || !attachment || typeof attachment.receive !== "function") throw new ProtocolError("LOCAL_ENGINE_BINDING_REQUIRED", "admitted host participant needs an injected engine adapter");
+      if (localParticipants.has(playerId)) throw new ProtocolError("LOCAL_ENGINE_BINDING_REQUIRED", "host participant is already registered");
+      pendingLocalPlayerIds.delete(playerId);
+      localParticipants.set(playerId, attachment);
+      return () => localParticipants.delete(playerId);
+    },
     beginCoordination(checkpoint) {
       if ([...peers].some(p => p.player && !p.ready)) throw new ProtocolError("SAVE_REQUIRED", "all participants must verify the save");
+      if (pendingLocalConnections !== 0 || pendingLocalPlayerIds.size !== 0
+        || [...localParticipants.values()].some(attachment => attachment.attached !== true)) {
+        throw new ProtocolError("LOCAL_ENGINE_BINDING_REQUIRED", "host-local engine adapter must attach before coordination");
+      }
       coordinator.prepare(authority.players(), checkpoint);
     } };
 }

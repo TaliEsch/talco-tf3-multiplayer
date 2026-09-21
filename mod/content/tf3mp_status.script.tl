@@ -550,8 +550,7 @@ local function digestText(value : string) : string
   return out
 end
 
-local function revisionsFor(component : any, includeOwner : boolean, includeVehicle : boolean, includeLine : boolean) : string
-  local engineIds = api.engine.getEntitiesWithComponent(component)
+local function revisionsForEntities(engineIds : {integer}, includeOwner : boolean, includeVehicle : boolean, includeLine : boolean) : string
   if engineIds == nil or #engineIds > 16384 then error("ENTITY_ENUMERATION_UNAVAILABLE") end
   local ids : {integer} = {}
   for _, entity in ipairs(engineIds) do ids[#ids + 1] = entity end
@@ -583,7 +582,206 @@ local function revisionsFor(component : any, includeOwner : boolean, includeVehi
 end
 
 local function observedDigest(component : any, includeOwner : boolean, includeVehicle : boolean, includeLine : boolean) : string
-  return digestText(revisionsFor(component, includeOwner, includeVehicle, includeLine))
+  return digestText(revisionsForEntities(api.engine.getEntitiesWithComponent(component), includeOwner, includeVehicle, includeLine))
+end
+
+local function rosterEntities(receipt : table) : {integer}
+  if receipt.companyCount == nil and validInteger(receipt.companyEntity) then return { receipt.companyEntity as integer } end
+  if type(receipt.companyCount) ~= "number" or receipt.companyCount < 2 or receipt.companyCount > 4 then error("ROSTER_UNAVAILABLE") end
+  local result : {integer} = {}
+  for index = 1, receipt.companyCount do
+    local entity = receipt["company" .. tostring(index)]
+    if not validInteger(entity) or not api.engine.entityExists(entity) then error("ROSTER_ENTITY_UNAVAILABLE") end
+    result[#result + 1] = entity
+  end
+  return result
+end
+
+local function topologyEntities() : {integer}
+  -- BASE_EDGE is readable but not loopable in build 40379.  The public street
+  -- system exposes every segment through its node adjacency map instead.
+  local map = api.engine.system.streetSystem.getNode2SegmentMap()
+  if map == nil then error("TOPOLOGY_MAP_UNAVAILABLE") end
+  local unique : table = {}
+  for node, segments in pairs(map) do
+    if not validInteger(node) or type(segments) ~= "table" or #segments > 4096 then error("TOPOLOGY_MAP_INVALID") end
+    for _, entity in ipairs(segments) do
+      if not validInteger(entity) then error("TOPOLOGY_ENTITY_UNAVAILABLE") end
+      unique[entity] = true
+    end
+  end
+  local result : {integer} = {}
+  for entity in pairs(unique) do result[#result + 1] = entity as integer end
+  if #result > 16384 then error("TOPOLOGY_ENUMERATION_UNAVAILABLE") end
+  return result
+end
+
+-- Town components are deliberately expanded rather than reduced to revisions:
+-- their autonomous development fields can change without a player command.  A
+-- failed read invalidates the *entire* lane; callers must never publish the
+-- prefix they happened to read before an entity changed under us.
+local function checkpointNumber(value : any, maximum : number) : string
+  if type(value) ~= "number" or value ~= value or value == math.huge or value == -math.huge or math.abs(value) > maximum then
+    error("CHECKPOINT_NUMBER_UNAVAILABLE")
+  end
+  return string.format("%.17g", value)
+end
+
+local function checkpointInteger(value : any, minimum : number, maximum : number) : string
+  if type(value) ~= "number" or value < minimum or value > maximum or value % 1 ~= 0 then
+    error("CHECKPOINT_INTEGER_UNAVAILABLE")
+  end
+  return string.format("%.0f", value)
+end
+
+local function checkpointEntity(value : any) : string
+  if not validInteger(value) then error("CHECKPOINT_ENTITY_UNAVAILABLE") end
+  return tostring(value)
+end
+
+local function checkpointText(value : any, maximum : integer) : string
+  if type(value) ~= "string" or #value > maximum then error("CHECKPOINT_TEXT_UNAVAILABLE") end
+  -- Length-prefix so a resource name cannot make two field sequences ambiguous.
+  return tostring(#value) .. ":" .. value
+end
+
+
+-- Construction module parameters are public but dynamically shaped. Preserve
+-- every supported value, with deterministic map ordering and strict caps. An
+-- unsupported userdata/function/cycle fails the complete town lane rather than
+-- publishing a key-only digest that could collide with different parameters.
+local function checkpointAny(value : any, depth : integer, budget : table, seen : table) : string
+  budget.count = (budget.count or 0) + 1
+  if budget.count > 4096 or depth > 8 then error("CHECKPOINT_VALUE_BUDGET_EXCEEDED") end
+  local kind = type(value)
+  if kind == "nil" then return "z" end
+  if kind == "boolean" then return value and "b1" or "b0" end
+  if kind == "number" then return "n" .. checkpointNumber(value, 9007199254740991) end
+  if kind == "string" then return "s" .. checkpointText(value, 4096) end
+  if kind ~= "table" or seen[value] then error("CHECKPOINT_VALUE_UNSUPPORTED") end
+  seen[value] = true
+  local entries : {string} = {}
+  for key, item in pairs(value as table) do
+    local encodedKey : string
+    if type(key) == "string" then encodedKey = "s" .. checkpointText(key, 1024)
+    elseif type(key) == "number" then encodedKey = "i" .. checkpointInteger(key, -2147483648, 2147483647)
+    else error("CHECKPOINT_KEY_UNSUPPORTED") end
+    entries[#entries + 1] = encodedKey .. "=" .. checkpointAny(item, depth + 1, budget, seen)
+    if #entries > 512 then error("CHECKPOINT_TABLE_UNAVAILABLE") end
+  end
+  seen[value] = nil
+  table.sort(entries)
+  return "{" .. table.concat(entries, ",") .. "}"
+end
+
+local function townComponentDigest() : string
+  local towns = api.engine.getEntitiesWithComponent(api.type.ComponentType.TOWN)
+  local buildings = api.engine.getEntitiesWithComponent(api.type.ComponentType.TOWN_BUILDING)
+  if towns == nil or buildings == nil or #towns > 4096 or #buildings > 16384 then error("TOWN_ENUMERATION_UNAVAILABLE") end
+  local townIds : {integer} = {}
+  local buildingIds : {integer} = {}
+  for _, entity in ipairs(towns) do
+    if not validInteger(entity) then error("TOWN_ENTITY_UNAVAILABLE") end
+    townIds[#townIds + 1] = entity
+  end
+  for _, entity in ipairs(buildings) do
+    if not validInteger(entity) then error("TOWN_BUILDING_ENTITY_UNAVAILABLE") end
+    buildingIds[#buildingIds + 1] = entity
+  end
+  table.sort(townIds); table.sort(buildingIds)
+  local values : {string} = {}
+  for _, entity in ipairs(townIds) do
+    if not api.engine.entityExists(entity) then error("TOWN_DISAPPEARED") end
+    local town = api.engine.getComponent(entity, api.type.ComponentType.TOWN) as Engine.Component.Town
+    if town == nil then error("TOWN_COMPONENT_UNAVAILABLE") end
+    if town.initialLandUseCapacities == nil then error("TOWN_INITIAL_CAPACITIES_UNAVAILABLE") end
+    if town.sizeFactors == nil then error("TOWN_SIZE_FACTORS_UNAVAILABLE") end
+    if town.cargoNeeds == nil then error("TOWN_CARGO_NEEDS_UNAVAILABLE") end
+    if type(town.developmentActive) ~= "boolean" then error("TOWN_DEVELOPMENT_UNAVAILABLE") end
+    if #town.initialLandUseCapacities > 16 or (town.levelToCapacityDistributionWeights ~= nil and #town.levelToCapacityDistributionWeights > 64)
+      or #town.sizeFactors > 16 or #town.cargoNeeds > 4 then error("TOWN_ARRAY_UNAVAILABLE") end
+    local value = "t:" .. checkpointEntity(entity) .. ":d" .. tostring(town.developmentActive and 1 or 0)
+      .. ":c" .. checkpointNumber(town.capacityScalingFactor, 9007199254740991)
+    value = value .. ":i" .. tostring(#town.initialLandUseCapacities)
+    for _, capacity in ipairs(town.initialLandUseCapacities) do value = value .. "," .. checkpointInteger(capacity, 0, 2147483647) end
+    -- Build 40379 declares this field but returns nil for the live Town
+    -- component. Hash an explicit absence marker; never substitute guessed
+    -- defaults. Other autonomous town and building fields remain observed.
+    if town.levelToCapacityDistributionWeights == nil then value = value .. ":w?"
+    else
+      value = value .. ":w" .. tostring(#town.levelToCapacityDistributionWeights)
+      for _, weights in ipairs(town.levelToCapacityDistributionWeights) do
+        if weights == nil or #weights > 64 then error("TOWN_DISTRIBUTION_UNAVAILABLE") end
+        value = value .. "/" .. tostring(#weights)
+        for _, weight in ipairs(weights) do value = value .. "," .. checkpointNumber(weight, 9007199254740991) end
+      end
+    end
+    value = value .. ":s" .. tostring(#town.sizeFactors)
+    for _, size in ipairs(town.sizeFactors) do value = value .. "," .. checkpointNumber(size, 9007199254740991) end
+    value = value .. ":n" .. tostring(#town.cargoNeeds)
+    for _, district in ipairs(town.cargoNeeds) do
+      if district == nil or #district > 128 then error("TOWN_CARGO_NEEDS_UNAVAILABLE") end
+      value = value .. "/" .. tostring(#district)
+      for _, need in ipairs(district) do
+        if need == nil or #need ~= 2 then error("TOWN_CARGO_NEED_UNAVAILABLE") end
+        value = value .. "," .. checkpointInteger(need[1], 0, 2147483647) .. "=" .. checkpointNumber(need[2], 9007199254740991)
+      end
+    end
+    value = value .. ":e" .. checkpointNumber(town.noise, 9007199254740991)
+      .. ":o" .. checkpointNumber(town.pollution, 9007199254740991)
+    values[#values + 1] = value
+  end
+  for _, entity in ipairs(buildingIds) do
+    if not api.engine.entityExists(entity) then error("TOWN_BUILDING_DISAPPEARED") end
+    local building = api.engine.getComponent(entity, api.type.ComponentType.TOWN_BUILDING) as Engine.Component.TownBuilding
+    if building == nil or type(building.blockedDevelopment) ~= "boolean" then error("TOWN_BUILDING_COMPONENT_UNAVAILABLE") end
+    if building.parcels == nil or #building.parcels > 16 then error("TOWN_BUILDING_PARCELS_UNAVAILABLE") end
+    local parcelIds : {integer} = {}
+    for _, parcel in ipairs(building.parcels) do
+      if not validInteger(parcel) then error("TOWN_BUILDING_PARCEL_UNAVAILABLE") end
+      parcelIds[#parcelIds + 1] = parcel
+    end
+    table.sort(parcelIds)
+    local buildingRevision = api.engine.getRevision(entity).num[1]
+    if not validInteger(buildingRevision) then error("TOWN_BUILDING_REVISION_UNAVAILABLE") end
+    -- The TownBuilding.construction field is present in the public type but is
+    -- not the authoritative relation in build 40379. Resolve through the
+    -- documented connector system, as the base game does for other reverse
+    -- construction lookups.
+    local constructionEntity = api.engine.system.streetConnectorSystem.getConstructionEntityForTownBuilding(entity)
+    if not validInteger(constructionEntity) or not api.engine.entityExists(constructionEntity) then error("TOWN_BUILDING_CONSTRUCTION_ENTITY_UNAVAILABLE") end
+    local constructionRevision = api.engine.getRevision(constructionEntity).num[1]
+    if not validInteger(constructionRevision) then error("TOWN_BUILDING_CONSTRUCTION_REVISION_UNAVAILABLE") end
+    local construction = api.engine.getComponent(constructionEntity, api.type.ComponentType.CONSTRUCTION) as Engine.Component.Construction
+    local value = "b:" .. checkpointEntity(entity) .. ":t" .. checkpointEntity(building.town)
+      .. ":r" .. checkpointInteger(buildingRevision, 0, 9007199254740991)
+      .. ":c" .. checkpointEntity(constructionEntity)
+      .. ":cr" .. checkpointInteger(constructionRevision, 0, 9007199254740991)
+      .. ":u" .. (validInteger(building.personCapacity) and tostring(building.personCapacity) or "?")
+      .. ":s" .. (validInteger(building.stockList) and tostring(building.stockList) or "?")
+      .. ":l" .. checkpointInteger(building.level, 0, 2147483647)
+      .. ":d" .. checkpointInteger(building.depth, 0, 2147483647)
+      .. ":h" .. checkpointNumber(building.height, 9007199254740991)
+      .. ":b" .. tostring(building.blockedDevelopment and 1 or 0)
+      .. ":x" .. checkpointInteger(building.timeBuilt, -9007199254740991, 9007199254740991)
+      .. ":a" .. tostring(#parcelIds)
+    for _, parcel in ipairs(parcelIds) do value = value .. "," .. checkpointEntity(parcel) end
+    -- Build 40379 resolves the construction relation but returns no readable
+    -- Construction payload for these town buildings. The entity revision above
+    -- still detects a changed construction. Preserve an explicit marker rather
+    -- than guessing file/seed/year/module values.
+    if construction == nil or construction.params == nil or construction.params.modules == nil then
+      value = value .. ":q?"
+    else
+      local moduleBudget : table = { count = 0 }
+      value = value .. ":f" .. checkpointText(construction.fileName, 1024)
+        .. ":p" .. checkpointInteger(construction.params.seed, -2147483648, 2147483647)
+        .. ":y" .. checkpointInteger(construction.params.year, -2147483648, 2147483647)
+        .. ":m" .. checkpointAny(construction.params.modules, 0, moduleBudget, {})
+    end
+    values[#values + 1] = value
+  end
+  return digestText(table.concat(values, ";"))
 end
 
 local function captureCanonicalWorld(receipt : table) : nil
@@ -592,13 +790,11 @@ local function captureCanonicalWorld(receipt : table) : nil
   -- from looking comparable.  RNG and hidden simulation state have no public
   -- TF3 read API and are therefore never fabricated.
   receipt.rngHiddenStateStatus = "unavailable"; receipt.rngHiddenStateHash = "unavailable"
-  local ok, towns = pcall(function() : string return observedDigest(api.type.ComponentType.CONSTRUCTION, true, false, false) end)
-  if ok then receipt.townsGrowthStatus = "observed"; receipt.townsGrowthHash = towns as string else receipt.townsGrowthStatus = "read_failed"; receipt.townsGrowthHash = "read_failed" end
+  local ok, towns = pcall(function() : string return townComponentDigest() end)
+  if ok then receipt.townsGrowthStatus = "observed"; receipt.townsGrowthHash = towns as string
+  else print("TF3MP_CHECKPOINT lane=townsGrowth error=" .. tostring(towns)); receipt.townsGrowthStatus = "read_failed"; receipt.townsGrowthHash = "read_failed" end
   local economyOk, economy = pcall(function() : string
-    local enginePlayers = api.engine.getEntitiesWithComponent(api.type.ComponentType.PLAYER)
-    if enginePlayers == nil or #enginePlayers > 4 then error("PLAYERS_UNAVAILABLE") end
-    local players : {integer} = {}
-    for _, player in ipairs(enginePlayers) do players[#players + 1] = player end
+    local players = rosterEntities(receipt)
     table.sort(players); local values : {string} = {}
     for _, player in ipairs(players) do
       local balance = api.engine.util.finance.getPlayersBalance(player)
@@ -607,15 +803,20 @@ local function captureCanonicalWorld(receipt : table) : nil
     end
     return digestText(table.concat(values, ";"))
   end)
-  if economyOk then receipt.economyStatus = "observed"; receipt.economyHash = economy as string else receipt.economyStatus = "read_failed"; receipt.economyHash = "read_failed" end
-  local topologyOk, topology = pcall(function() : string return observedDigest(api.type.ComponentType.BASE_EDGE, true, false, false) end)
-  if topologyOk then receipt.topologyStatus = "observed"; receipt.topologyHash = topology as string else receipt.topologyStatus = "read_failed"; receipt.topologyHash = "read_failed" end
+  if economyOk then receipt.economyStatus = "observed"; receipt.economyHash = economy as string
+  else print("TF3MP_CHECKPOINT lane=economy error=" .. tostring(economy)); receipt.economyStatus = "read_failed"; receipt.economyHash = "read_failed" end
+  local topologyOk, topology = pcall(function() : string return digestText(revisionsForEntities(topologyEntities(), true, false, false)) end)
+  if topologyOk then receipt.topologyStatus = "observed"; receipt.topologyHash = topology as string
+  else print("TF3MP_CHECKPOINT lane=topology error=" .. tostring(topology)); receipt.topologyStatus = "read_failed"; receipt.topologyHash = "read_failed" end
   local vehiclesOk, vehicles = pcall(function() : string return observedDigest(api.type.ComponentType.TRANSPORT_VEHICLE, true, true, false) end)
-  if vehiclesOk then receipt.vehiclesStatus = "observed"; receipt.vehiclesHash = vehicles as string else receipt.vehiclesStatus = "read_failed"; receipt.vehiclesHash = "read_failed" end
-  local companiesOk, companies = pcall(function() : string return observedDigest(api.type.ComponentType.PLAYER, false, false, false) end)
-  if companiesOk then receipt.companiesStatus = "observed"; receipt.companiesHash = companies as string else receipt.companiesStatus = "read_failed"; receipt.companiesHash = "read_failed" end
-  local linesOk, lines = pcall(function() : string return observedDigest(api.type.ComponentType.LINE, true, false, true) end)
-  if linesOk then receipt.linesServicesStatus = "observed"; receipt.linesServicesHash = lines as string else receipt.linesServicesStatus = "read_failed"; receipt.linesServicesHash = "read_failed" end
+  if vehiclesOk then receipt.vehiclesStatus = "observed"; receipt.vehiclesHash = vehicles as string
+  else print("TF3MP_CHECKPOINT lane=vehicles error=" .. tostring(vehicles)); receipt.vehiclesStatus = "read_failed"; receipt.vehiclesHash = "read_failed" end
+  local companiesOk, companies = pcall(function() : string return digestText(revisionsForEntities(rosterEntities(receipt), false, false, false)) end)
+  if companiesOk then receipt.companiesStatus = "observed"; receipt.companiesHash = companies as string
+  else print("TF3MP_CHECKPOINT lane=companies error=" .. tostring(companies)); receipt.companiesStatus = "read_failed"; receipt.companiesHash = "read_failed" end
+  local linesOk, lines = pcall(function() : string return digestText(revisionsForEntities(api.engine.system.lineSystem.getLines(), true, false, true)) end)
+  if linesOk then receipt.linesServicesStatus = "observed"; receipt.linesServicesHash = lines as string
+  else print("TF3MP_CHECKPOINT lane=linesServices error=" .. tostring(lines)); receipt.linesServicesStatus = "read_failed"; receipt.linesServicesHash = "read_failed" end
   return nil
 end
 
@@ -1372,8 +1573,8 @@ local ret : GameScriptWithGui<Tf3MpState, Tf3MpGuiState> = {
       local afterClock = readClock()
       local afterSpeed = api.engine.getComponent(api.engine.util.getWorld(), api.type.ComponentType.GAME_SPEED) as Engine.Component.GameSpeed
       if afterClock.updateCount ~= request.updateCount or afterSpeed.speedup ~= 0 then state:set(current); return nil end
-      captureCanonicalWorld(receipt)
       receipt.snapshotVersion = 2; receipt.companyCount = #roster
+      captureCanonicalWorld(receipt)
       receipt.held = true; receipt.status = "ok"
       binding.phase = "checkpoint_held"
       state:set(current)
