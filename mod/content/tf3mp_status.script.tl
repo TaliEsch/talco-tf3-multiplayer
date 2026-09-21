@@ -13,6 +13,7 @@ local record Tf3MpState
   probePending : boolean
   probePreviousUpdate : integer
   vehicleReceipt : table
+  vehicleDiscoveryReceipt : table
   vehicleInbox : table
   companyTestAttempted : boolean
   companyReceipt : table
@@ -531,9 +532,100 @@ local function pauseEvent(state : GameScriptState<Tf3MpState>, current : Tf3MpSt
   return nil
 end
 
+-- A bounded canonical digest is deliberately calculated in the simulation
+-- callback, while the checked hold is still true.  It contains only primitive
+-- public-component observations: no userdata, GUI proposal, entity reference,
+-- or native pointer crosses this boundary.  These are detector lanes, not a
+-- save-file serializer and not a claim that inaccessible RNG is observable.
+local function digestText(value : string) : string
+  local lanes : {integer} = { 216613626, 146959810, 709607, 16777619, 104729, 8191, 65537, 1000003 }
+  local primes : {integer} = { 131, 137, 139, 149, 151, 157, 163, 167 }
+  for index = 1, #lanes do
+    local lane = lanes[index]
+    for position = 1, #value do lane = (lane * primes[index] + string.byte(value, position)) % 2147483629 end
+    lanes[index] = lane
+  end
+  local out = ""
+  for _, lane in ipairs(lanes) do out = out .. string.format("%08x", lane) end
+  return out
+end
+
+local function revisionsFor(component : any, includeOwner : boolean, includeVehicle : boolean, includeLine : boolean) : string
+  local engineIds = api.engine.getEntitiesWithComponent(component)
+  if engineIds == nil or #engineIds > 16384 then error("ENTITY_ENUMERATION_UNAVAILABLE") end
+  local ids : {integer} = {}
+  for _, entity in ipairs(engineIds) do ids[#ids + 1] = entity end
+  table.sort(ids)
+  local values : {string} = {}
+  for _, entity in ipairs(ids) do
+    if not api.engine.entityExists(entity) then error("ENTITY_DISAPPEARED") end
+    local revision = api.engine.getRevision(entity).num[1]
+    if type(revision) ~= "number" or revision < 0 or revision % 1 ~= 0 then error("REVISION_UNAVAILABLE") end
+    local value = tostring(entity) .. ":" .. tostring(revision)
+    if includeOwner then
+      local owner = api.engine.getComponent(entity, api.type.ComponentType.PLAYER_OWNED) as Engine.Component.PlayerOwned
+      value = value .. ":o" .. tostring(owner == nil and 0 or owner.player)
+    end
+    if includeVehicle then
+      local vehicle = api.engine.getComponent(entity, api.type.ComponentType.TRANSPORT_VEHICLE) as Engine.Component.TransportVehicle
+      if vehicle == nil then error("VEHICLE_DISAPPEARED") end
+      value = value .. ":s" .. tostring(vehicle.userStopped and 1 or 0) .. ":l" .. tostring(vehicle.line == nil and 0 or vehicle.line)
+    end
+    if includeLine then
+      local line = api.engine.getComponent(entity, api.type.ComponentType.LINE) as table
+      if line == nil or line.stops == nil or #line.stops > 4096 then error("LINE_UNAVAILABLE") end
+      value = value .. ":n" .. tostring(#line.stops)
+      for _, stop in ipairs(line.stops) do value = value .. ":" .. tostring(stop.stationGroup) .. "," .. tostring(stop.station) .. "," .. tostring(stop.terminal) end
+    end
+    values[#values + 1] = value
+  end
+  return table.concat(values, ";")
+end
+
+local function observedDigest(component : any, includeOwner : boolean, includeVehicle : boolean, includeLine : boolean) : string
+  return digestText(revisionsFor(component, includeOwner, includeVehicle, includeLine))
+end
+
+local function captureCanonicalWorld(receipt : table) : nil
+  -- All supported domains must either be independently read to completion or
+  -- explicitly marked unavailable/read_failed.  This prevents partial lanes
+  -- from looking comparable.  RNG and hidden simulation state have no public
+  -- TF3 read API and are therefore never fabricated.
+  receipt.rngHiddenStateStatus = "unavailable"; receipt.rngHiddenStateHash = "unavailable"
+  local ok, towns = pcall(function() : string return observedDigest(api.type.ComponentType.CONSTRUCTION, true, false, false) end)
+  if ok then receipt.townsGrowthStatus = "observed"; receipt.townsGrowthHash = towns as string else receipt.townsGrowthStatus = "read_failed"; receipt.townsGrowthHash = "read_failed" end
+  local economyOk, economy = pcall(function() : string
+    local enginePlayers = api.engine.getEntitiesWithComponent(api.type.ComponentType.PLAYER)
+    if enginePlayers == nil or #enginePlayers > 4 then error("PLAYERS_UNAVAILABLE") end
+    local players : {integer} = {}
+    for _, player in ipairs(enginePlayers) do players[#players + 1] = player end
+    table.sort(players); local values : {string} = {}
+    for _, player in ipairs(players) do
+      local balance = api.engine.util.finance.getPlayersBalance(player)
+      if balance == nil or balance ~= balance or math.abs(balance) > 9007199254740991 or balance % 1 ~= 0 then error("BALANCE_UNAVAILABLE") end
+      values[#values + 1] = tostring(player) .. ":" .. tostring(balance)
+    end
+    return digestText(table.concat(values, ";"))
+  end)
+  if economyOk then receipt.economyStatus = "observed"; receipt.economyHash = economy as string else receipt.economyStatus = "read_failed"; receipt.economyHash = "read_failed" end
+  local topologyOk, topology = pcall(function() : string return observedDigest(api.type.ComponentType.BASE_EDGE, true, false, false) end)
+  if topologyOk then receipt.topologyStatus = "observed"; receipt.topologyHash = topology as string else receipt.topologyStatus = "read_failed"; receipt.topologyHash = "read_failed" end
+  local vehiclesOk, vehicles = pcall(function() : string return observedDigest(api.type.ComponentType.TRANSPORT_VEHICLE, true, true, false) end)
+  if vehiclesOk then receipt.vehiclesStatus = "observed"; receipt.vehiclesHash = vehicles as string else receipt.vehiclesStatus = "read_failed"; receipt.vehiclesHash = "read_failed" end
+  local companiesOk, companies = pcall(function() : string return observedDigest(api.type.ComponentType.PLAYER, false, false, false) end)
+  if companiesOk then receipt.companiesStatus = "observed"; receipt.companiesHash = companies as string else receipt.companiesStatus = "read_failed"; receipt.companiesHash = "read_failed" end
+  local linesOk, lines = pcall(function() : string return observedDigest(api.type.ComponentType.LINE, true, false, true) end)
+  if linesOk then receipt.linesServicesStatus = "observed"; receipt.linesServicesHash = lines as string else receipt.linesServicesStatus = "read_failed"; receipt.linesServicesHash = "read_failed" end
+  return nil
+end
+
 -- Read-only fresh-event snapshot; never save executable work or echo a host hash.
 local function snapshotEvent(current : Tf3MpState, request : table) : nil
   if request.schemaVersion ~= 1 or request.kind ~= "snapshot_request" or type(request.nonce) ~= "string" then return nil end
+  local requestFields : table = { schemaVersion=true, kind=true, nonce=true, requestId=true, entity=true, companyEntity=true, heldUpdate=true, issuedTick=true, expiresTick=true }
+  local requestCount : integer = 0
+  for key in pairs(request) do if requestFields[key] ~= true then return nil end; requestCount = requestCount + 1 end
+  if requestCount ~= 9 then return nil end
   local nonce = request.nonce as string
   if #nonce ~= 32 or not string.match(nonce, "^[0-9a-f]+$") then return nil end
   for _, key in ipairs({ "requestId", "entity", "companyEntity", "heldUpdate", "issuedTick", "expiresTick" }) do
@@ -567,6 +659,8 @@ local function snapshotEvent(current : Tf3MpState, request : table) : nil
   receipt.ownerCompanyEntity = vehicle.company
   receipt.revision = vehicle.revision
   receipt.stopFlag = vehicle.stopFlag
+  receipt.schemaVersion = 2
+  captureCanonicalWorld(receipt)
   -- Recheck the barrier after all reads. The helper hashes this observed data.
   if readClock().updateCount ~= request.heldUpdate then receipt.outcome = "hold_lost"; return nil end
   receipt.outcome = "captured"
@@ -1066,7 +1160,7 @@ local ret : GameScriptWithGui<Tf3MpState, Tf3MpGuiState> = {
     -- GUI events use the script's event subscriptions too. Existing saves may
     -- already have the engine-only subscription, so hasEventSubscriptions alone
     -- is not sufficient when adding the receipt/status events.
-    if not state:hasEventSubscriptions() or current.eventSubscriptionsVersion ~= 19 then
+    if not state:hasEventSubscriptions() or current.eventSubscriptionsVersion ~= 20 then
       state:subscribeToEvent("tf3mp_native_road_stop_replay")
       state:subscribeToEvent("tf3mp_get_native_road_stop_replay")
       state:subscribeToEvent("tf3mp_placement_observer_selftest")
@@ -1109,6 +1203,8 @@ local ret : GameScriptWithGui<Tf3MpState, Tf3MpGuiState> = {
       state:subscribeToEvent("tf3mp_get_status")
       state:subscribeToEvent("tf3mp_vehicle_command")
       state:subscribeToEvent("tf3mp_get_vehicle_receipt")
+      state:subscribeToEvent("tf3mp_discover_vehicle")
+      state:subscribeToEvent("tf3mp_get_vehicle_discovery")
       state:subscribeToEvent("tf3mp_company_probe")
       state:subscribeToEvent("tf3mp_get_company_receipt")
       state:subscribeToEvent("tf3mp_finance_probe")
@@ -1117,7 +1213,7 @@ local ret : GameScriptWithGui<Tf3MpState, Tf3MpGuiState> = {
       state:subscribeToEvent("tf3mp_get_pause_receipt")
       state:subscribeToEvent("tf3mp_station_template_probe")
       state:subscribeToEvent("tf3mp_get_station_template")
-      current.eventSubscriptionsVersion = 19
+      current.eventSubscriptionsVersion = 20
     end
     if subscriptionsMissing or current.readbackEventVersion ~= 1 then
       state:subscribeToEvent("tf3mp_stop_readback")
@@ -1276,7 +1372,8 @@ local ret : GameScriptWithGui<Tf3MpState, Tf3MpGuiState> = {
       local afterClock = readClock()
       local afterSpeed = api.engine.getComponent(api.engine.util.getWorld(), api.type.ComponentType.GAME_SPEED) as Engine.Component.GameSpeed
       if afterClock.updateCount ~= request.updateCount or afterSpeed.speedup ~= 0 then state:set(current); return nil end
-      receipt.snapshotVersion = 1; receipt.companyCount = #roster
+      captureCanonicalWorld(receipt)
+      receipt.snapshotVersion = 2; receipt.companyCount = #roster
       receipt.held = true; receipt.status = "ok"
       binding.phase = "checkpoint_held"
       state:set(current)
@@ -1721,6 +1818,42 @@ local ret : GameScriptWithGui<Tf3MpState, Tf3MpGuiState> = {
       end
       return nil
     end
+    if src == "tf3mp_status_1::/tf3mp_status.gs" and id == "tf3mp_engine_bridge" and name == "tf3mp_discover_vehicle" and type(param) == "table" then
+      local request = param as table
+      if request.schemaVersion ~= 1 or request.kind ~= "vehicle_discovery_request" or type(request.nonce) ~= "string"
+        or type(request.requestId) ~= "number" or type(request.company) ~= "number" then return nil end
+      local nonce = request.nonce as string
+      if #nonce ~= 32 or not string.match(nonce, "^[0-9a-f]+$") or not validInteger(request.requestId)
+        or request.requestId < 1 or not validInteger(request.company) then return nil end
+      local current = state:get()
+      if current == nil or current.schemaVersion == nil then return nil end
+      local old = current.vehicleDiscoveryReceipt or {}
+      if old.nonce == nonce and old.requestId >= request.requestId then return nil end
+      local clock = readClock()
+      local receipt : table = { schemaVersion = 1, kind = "vehicle_discovery_receipt", nonce = nonce,
+        requestId = request.requestId, company = request.company, entity = 0, revision = 0, stopFlag = 0,
+        tickCount = clock.tickCount, updateCount = clock.updateCount, outcome = "missing" }
+      if api.engine.util.getPlayer() ~= request.company then
+        receipt.outcome = "not_owner"
+      else
+        local vehicles = api.engine.getEntitiesWithComponent(api.type.ComponentType.TRANSPORT_VEHICLE)
+        table.sort(vehicles)
+        for _, entity in ipairs(vehicles) do
+          local owner = api.engine.getComponent(entity, api.type.ComponentType.PLAYER_OWNED) as Engine.Component.PlayerOwned
+          local vehicle = api.engine.getComponent(entity, api.type.ComponentType.TRANSPORT_VEHICLE) as Engine.Component.TransportVehicle
+          if owner ~= nil and vehicle ~= nil and owner.player == request.company then
+            receipt.entity = entity
+            receipt.revision = api.engine.getRevision(entity).num[1]
+            receipt.stopFlag = vehicle.userStopped and 1 or 0
+            receipt.outcome = "found"
+            break
+          end
+        end
+      end
+      current.vehicleDiscoveryReceipt = receipt
+      state:set(current)
+      return nil
+    end
     if src == "tf3mp_status_1::/tf3mp_status.gs" and id == "tf3mp_engine_bridge" and name == "tf3mp_vehicle_command" and type(param) == "table" then
       local current = state:get()
       if current ~= nil and current.schemaVersion ~= nil then
@@ -1915,6 +2048,11 @@ local ret : GameScriptWithGui<Tf3MpState, Tf3MpGuiState> = {
     if id == "tf3mp_engine_bridge" and name == "tf3mp_get_vehicle_receipt" then
       local current = state:get()
       if current ~= nil and current.vehicleReceipt ~= nil then return current.vehicleReceipt end
+      return nil
+    end
+    if id == "tf3mp_engine_bridge" and name == "tf3mp_get_vehicle_discovery" then
+      local current = state:get()
+      if current ~= nil and current.vehicleDiscoveryReceipt ~= nil then return current.vehicleDiscoveryReceipt end
       return nil
     end
     if id == "tf3mp_engine_bridge" and name == "tf3mp_get_engine_receipt" then

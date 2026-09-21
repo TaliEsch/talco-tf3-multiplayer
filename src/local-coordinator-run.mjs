@@ -37,6 +37,7 @@ export async function createLocalCoordinatorRun({directory,bridge,playerId,compa
     phase='failed';report.outcome=code;report.finishedAt=now();event(code);adapter?.halt(code);persist();
   }
   adapter=await createEngineSessionAdapter({directory,bridge,playerId,companies,now,
+    checkpointEvidenceScope:'local_diagnostic',
     healthy:()=>!closed&&!reportFailed&&phase!=='failed',controlsReady:()=>bridge.coordinationControlsLocked,
     disconnect:()=>{if(phase!=='stopping')fail(adapter?.fault??'ADAPTER_DISCONNECTED');},
     send:(kind,payload)=>reports.push({kind,payload})});

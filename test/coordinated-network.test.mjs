@@ -9,10 +9,10 @@ async function until(predicate) {
   for (let i = 0; i < 300; i++) { if (predicate()) return; await new Promise(r => setTimeout(r, 5)); }
   assert.fail("coordination socket test timed out");
 }
-async function fixture(count) {
+async function fixture(count, { requireReleaseAck = false } = {}) {
   let update = 100;
   const owners = new Map(), clients = [];
-  const host = startHost({ secret, buildHash, modManifestHash, port: 0, getUpdateCount: () => update, resolveEntityOwner: e => owners.get(e) ?? null });
+  const host = startHost({ secret, buildHash, modManifestHash, port: 0, getUpdateCount: () => update, resolveEntityOwner: e => owners.get(e) ?? null, requireReleaseAck });
   await once(host.server, "listening");
   try {
     for (let i = 0; i < count; i++) {
@@ -81,6 +81,23 @@ test("different state hashes halt the coordinated socket session", async () => {
     await until(() => f.clients[0].messages.some(m => m.kind === "session_halted"));
     assert.equal(f.host.coordinator.phase, "halted");
     assert.equal(f.clients[0].messages.some(m => m.kind === "command_completed"), false);
+  } finally { await f.close(); }
+});
+
+test("production socket coordination waits for every participant release receipt", async () => {
+  const f = await fixture(2, { requireReleaseAck: true });
+  try {
+    f.host.coordinator.setResumeSpeed(2);
+    f.host.beginCoordination({ checkpointHash, updateCount: 100 });
+    await until(() => f.clients.every(c => c.messages.some(m => m.kind === "coordination_prepare")));
+    f.clients.forEach((c, i) => c.connection.send("participant_ready", { roundId: f.host.coordinator.roundId, checkpointHash, updateCount: 100, companyEntity: 1000 + i }));
+    await until(() => f.clients.every(c => c.messages.some(m => m.kind === "coordination_ready")));
+    assert.equal(f.host.coordinator.phase, "awaiting_release");
+    const receipt = { roundId: f.host.coordinator.roundId, hostSequence: 0, releaseUpdate: 100, updateCount: 100, speedup: 2 };
+    f.clients[0].connection.send("participant_released", receipt);
+    await until(() => f.host.coordinator.phase === "awaiting_release");
+    f.clients[1].connection.send("participant_released", receipt);
+    await until(() => f.host.coordinator.phase === "running");
   } finally { await f.close(); }
 });
 

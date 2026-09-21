@@ -5,7 +5,7 @@ import { FrameDecoder, decodeFrame, encodeFrame, makeBody } from "./protocol.mjs
 import { HostAuthority, ProtocolError } from "./lockstep.mjs";
 import { SessionCoordinator } from "./session-coordinator.mjs";
 
-export function startHost({ secret, sessionId = randomUUID(), bind = DEFAULT_BIND, port = DEFAULT_PORT, buildHash, modManifestHash, requiredSave = null, expiresAt = null, getUpdateCount = () => 0, resolveEntityOwner = () => null, admissionAllowed = () => true, logger = () => {}, legacyModelRelay = false }) {
+export function startHost({ secret, sessionId = randomUUID(), bind = DEFAULT_BIND, port = DEFAULT_PORT, buildHash, modManifestHash, requiredSave = null, expiresAt = null, getUpdateCount = () => 0, resolveEntityOwner = () => null, admissionAllowed = () => true, logger = () => {}, legacyModelRelay = false, requireReleaseAck = true }) {
   if (expiresAt !== null && (!Number.isSafeInteger(expiresAt) || expiresAt <= Date.now())) throw new RangeError("session expiry must be a future Unix timestamp in milliseconds");
   const authority = new HostAuthority({ sessionId, buildHash, modManifestHash, resolveEntityOwner });
   const peers = new Set();
@@ -23,7 +23,7 @@ export function startHost({ secret, sessionId = randomUUID(), bind = DEFAULT_BIN
     return socket.write(frame);
   };
   const broadcast = (kind, payload) => { for (const peer of peers) if (peer.player) send(peer.socket, kind, payload, peer.player.playerId); };
-  const coordinator = new SessionCoordinator({ broadcast: (kind, payload) => {
+  const coordinator = new SessionCoordinator({ requireReleaseAck, broadcast: (kind, payload) => {
     broadcast(kind, payload); logger({ level: kind === "session_halted" ? "warn" : "info", event: kind, code: payload.code, hostSequence: payload.hostSequence });
   } });
   const server = net.createServer((socket) => {
@@ -54,8 +54,6 @@ export function startHost({ secret, sessionId = randomUUID(), bind = DEFAULT_BIN
             continue;
           }
           if (!peer.player) {
-            if (!admissionAllowed()) throw new ProtocolError("VEHICLE_TEST_ACTIVE", "host is running a local-only vehicle test");
-            if (expiresAt !== null && now >= expiresAt) throw new ProtocolError("SESSION_EXPIRED", "join deadline passed");
             if (body.kind === "diagnostic_hello") {
               if (body.playerId !== null || Object.keys(body.payload).length !== 0) throw new ProtocolError("BAD_DIAGNOSTIC", "empty diagnostic hello required");
               peer.diagnostic = true;
@@ -65,6 +63,8 @@ export function startHost({ secret, sessionId = randomUUID(), bind = DEFAULT_BIN
               logger({ level: "info", event: "diagnostic_connected", gameplayVerified: false });
               continue;
             }
+            if (!admissionAllowed()) throw new ProtocolError("VEHICLE_TEST_ACTIVE", "host is running a local-only vehicle test");
+            if (expiresAt !== null && now >= expiresAt) throw new ProtocolError("SESSION_EXPIRED", "join deadline passed");
             if (body.kind !== "hello") throw new ProtocolError("HELLO_REQUIRED", "first message must be hello");
             if (coordinator.locked) throw new ProtocolError("ROSTER_LOCKED", "new participants require a new session");
             peer.player = authority.admit(body.payload);
@@ -77,12 +77,13 @@ export function startHost({ secret, sessionId = randomUUID(), bind = DEFAULT_BIN
             continue;
           }
           if (body.playerId !== peer.player.playerId) throw new ProtocolError("IDENTITY_MISMATCH", "message player ID differs");
-          if (["participant_ready", "participant_heartbeat", "command_prepared", "command_applied"].includes(body.kind)) {
+          if (["participant_ready", "participant_heartbeat", "command_prepared", "command_applied", "participant_released"].includes(body.kind)) {
             if (!peer.ready) throw new ProtocolError("SAVE_REQUIRED", "verify the save first");
             if (body.kind === "participant_ready") coordinator.ready(peer.player.playerId, body.payload);
             if (body.kind === "participant_heartbeat") coordinator.heartbeat(peer.player.playerId, body.payload);
             if (body.kind === "command_prepared") coordinator.prepared(peer.player.playerId, body.payload, getUpdateCount());
             if (body.kind === "command_applied") coordinator.applied(peer.player.playerId, body.payload);
+            if (body.kind === "participant_released") coordinator.released(peer.player.playerId, body.payload);
             continue;
           }
           if (body.kind === "save_ready") {

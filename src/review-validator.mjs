@@ -9,6 +9,7 @@ const EXPECTED_CONTENT = Object.freeze([
   "tf3mp_depot_preview.script.lua",
   "tf3mp_depot_tools.res.lua",
   "tf3mp_depot_tools.script.lua",
+  "tf3mp_load_probe.script.lua",
   "tf3mp_native_controls.res.lua",
   "tf3mp_native_controls.script.tl",
   "tf3mp_proposal_facts.lua",
@@ -21,6 +22,7 @@ const EXPECTED_CONTENT = Object.freeze([
   "tf3mp_road_replay_result.lua",
   "tf3mp_service_command.lua",
   "tf3mp_service_observation.lua",
+  "tf3mp_startup_load.script.lua",
   "tf3mp_station_command.lua",
   "tf3mp_station_probe.lua",
   "tf3mp_status.gs.lua",
@@ -64,6 +66,16 @@ export async function validateReviewPackage(root) {
   const forbidden = files.filter((file) => FORBIDDEN_EXTENSIONS.has(path.extname(file).toLowerCase()));
   if (forbidden.length) throw new Error(`forbidden bundled file: ${forbidden[0]}`);
   const gameScript = await readFile(path.join(absoluteRoot, "content", "tf3mp_status.script.tl"), "utf8");
+  const loadProbeSource=await readFile(path.join(absoluteRoot,'content','tf3mp_load_probe.script.lua'),'utf8');
+  if(createHash('sha256').update(loadProbeSource.replace(/\r\n/g,'\n')).digest('hex')!=='889fd32533bbe239c3b8bc6f7c99c0ac24508eb893e905baa26353a607fe08f7'
+    || /loadGame\s*\(|sendCommand\s*\(|setGameSpeedup\s*\(|saveGame\s*\(/.test(loadProbeSource))
+    throw new Error('startup load probe differs from reviewed read-only source');
+  const startupLoadSource=await readFile(path.join(absoluteRoot,'content','tf3mp_startup_load.script.lua'),'utf8');
+  if(createHash('sha256').update(startupLoadSource.replace(/\r\n/g,'\n')).digest('hex')!=='7f61373532e15d8e705c1743b634fa2d10cbcf5fb4f2e3492edd012b08398618'
+    || !startupLoadSource.includes('if matches ~= 1 then')
+    || startupLoadSource.indexOf('pcall(app.removeUserdata')>startupLoadSource.indexOf('pcall(app.loadGame')
+    || /app\.saveGame\s*\(|api\.cmd|sendCommand|setGameSpeedup/.test(startupLoadSource))
+    throw new Error('startup disposable loader differs from reviewed one-shot source');
   const stopReadbackSource=await readFile(path.join(absoluteRoot,'content','tf3mp_stop_readback.lua'),'utf8');
   if(createHash('sha256').update(stopReadbackSource.replace(/\r\n/g,'\n')).digest('hex')!=='cd0a8eba428a6c1c12b4988b9733744d14e6385b96bf62b87ae613cf4abdae14')
     throw new Error('stop readback differs from reviewed read-only source');
@@ -151,7 +163,7 @@ export async function validateReviewPackage(root) {
   for (const event of ["tf3mp_engine_probe", "tf3mp_get_engine_receipt", "tf3mp_get_status", "tf3mp_vehicle_command", "tf3mp_get_vehicle_receipt", "tf3mp_company_probe", "tf3mp_get_company_receipt", "tf3mp_finance_probe", "tf3mp_get_finance_receipt"]) {
     if (!gameScript.includes(`state:subscribeToEvent("${event}")`)) throw new Error(`missing script event subscription: ${event}`);
   }
-  if (!gameScript.includes("current.eventSubscriptionsVersion ~= 19")) throw new Error("missing event subscription migration");
+  if (!gameScript.includes("current.eventSubscriptionsVersion ~= 20")) throw new Error("missing event subscription migration");
   for (const event of ['tf3mp_native_road_stop_replay', 'tf3mp_get_native_road_stop_replay']) {
     if (!gameScript.includes(`state:subscribeToEvent("${event}")`)) throw new Error('missing road replay subscription');
   }

@@ -91,9 +91,9 @@ export async function isUnpublishedEngineSource(temporary,source) {
   }finally{await pending.close();}
 }
 
-export async function createAsyncEngineMailbox({directory,nonce=randomBytes(16).toString("hex"),requireCheckpointSnapshot=true}) {
+export async function createAsyncEngineMailbox({directory,nonce=randomBytes(16).toString("hex"),requireCheckpointSnapshot=true,requireCompleteCheckpointCoverage=false}) {
   if (!/^[0-9a-f]{32}$/.test(nonce)) throw new TypeError("invalid mailbox nonce");
-  if(typeof requireCheckpointSnapshot!=='boolean') throw new TypeError('invalid checkpoint evidence option');
+  if(typeof requireCheckpointSnapshot!=='boolean'||typeof requireCompleteCheckpointCoverage!=='boolean') throw new TypeError('invalid checkpoint evidence option');
   directory=await requirePlainDirectory(directory);
   const lockPath=path.join(directory,"coordination.lock"), requestPath=path.join(directory,"coordination_request.lua");
   const lock=await open(lockPath,"wx",0o600);
@@ -165,7 +165,11 @@ export async function createAsyncEngineMailbox({directory,nonce=randomBytes(16).
       // Raw selected-state fields come from the engine, never from the expected
       // request hash. A malformed active receipt is forwarded as failure.
       if(p.operation==='holdCheckpoint'&&p.status==='ok'&&p.snapshotVersion!==undefined) {
-        try {p=decodeCheckpointReceipt(p).receipt;} catch {p={...p,status:'unknown'};}
+        try {
+          const checkpoint=decodeCheckpointReceipt(p);
+          p=requireCompleteCheckpointCoverage&&!checkpoint.coverage.complete
+            ?{...p,status:'unknown'}:checkpoint.receipt;
+        } catch {p={...p,status:'unknown'};}
       } else if(requireCheckpointSnapshot&&p.operation==='holdCheckpoint'&&p.status==='ok') {
         p={...p,status:'unknown'}; // Never accept an expected-hash echo from the real adapter.
       }

@@ -17,6 +17,8 @@ import { createLocalCoordinatorRun } from "./local-coordinator-run.mjs";
 import {createPhase2SetupSession} from './phase2-setup-session.mjs';
 import {beginRoadStopReplayRecording,finishRoadStopReplayRecording,loadRoadStopReplayRecordingCase,previewRoadStopReplayCaptureDiagnostics,readRoadStopReadbackDiagnostic} from './road-stop-replay-session.mjs';
 import {checkRoadStopReplayIdentity} from './road-stop-replay-case.mjs';
+import {openNativeHostJoinGate,resolveNativeHostJoinMode} from './native-host-join.mjs';
+import {prepareDisposableStartupLoad} from './startup-load.mjs';
 
 function options(args) {
   const result = {};
@@ -99,7 +101,7 @@ const log = record => {
 };
 const sessionSecret = opt.secret ?? process.env.TF3MP_SESSION_SECRET;
 let bridge;
-let hostInstance, vehicleTestActive = false;
+let hostInstance, nativeGate, vehicleTestActive = false;
 async function enableBridge() {
   if (opt["bridge-dir"]) {
     bridge = await startGameBridge({ directory: opt["bridge-dir"], logger: log });
@@ -115,6 +117,7 @@ async function stop() {
   await phase2Setup?.close();
   if(coordinatorRun)await coordinatorRun.close();
   if (integrationBatch) await integrationBatch.stop();
+  nativeGate?.close();
   if (bridge) await bridge.close();
   process.exit(0);
 }
@@ -300,10 +303,13 @@ if (command === "hash-game") {
   log({ level: "info", event: "review_validation", ...(await validateReviewPackage(opt.path ?? "mod")) });
 } else if (command === "host") {
   if (!sessionSecret || !opt["mod-hash"]) throw new Error("host requires TF3MP_SESSION_SECRET (or --secret) and --mod-hash");
+  const nativeMode=resolveNativeHostJoinMode(opt);
   const exe = opt.exe ?? "E:\\Steam\\steamapps\\common\\Transport Fever 3\\TransportFever3.exe";
   const buildHash = await readGameBuild(exe);
   log({ level: describeBuild(buildHash).recommended ? "info" : "warn", event: "game_hash", ...describeBuild(buildHash) });
   const hostSessionId = opt.session ?? randomUUID();
+  if(nativeMode.diagnosticOnly)log({level:'warn',event:'diagnostic_transport_only',coordinatedGameplayAdmission:false});
+  else nativeGate=await openNativeHostJoinGate({options:opt,sessionId:hostSessionId,role:'host',logger:log,onDisconnect:()=>stop()});
   const expiresAt = opt.expires ? Number(opt.expires) : null;
   if (expiresAt !== null && (!Number.isSafeInteger(expiresAt) || expiresAt <= Date.now())) throw new Error("--expires must be a future Unix timestamp in milliseconds");
   let requiredSave = null;
@@ -313,7 +319,7 @@ if (command === "hash-game") {
     observedSaveHash=transfer.sha256;
     log({ level: "info", event: "save_transfer_listening", bytes: transfer.bytes, sha256: transfer.sha256, port: transfer.port });
   }
-  const instance = startHost({ secret: sessionSecret, sessionId: hostSessionId, bind: opt.bind, port: opt.port ? Number(opt.port) : undefined, buildHash, modManifestHash: opt["mod-hash"], requiredSave, expiresAt, logger: log, admissionAllowed: () => !vehicleTestActive });
+  const instance = startHost({ secret: sessionSecret, sessionId: hostSessionId, bind: opt.bind, port: opt.port ? Number(opt.port) : undefined, buildHash, modManifestHash: opt["mod-hash"], requiredSave, expiresAt, logger: log, admissionAllowed: () => !nativeMode.diagnosticOnly && nativeGate?.ready===true && !vehicleTestActive });
   hostInstance = instance;
   await once(instance.server, "listening");
   await enableBridge();
@@ -321,11 +327,14 @@ if (command === "hash-game") {
 } else if (command === "join") {
   if (!sessionSecret) throw new Error("join requires TF3MP_SESSION_SECRET (or --secret)");
   for (const required of ["session", "name", "mod-hash"]) if (!opt[required]) throw new Error(`join requires --${required}`);
+  const nativeMode=resolveNativeHostJoinMode(opt);
   const buildHash = await readGameBuild(opt.exe ?? "E:\\Steam\\steamapps\\common\\Transport Fever 3\\TransportFever3.exe");
   log({ level: describeBuild(buildHash).recommended ? "info" : "warn", event: "game_hash", ...describeBuild(buildHash) });
+  if(nativeMode.diagnosticOnly)log({level:'warn',event:'diagnostic_transport_only',coordinatedGameplayAdmission:false});
+  else nativeGate=await openNativeHostJoinGate({options:opt,sessionId:opt.session,role:'join',logger:log,onDisconnect:()=>stop()});
   await enableBridge();
   let testSent = false, saveStarted = false;
-  connectClient({ secret: sessionSecret, sessionId: opt.session, host: opt.host, port: opt.port ? Number(opt.port) : undefined, displayName: opt.name, buildHash, modManifestHash: opt["mod-hash"], onMessage: (message, context) => {
+  connectClient({ secret: sessionSecret, sessionId: opt.session, host: opt.host, port: opt.port ? Number(opt.port) : undefined, displayName: opt.name, buildHash, modManifestHash: opt["mod-hash"], diagnosticOnly:nativeMode.diagnosticOnly, onMessage: (message, context) => {
     if (message.kind === "session_ended") stop();
     log({ level: "info", event: "message", kind: message.kind, code: message.payload?.code, payload: message.payload });
     if (message.kind === "admitted" && opt["test-message"] && !testSent) {
@@ -349,7 +358,11 @@ if (command === "hash-game") {
   if (!opt.dir) throw new Error("probe-ipc requires --dir with an absolute dedicated userdata directory");
   const result = await processProbeOnce(opt.dir);
   log({ level: "info", event: "userdata_probe_response", counter: result.probe.counter, nonce: result.probe.nonce, responseFile: `inbox_${result.probe.counter}.lua` });
+} else if(command==='prepare-disposable-load'){
+  for(const required of ['source','save-dir','bridge-dir'])if(!opt[required])throw new Error(`prepare-disposable-load requires --${required}`);
+  const result=await prepareDisposableStartupLoad({sourceSave:opt.source,saveDirectory:opt['save-dir'],bridgeDirectory:opt['bridge-dir']});
+  log({level:'info',event:'disposable_load_prepared',saveName:result.saveName,bytes:result.bytes,sha256:result.sha256,path:result.path,requestPath:result.requestPath});
 } else {
-  process.stderr.write("Usage: node src/cli.mjs <host|join|hash-game|hash-mod|review|generate-secret|probe-ipc> [options]\nHost save: --save <absolute.sav> [--save-port 37334]; client pull: --save-dir <absolute-directory>\n");
+  process.stderr.write("Usage: node src/cli.mjs <host|join|hash-game|hash-mod|review|generate-secret|probe-ipc|prepare-disposable-load> [options]\nHost save: --save <absolute.sav> [--save-port 37334]; client pull: --save-dir <absolute-directory>\n");
   process.exitCode = 2;
 }

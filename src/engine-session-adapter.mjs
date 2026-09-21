@@ -5,12 +5,34 @@ import { AsyncSessionParticipant } from './async-session-participant.mjs';
 // common save/build identity and actual control coverage before remote admission.
 // No synthetic engine receipts, automatic game launch, or automatic retry.
 export async function createEngineSessionAdapter({directory,bridge,playerId,companies,
-  send,disconnect,healthy,controlsReady,now=Date.now}) {
+  send,disconnect,healthy,controlsReady,now=Date.now,nativeRuntime=null,checkpointEvidenceScope='production'}) {
   if(!bridge||typeof bridge.startCoordinationLease!=='function'
     ||![send,disconnect,healthy,controlsReady,now].every(f=>typeof f==='function')) throw new TypeError('INVALID_ADAPTER_OPTIONS');
-  const mailbox=await createAsyncEngineMailbox({directory,nonce:bridge.nonce});
-  let participant,lease,closed=false,lastCounter=-1,polling=null,closing=null;
+  if(nativeRuntime!==null&&(!nativeRuntime||typeof nativeRuntime.sessionId!=='string'||!/^[A-Za-z0-9_.:-]{1,128}$/.test(nativeRuntime.sessionId)
+    ||!['host','participant'].includes(nativeRuntime.role)||typeof nativeRuntime.client?.requireCapability!=='function'
+    ||typeof nativeRuntime.client?.bindSession!=='function'||typeof nativeRuntime.client?.control!=='function'
+    ||typeof nativeRuntime.client?.on!=='function'||typeof nativeRuntime.client?.off!=='function'
+    ||typeof nativeRuntime.logger!=='function')) throw new TypeError('INVALID_NATIVE_RUNTIME_ADAPTER_OPTIONS');
+  if(!['production','local_diagnostic'].includes(checkpointEvidenceScope))throw new TypeError('INVALID_CHECKPOINT_EVIDENCE_SCOPE');
+  const mailbox=await createAsyncEngineMailbox({directory,nonce:bridge.nonce,
+    requireCompleteCheckpointCoverage:checkpointEvidenceScope==='production'});
+  let participant,lease,closed=false,lastCounter=-1,polling=null,closing=null,nativeHaltIssued=false;
   const stopRenewal=()=>lease?.stop();
+  // Native IPC is a session fence only. Its debugger/qualification receipts do
+  // not describe TF3 world state, ownership, command execution, or release.
+  const nativeHalt=reason=>{
+    if(!nativeRuntime||nativeHaltIssued)return;
+    nativeHaltIssued=true;
+    Promise.resolve(nativeRuntime.client.control('halt')).then(receipt=>{
+      nativeRuntime.logger({level:'info',event:'native_runtime_halt_receipt',reason,
+        accepted:receipt?.status==='accepted',control:receipt?.control??null,gameWorldReceipt:false});
+    }).catch(error=>nativeRuntime.logger({level:'error',event:'native_runtime_halt_unknown',reason,
+      code:error?.message??'UNKNOWN',noRetry:true,gameWorldReceipt:false}));
+  };
+  const nativeDisconnected=reason=>{
+    nativeRuntime?.logger({level:'error',event:'native_runtime_disconnected',reason,gameWorldReceipt:false});
+    participant?.halt('NATIVE_RUNTIME_DISCONNECTED');
+  };
   try {
     // One operation includes the scheduled wait plus separate held-event and
     // receipt exchanges. Match the local coordinator's 30s bounded deadline;
@@ -20,10 +42,32 @@ export async function createEngineSessionAdapter({directory,bridge,playerId,comp
         if(request.operation!=='halt'&&(!lease?.active||!healthy())) throw new Error('ENGINE_LEASE_NOT_ACTIVE');
         if(['release','prepare','executeHeld'].includes(request.operation)&&controlsReady()!==true) throw new Error('NATIVE_CONTROLS_NOT_LOCKED');
         return mailbox.publish(request);
-      },send,disconnect:()=>{stopRenewal();disconnect();}});
+      },send,disconnect:()=>{stopRenewal();nativeHalt(participant?.fault??'PARTICIPANT_DISCONNECTED');disconnect();}});
+    if(nativeRuntime){
+      nativeRuntime.client.requireCapability('session.bind');
+      // This is authenticated controller identity binding, deliberately outside
+      // AsyncSessionParticipant.receiveEngine(). The latter accepts only
+      // correlated mailbox/world receipts.
+      const requestedBinding={sessionId:nativeRuntime.sessionId,role:nativeRuntime.role};
+      // openNativeHostJoinGate binds this real client before adapter creation.
+      // Reuse only an exactly matching persistent binding; a transport receipt is
+      // still never game-world or checkpoint proof.
+      const existingBinding=nativeRuntime.binding??nativeRuntime.client.binding;
+      if(existingBinding&&(existingBinding.sessionId!==requestedBinding.sessionId||existingBinding.role!==requestedBinding.role))
+        throw new Error('NATIVE_RUNTIME_BINDING_MISMATCH');
+      const bindingReceipt=existingBinding
+        ?existingBinding.receipt
+        :await nativeRuntime.client.bindSession(requestedBinding);
+      if(bindingReceipt?.status!=='accepted'
+        ||(bindingReceipt.boundSessionId??bindingReceipt.sessionId)!==nativeRuntime.sessionId
+        ||(bindingReceipt.boundRole??bindingReceipt.role)!==nativeRuntime.role) throw new Error('NATIVE_RUNTIME_INVALID_BIND_RECEIPT');
+      nativeRuntime.logger({level:'info',event:'native_runtime_binding_receipt',sessionId:nativeRuntime.sessionId,
+        role:nativeRuntime.role,accepted:true,gameWorldReceipt:false});
+      nativeRuntime.client.on('disconnect',nativeDisconnected);
+    }
     lease=await bridge.startCoordinationLease({healthy:()=>!closed&&participant.phase!=='halted'&&healthy()===true,
       onFailure:code=>participant.halt(code)});
-  } catch(error) {stopRenewal();await mailbox.close();throw error;}
+  } catch(error) {nativeRuntime?.client.off('disconnect',nativeDisconnected);nativeRuntime?.client.close?.();stopRenewal();await mailbox.close();throw error;}
 
   function observe() {
     const observation=bridge.engineObservation,s=observation?.sample;
@@ -53,7 +97,8 @@ export async function createEngineSessionAdapter({directory,bridge,playerId,comp
     receive(kind,payload){
       if(!check())return false;
       if(!lease.active){participant.halt('ENGINE_LEASE_NOT_ACTIVE');return false;}
-      return participant.receive(kind,payload);
+      const accepted=participant.receive(kind,payload);
+      return accepted;
     },
     poll(){
       if(closed)return Promise.resolve(false);
@@ -76,7 +121,7 @@ export async function createEngineSessionAdapter({directory,bridge,playerId,comp
     halt(code='EXPLICIT_STOP'){participant.halt(code);},
     close(){
       if(closing)return closing;
-      closed=true;stopRenewal();
+      closed=true;stopRenewal();nativeRuntime?.client.off('disconnect',nativeDisconnected);nativeHalt('ADAPTER_CLOSED');
       // Teardown is not halt proof. Caller should request halt and keep polling
       // its receipt before closing when possible; expiry remains the fallback.
       closing=(async()=>{await polling;await mailbox.close();})();

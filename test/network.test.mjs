@@ -216,3 +216,20 @@ test("gameplay requests remain blocked until client verifies host save", async (
 test("host rejects an already-expired session", () => {
   assert.throws(() => startHost({ legacyModelRelay: true, secret: SECRET, sessionId: "expired", port: 0, buildHash: BUILD, modManifestHash: MODS, expiresAt: Date.now() - 1 }), /future Unix timestamp/);
 });
+
+test("diagnostic-only client never joins the player roster or sends gameplay", { timeout: 5000 }, async () => {
+  const instance=startHost({legacyModelRelay:true,secret:SECRET,sessionId:'diagnostic-only',port:0,buildHash:BUILD,modManifestHash:MODS,admissionAllowed:()=>false});
+  await once(instance.server,'listening');
+  let handle;
+  try{
+    await new Promise((resolve,reject)=>{
+      handle=connectClient({secret:SECRET,sessionId:instance.sessionId,port:instance.server.address().port,displayName:'Ignored',buildHash:BUILD,modManifestHash:MODS,diagnosticOnly:true,onMessage:(message,context)=>{
+        if(message.kind==='diagnostic_ready'){assert.equal(context.playerId,null);context.send('diagnostic_ping',{challenge:'a'.repeat(32)});}
+        else if(message.kind==='diagnostic_pong'){assert.equal(context.playerId,null);resolve();}
+        else if(message.kind==='transport_error'||message.kind==='error')reject(new Error(message.payload.code));
+      }});
+    });
+    assert.equal(instance.authority.players().length,0);
+    assert.throws(()=>handle.send('test',{value:'must not send'}),/DIAGNOSTIC_ONLY/);
+  }finally{await shutdown(instance.server,handle?[handle.socket]:[]);}
+});

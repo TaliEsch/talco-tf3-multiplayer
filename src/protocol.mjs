@@ -15,7 +15,7 @@ const KINDS = new Set([
   "peer_joined", "peer_left", "save_ready", "session_ready", "error",
   "diagnostic_hello", "diagnostic_ready", "diagnostic_ping", "diagnostic_pong",
   "coordination_prepare", "coordination_ready", "coordination_heartbeat", "participant_ready", "participant_heartbeat",
-  "command_prepare", "command_prepared", "command_commit", "command_applied", "command_completed", "session_halted",
+  "command_prepare", "command_prepared", "command_commit", "command_applied", "command_completed", "participant_released", "session_halted",
 ]);
 
 function assertString(value, name, max = MAX_STRING_LENGTH) {

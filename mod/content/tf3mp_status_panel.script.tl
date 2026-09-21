@@ -70,6 +70,7 @@ local probeReported : integer = 0
 local probeFailed = false
 local probeResult = "diagnostics"
 local vehiclePhaseKey = ""
+local vehicleDiscoverySent : integer = 0
 local companyProbeSent : integer = 0
 local phase2FundingSent : integer = 0
 local phase2FundingReported : integer = 0
@@ -505,8 +506,8 @@ local function exchangeCheckpoint() : nil
   local result : table = { schemaVersion = 1, nonce = bridgeNonce, operationId = checkpointSent, roundId = receipt.roundId,
     operation = "holdCheckpoint", status = receipt.status, updateCount = receipt.updateCount, held = receipt.held }
   if receipt.status == "ok" then
-    if receipt.snapshotVersion ~= 1 or type(receipt.companyCount) ~= "number" or receipt.companyCount < 2 or receipt.companyCount > 4 or receipt.companyCount % 1 ~= 0 then return nil end
-    result.snapshotVersion = 1; result.companyCount = receipt.companyCount
+    if receipt.snapshotVersion ~= 2 or type(receipt.companyCount) ~= "number" or receipt.companyCount < 2 or receipt.companyCount > 4 or receipt.companyCount % 1 ~= 0 then return nil end
+    result.snapshotVersion = 2; result.companyCount = receipt.companyCount
     for i = 1, receipt.companyCount as integer do
       local entity = receipt["company" .. tostring(i)]
       local balance = receipt["balance" .. tostring(i)]
@@ -514,6 +515,16 @@ local function exchangeCheckpoint() : nil
       if type(entity) ~= "number" or entity < 0 or entity > 2147483647 or entity % 1 ~= 0 then return nil end
       if type(balance) ~= "number" or balance < 0 or balance > 9007199254740991 or balance % 1 ~= 0 or (negative ~= 0 and negative ~= 1) then return nil end
       result["company" .. tostring(i)] = entity; result["balance" .. tostring(i)] = balance; result["negative" .. tostring(i)] = negative
+    end
+    for _, domain in ipairs({ "townsGrowth", "economy", "topology", "vehicles", "companies", "linesServices", "rngHiddenState" }) do
+      local status, digest = receipt[domain .. "Status"], receipt[domain .. "Hash"]
+      if type(status) ~= "string" or type(digest) ~= "string" then return nil end
+      if status == "observed" then
+        if #digest ~= 64 or not string.match(digest, "^[0-9a-f]+$") then return nil end
+      elseif (status == "unavailable" or status == "unsupported" or status == "read_failed") and digest == status then
+        -- Explicit blind spot/failure is part of the hashed checkpoint state.
+      else return nil end
+      result[domain .. "Status"] = status; result[domain .. "Hash"] = digest
     end
   end
   app.saveUserdata("tf3mp_status_1", "coordination_receipt", result)
@@ -897,6 +908,41 @@ local function dispatchVehicleAtUpdate() : nil
     if live[key] ~= value then return nil end
   end
   api.cmd.sendCommand(api.cmd.makeScriptingSendEventCmd("tf3mp_status_1::/tf3mp_status.gs", "tf3mp_engine_bridge", "tf3mp_vehicle_command", request))
+  return nil
+end
+
+local function exchangeVehicleDiscovery() : nil
+  if not userdataExists("vehicle_discovery_request") then return nil end
+  local request = app.loadUserdata("tf3mp_status_1", "vehicle_discovery_request")
+  if request.schemaVersion ~= 1 or request.kind ~= "vehicle_discovery_request" or request.nonce ~= bridgeNonce then return nil end
+  for _, key in ipairs({ "requestId", "company" }) do
+    local value = request[key]
+    if type(value) ~= "number" or value < 0 or value > 2147483647 or value % 1 ~= 0 then return nil end
+  end
+  if request.requestId < 1 then return nil end
+  if request.requestId > vehicleDiscoverySent then
+    vehicleDiscoverySent = request.requestId as integer
+    api.cmd.sendCommand(api.cmd.makeScriptingSendEventCmd("tf3mp_status_1::/tf3mp_status.gs", "tf3mp_engine_bridge", "tf3mp_discover_vehicle", {
+      schemaVersion = 1, kind = "vehicle_discovery_request", nonce = bridgeNonce,
+      requestId = vehicleDiscoverySent, company = request.company,
+    }))
+  end
+  if request.requestId ~= vehicleDiscoverySent then return nil end
+  local value = api.gui.fireGuiScriptEvent("tf3mp_engine_bridge", "tf3mp_get_vehicle_discovery", {})
+  if type(value) ~= "table" then return nil end
+  local receipt = value as table
+  if receipt.schemaVersion ~= 1 or receipt.kind ~= "vehicle_discovery_receipt" or receipt.nonce ~= bridgeNonce
+    or receipt.requestId ~= vehicleDiscoverySent or receipt.company ~= request.company then return nil end
+  local result : table = { schemaVersion = 1, kind = "vehicle_discovery_receipt", nonce = bridgeNonce,
+    requestId = vehicleDiscoverySent, outcome = receipt.outcome }
+  if receipt.outcome ~= "found" and receipt.outcome ~= "missing" and receipt.outcome ~= "not_owner" then return nil end
+  for _, key in ipairs({ "company", "entity", "revision", "stopFlag", "tickCount", "updateCount" }) do
+    local numberValue = receipt[key]
+    if type(numberValue) ~= "number" or numberValue < 0 or numberValue > 2147483647 or numberValue % 1 ~= 0 then return nil end
+    result[key] = numberValue
+  end
+  if receipt.stopFlag ~= 0 and receipt.stopFlag ~= 1 then return nil end
+  app.saveUserdata("tf3mp_status_1", "vehicle_discovery_receipt", result)
   return nil
 end
 
@@ -1544,7 +1590,18 @@ local function exchangeHeldSnapshot() : nil
     end
   end
   if receipt.kind ~= "held_snapshot" or receipt.nonce ~= bridgeNonce or receipt.requestId ~= param.requestId then return nil end
-  local result : table = { schemaVersion = 1, kind = "held_snapshot", nonce = bridgeNonce }
+  if receipt.schemaVersion ~= 1 and receipt.schemaVersion ~= 2 then return nil end
+  local allowed : table = { schemaVersion=true, kind=true, nonce=true, requestId=true, entity=true, companyEntity=true, heldUpdate=true,
+    tickCount=true, updateCount=true, speedup=true, ownerCompanyEntity=true, revision=true, stopFlag=true, balanceNegative=true, balance=true, outcome=true }
+  if receipt.schemaVersion == 2 then
+    for _, domain in ipairs({ "townsGrowth", "economy", "topology", "vehicles", "companies", "linesServices", "rngHiddenState" }) do
+      allowed[domain .. "Status"] = true; allowed[domain .. "Hash"] = true
+    end
+  end
+  local count : integer = 0
+  for key in pairs(receipt) do if allowed[key] ~= true then return nil end; count = count + 1 end
+  if count ~= (receipt.schemaVersion == 2 and 30 or 16) then return nil end
+  local result : table = { schemaVersion = receipt.schemaVersion, kind = "held_snapshot", nonce = bridgeNonce }
   for _, key in ipairs({ "requestId", "entity", "companyEntity", "heldUpdate", "tickCount", "updateCount", "speedup", "ownerCompanyEntity", "revision", "stopFlag", "balanceNegative" }) do
     local v = receipt[key]
     if type(v) ~= "number" or v < 0 or v > 2147483647 or v % 1 ~= 0 then return nil end
@@ -1553,6 +1610,20 @@ local function exchangeHeldSnapshot() : nil
   if type(receipt.balance) ~= "number" or receipt.balance < 0 or receipt.balance > 9007199254740991 or receipt.balance % 1 ~= 0 then return nil end
   if type(receipt.outcome) ~= "string" or not string.match(receipt.outcome as string, "^[a-z_]+$") then return nil end
   result.balance = receipt.balance; result.outcome = receipt.outcome
+  if receipt.schemaVersion == 2 then
+    -- v2 is an exact, fail-closed envelope.  A missing or malformed domain
+    -- never degrades into the old selected-state receipt under the same nonce.
+    for _, domain in ipairs({ "townsGrowth", "economy", "topology", "vehicles", "companies", "linesServices", "rngHiddenState" }) do
+      local status, digest = receipt[domain .. "Status"], receipt[domain .. "Hash"]
+      if type(status) ~= "string" or type(digest) ~= "string" then return nil end
+      if status == "observed" then
+        if #digest ~= 64 or not string.match(digest, "^[0-9a-f]+$") then return nil end
+      elseif (status == "unavailable" or status == "unsupported" or status == "read_failed") and digest == status then
+        -- Explicit blind spot/failure; JS will refuse comparison-ready mode.
+      else return nil end
+      result[domain .. "Status"] = status; result[domain .. "Hash"] = digest
+    end
+  elseif receipt.schemaVersion ~= 1 then return nil end
   app.saveUserdata("tf3mp_status_1", "snapshot_receipt", result)
   return nil
 end
@@ -1575,6 +1646,7 @@ local function exchangeTelemetry(tickCount : integer, updateCount : integer) : s
     probeFailed = false
     probeResult = "diagnostics"
     vehiclePhaseKey = ""
+    vehicleDiscoverySent = 0
     companyProbeSent = 0
     phase2FundingSent = 0
     phase2FundingReported = 0
@@ -1697,6 +1769,8 @@ local function exchangeTelemetry(tickCount : integer, updateCount : integer) : s
     return ok and "company test / see launcher / disposable save" or "company test error / do not retry"
   end
   if config.mode == "vehicle_test" then
+    local discoveryOk = pcall(exchangeVehicleDiscovery)
+    if not discoveryOk then return "vehicle discovery error / see launcher" end
     local ok = pcall(exchangeVehicleTest)
     return ok and "LOCAL vehicle test / not multiplayer" or "vehicle test error / see launcher"
   end

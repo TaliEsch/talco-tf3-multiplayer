@@ -17,7 +17,8 @@ test("host releases bridge lock when launcher input closes, allowing a fresh hos
     for (let run = 0; run < 2; run++) {
       const child = spawn(process.execPath, [fileURLToPath(new URL("../src/cli.mjs", import.meta.url)), "host",
         "--exe", fixture, "--save", fixture, "--mod-hash", "a".repeat(64),
-        "--bind", "127.0.0.1", "--port", "0", "--save-port", "0", "--bridge-dir", directory], {
+        "--bind", "127.0.0.1", "--port", "0", "--save-port", "0", "--bridge-dir", directory,
+        "--diagnostic-transport-only"], {
         env: { ...process.env, TF3MP_SESSION_SECRET: "0123456789abcdef0123456789abcdef" },
         stdio: ["pipe", "pipe", "pipe"], windowsHide: true,
       });

@@ -3,7 +3,7 @@ import { FrameDecoder, decodeFrame, encodeFrame, makeBody } from "./protocol.mjs
 import { DEFAULT_PORT } from "./constants.mjs";
 import { MAX_SESSION_MESSAGES } from "./constants.mjs";
 
-export function connectClient({ secret, sessionId, host = "127.0.0.1", port = DEFAULT_PORT, displayName, buildHash, modManifestHash, onMessage = () => {} }) {
+export function connectClient({ secret, sessionId, host = "127.0.0.1", port = DEFAULT_PORT, displayName, buildHash, modManifestHash, diagnosticOnly = false, onMessage = () => {} }) {
   const socket = net.createConnection({ host, port });
   const deadline = setTimeout(() => socket.destroy(Object.assign(new Error("admission timeout"), { code: "ADMISSION_TIMEOUT" })), 15_000);
   deadline.unref();
@@ -12,8 +12,12 @@ export function connectClient({ secret, sessionId, host = "127.0.0.1", port = DE
   let lastServerSequence = -1;
   const seenServerMessages = new Set();
   let playerId = null;
-  const send = (kind, payload) => socket.write(encodeFrame(secret, makeBody({ kind, sequence: sequence++, sessionId, playerId, payload })));
-  socket.on("connect", () => send("hello", { displayName, buildHash, modManifestHash }));
+  const sendFrame = (kind, payload) => socket.write(encodeFrame(secret, makeBody({ kind, sequence: sequence++, sessionId, playerId, payload })));
+  const send = (kind, payload) => {
+    if(diagnosticOnly&&kind!=="diagnostic_ping")throw new Error("DIAGNOSTIC_ONLY");
+    return sendFrame(kind,payload);
+  };
+  socket.on("connect", () => diagnosticOnly ? sendFrame("diagnostic_hello", {}) : send("hello", { displayName, buildHash, modManifestHash }));
   socket.on("data", (chunk) => {
     try {
       for (const frame of decoder.push(chunk)) {
@@ -23,7 +27,11 @@ export function connectClient({ secret, sessionId, host = "127.0.0.1", port = DE
         if (seenServerMessages.size >= MAX_SESSION_MESSAGES) throw new Error("session message budget exhausted");
         lastServerSequence = body.sequence;
         seenServerMessages.add(body.messageId);
-        if (body.kind === "admitted") { playerId = body.payload.player.playerId; clearTimeout(deadline); }
+        if(diagnosticOnly){
+          if(!["diagnostic_ready","diagnostic_pong"].includes(body.kind))throw new Error("DIAGNOSTIC_ONLY");
+          if(body.playerId!==null)throw new Error("DIAGNOSTIC_IDENTITY_VIOLATION");
+          if(body.kind==="diagnostic_ready")clearTimeout(deadline);
+        } else if (body.kind === "admitted") { playerId = body.payload.player.playerId; clearTimeout(deadline); }
         onMessage(body, { send, socket, get playerId() { return playerId; } });
       }
     } catch (error) {

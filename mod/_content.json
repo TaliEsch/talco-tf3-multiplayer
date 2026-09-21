@@ -5,6 +5,7 @@
     "tf3mp_depot_preview.script.lua",
     "tf3mp_depot_tools.res.lua",
     "tf3mp_depot_tools.script.lua",
+    "tf3mp_load_probe.script.lua",
     "tf3mp_native_controls.res.lua",
     "tf3mp_native_controls.script.tl",
     "tf3mp_proposal_facts.lua",
@@ -25,6 +26,7 @@
     "tf3mp_status_panel.res.lua",
     "tf3mp_status_panel.script.tl",
     "tf3mp_status_panel.css.lua",
+    "tf3mp_startup_load.script.lua",
     "tf3mp_vehicle_command.lua",
     "tf3mp_vehicle_test.res.lua",
     "tf3mp_vehicle_test.script.tl"
