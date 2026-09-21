@@ -2,6 +2,39 @@
 
 ## Current status — 20 September 2026
 
+### 21 September: post-apply placed-stop readback implemented
+
+The incomplete preview is no longer the only investigated source. The passive
+apply observer copies only bounded result IDs, owner and observed name/one-way
+options. A protected regular GUI callback submits one read-only engine event;
+the event checks paused state, actual returned entities, exact owned stop identity,
+its live road membership and side, then copies public EdgeObject resource,
+relative parameter, transform and tagged parameters. It never submits construction,
+scans for substitute world objects, modifies money, or retains native userdata.
+
+The module is source-pinned. Requests, native reads and parameter serialization
+are bounded; failures expose only a fixed stage label. Duplicate send protection,
+correlated replies, a bounded polling count, helper nonce and company checks prevent
+stale readback being presented as current. Parameters use typed keys/values so
+empty tables and numeric/string keys are not silently flattened.
+
+Root reviewed both delegated modules, corrected native userdata handling, native
+double-quoted envelope support, JSON numeric/parser bounds, field agreement,
+resource checks and subscription ordering. Actual Lua mock output is tested
+through the JavaScript parser. This does not qualify access in the live engine.
+
+Check capture diagnostics can report `PLACED_STOP_READBACK_ONLY_NOT_REPLAY_READY`.
+The new file cannot satisfy the old replay-case parser. No successful replay or
+second-company service is claimed. Public-constructor qualification and mapping
+the resulting road back to the pre-action checkpoint remain outstanding; do not
+substitute current post-build entity IDs into a reloaded save.
+
+Final verification: 727/727 checks passed, review validation and diff checks
+passed. Staged 21 September at 07:04 UTC with TF3 closed; source/copy manifest
+`6a8b13a24361ff3885f82815dac8beafc1b96774cb628c78c62348dc45916a5a`.
+Backup `tf3mp_backup_52ecbdff20a84367a90c5efc85ee3b5f` preserves the prior mod.
+Launcher source unchanged; no automatic game launch or live placement performed.
+
 ### 21:09 preview result: lane repair observed, model source unresolved
 
 Root read the fresh create diagnostic and native stdout after the user's completed

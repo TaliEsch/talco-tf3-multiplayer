@@ -15,7 +15,7 @@ import { createLocalIntegrationBatch } from "./local-integration-batch.mjs";
 import { createBatchReportWriter } from "./batch-report.mjs";
 import { createLocalCoordinatorRun } from "./local-coordinator-run.mjs";
 import {createPhase2SetupSession} from './phase2-setup-session.mjs';
-import {beginRoadStopReplayRecording,finishRoadStopReplayRecording,loadRoadStopReplayRecordingCase,previewRoadStopReplayCaptureDiagnostics} from './road-stop-replay-session.mjs';
+import {beginRoadStopReplayRecording,finishRoadStopReplayRecording,loadRoadStopReplayRecordingCase,previewRoadStopReplayCaptureDiagnostics,readRoadStopReadbackDiagnostic} from './road-stop-replay-session.mjs';
 import {checkRoadStopReplayIdentity} from './road-stop-replay-case.mjs';
 
 function options(args) {
@@ -50,7 +50,9 @@ async function handleRoadReplayLine(line){
   if(operation==='road-replay-diagnostics'){
     if(parts.length!==1)throw new Error('INVALID_REPLAY_COMMAND');
     if(roadReplayWorkflow?.phase==='consumed')throw new Error('REPLAY_OWNS_HELPER_STOP_TO_EXIT');
-    const preview=await previewRoadStopReplayCaptureDiagnostics({bridgeDirectory:opt['bridge-dir'],freshAfter:helperStartedAt});
+    const observation=bridge?.engineObservation;
+    const placed=observation?.available ? await readRoadStopReadbackDiagnostic({bridgeDirectory:opt['bridge-dir'],freshAfter:helperStartedAt,companyEntity:observation.sample.companyEntity}) : null;
+    const preview=placed??await previewRoadStopReplayCaptureDiagnostics({bridgeDirectory:opt['bridge-dir'],freshAfter:helperStartedAt});
     if(stopping||roadReplayWorkflow?.phase==='consumed')throw new Error('REPLAY_OWNS_HELPER_STOP_TO_EXIT');
     replayLog(preview.status,preview.issues?{issues:preview.issues}:{});
     return;

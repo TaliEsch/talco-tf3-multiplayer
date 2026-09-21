@@ -154,7 +154,75 @@ local function exchangeRoadCapture() : nil
   end
   return nil
 end
+local stopReadbackSent : table = {}
+local stopReadbackFinished = false
+local stopReadbackSteps : integer = 0
+local stopReadbackPolls : integer = 0
+local function exchangeStopReadback() : nil
+  if stopReadbackFinished or #bridgeNonce ~= 32 or missedAcks > 10 or lastAck < 0 then return nil end
+  stopReadbackSteps = stopReadbackSteps + 1
+  if stopReadbackSteps % 60 ~= 0 then return nil end
+  if stopReadbackSent.observationId == nil then
+    local response = api.gui.fireGuiScriptEvent("tf3mp_engine_bridge", "tf3mp_get_status", {}) as table
+    if type(response) ~= "table" or type(response.roadStopReadbackCandidate) ~= "table" then return nil end
+    local candidate = response.roadStopReadbackCandidate as table
+    if type(candidate.observationId) ~= "number" or candidate.observationId < 1 or candidate.observationId > 16 or candidate.observationId % 1 ~= 0
+      or type(candidate.companyEntity) ~= "number" or candidate.companyEntity < 1 or candidate.companyEntity > 2147483647 or candidate.companyEntity % 1 ~= 0
+      or type(candidate.oneWay) ~= "boolean" or type(candidate.name) ~= "string" or #candidate.name > 1024
+      or type(candidate.resultEntities) ~= "table" or #candidate.resultEntities < 1 or #candidate.resultEntities > 64 then
+      stopReadbackFinished = true
+      log.message("{\"event\":\"native_stop_readback\",\"code\":\"INVALID_APPLY_RESULT\",\"gameplayVerified\":false}")
+      return nil
+    end
+    local ids : table = {}
+    local seen : table = {}
+    local count : integer = 0
+    for key, entity in pairs(candidate.resultEntities) do
+      count = count + 1
+      if type(key) ~= "number" or key % 1 ~= 0 or key < 1 or key > #candidate.resultEntities
+        or type(entity) ~= "number" or entity % 1 ~= 0 or entity < 1 or entity > 2147483647 or seen[entity] then error("READBACK_INVALID_IDS") end
+      seen[entity] = true; ids[key] = entity
+    end
+    if count ~= #candidate.resultEntities then error("READBACK_INVALID_IDS") end
+    stopReadbackSent = { schemaVersion = 1, nonce = bridgeNonce, observationId = candidate.observationId, companyEntity = candidate.companyEntity, resultEntities = ids, oneWay = candidate.oneWay, name = candidate.name }
+    api.cmd.sendCommand(api.cmd.makeScriptingSendEventCmd("tf3mp_status_1::/tf3mp_status.gs", "tf3mp_engine_bridge", "tf3mp_stop_readback", stopReadbackSent))
+    return nil
+  end
+  if stopReadbackSent.nonce ~= bridgeNonce then stopReadbackFinished = true; return nil end
+  stopReadbackPolls = stopReadbackPolls + 1
+  if stopReadbackPolls > 30 then
+    stopReadbackFinished = true
+    log.message("{\"event\":\"native_stop_readback\",\"code\":\"READBACK_TIMEOUT\",\"gameplayVerified\":false}")
+    return nil
+  end
+  local response = api.gui.fireGuiScriptEvent("tf3mp_engine_bridge", "tf3mp_get_stop_readback", {})
+  if type(response) ~= "table" then return nil end
+  local receipt = response as table
+  if receipt.nonce ~= stopReadbackSent.nonce or receipt.observationId ~= stopReadbackSent.observationId then return nil end
+  stopReadbackFinished = true
+  if receipt.code ~= "readback" or type(receipt.json) ~= "string" or #receipt.json < 1 or #receipt.json > 65536 then
+    local field = "receipt"
+    if type(receipt.field) == "string" and #receipt.field <= 32 and receipt.field:match("^[A-Za-z]+$") then field = receipt.field end
+    log.message("{\"event\":\"native_stop_readback\",\"code\":\"READBACK_UNAVAILABLE\",\"field\":\"" .. field .. "\",\"gameplayVerified\":false}")
+    return nil
+  end
+  local hex = roadCapture.toHex(receipt.json)
+  if type(hex) ~= "string" or #hex > 131072 then error("READBACK_INVALID_ENCODING") end
+  app.saveUserdata("tf3mp_status_1", "road_stop_readback", {
+    schemaVersion = 1, kind = "road_stop_readback", nonce = stopReadbackSent.nonce,
+    observationId = stopReadbackSent.observationId, snapshotHex = hex,
+  })
+  log.message("{\"event\":\"native_stop_readback\",\"code\":\"COPIED_PLACED_OBJECT_ONLY\",\"gameplayVerified\":false}")
+  return nil
+end
 local function flushRoadCapture() : nil
+  if not stopReadbackFinished then
+    local readbackOk = pcall(exchangeStopReadback)
+    if not readbackOk then
+      stopReadbackFinished = true
+      pcall(function() log.message("{\"event\":\"native_stop_readback\",\"code\":\"READBACK_FAILED\",\"gameplayVerified\":false}") end)
+    end
+  end
   if captureDisabled then return nil end
   local ok = pcall(exchangeRoadCapture)
   if not ok then

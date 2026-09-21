@@ -19,6 +19,7 @@
     "tf3mp_service_observation.lua",
     "tf3mp_station_command.lua",
     "tf3mp_station_probe.lua",
+    "tf3mp_stop_readback.lua",
     "tf3mp_status.gs.lua",
     "tf3mp_status.script.tl",
     "tf3mp_status_panel.res.lua",

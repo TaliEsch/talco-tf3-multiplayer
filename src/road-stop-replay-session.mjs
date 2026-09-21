@@ -5,6 +5,8 @@ import path from 'node:path';
 import {canonicalJson} from './canonical.mjs';
 import {ROAD_STOP_ENVELOPE_MAX_BYTES} from './road-stop-capture-envelope.mjs';
 import {createRoadStopReplayCase,parseRoadStopReplayCase,ROAD_STOP_REPLAY_CASE_MAX_BYTES} from './road-stop-replay-case.mjs';
+import {parseRoadStopReadbackEnvelope} from './road-stop-readback.mjs';
+import {parseFlatDataFile} from './userdata-ipc.mjs';
 
 // This module persists offline evidence only.  It deliberately does not write
 // replay requests, run commands, or make any claim about a loaded game state.
@@ -135,6 +137,21 @@ async function readDiagnostic(bridge,stage){
   let diagnostic;try{diagnostic=parseRoadCaptureDiagnostic(source.text);}catch{diagnosticFail();}
   if(diagnostic.stage!==stage)diagnosticFail();
   return {...diagnostic,digest:digest(source.bytes),mtimeMs:source.mtimeMs};
+}
+// Read-only evidence from an already placed object. Never a replay case and never
+// an alternate path through finishRoadStopReplayRecording's strict capture gate.
+export async function readRoadStopReadbackDiagnostic({bridgeDirectory,freshAfter,companyEntity}={}){
+  try{
+    if(!Number.isSafeInteger(freshAfter)||freshAfter<0||!positiveEntity(companyEntity))fail();
+    const directory=await safeDirectory(bridgeDirectory,false);
+    const source=await optionalBoundedRegularFile(path.join(directory,'road_stop_readback.lua'),140*1024,true);
+    if(!source||source.mtimeMs<=freshAfter)return null;
+    const bridgeFile=await boundedRegularFile(path.join(directory,'bridge.lua'),4096,true);
+    const session=parseFlatDataFile(bridgeFile.text);
+    const parsed=parseRoadStopReadbackEnvelope(source.text);
+    if(session.schemaVersion!==1||parsed.snapshot.nonce!==session.nonce||parsed.snapshot.companyEntity!==companyEntity)return null;
+    return {status:'PLACED_STOP_READBACK_ONLY_NOT_REPLAY_READY',companyEntity,updateCount:parsed.snapshot.updateCount};
+  }catch{return {status:'PLACED_STOP_READBACK_INVALID'};}
 }
 export async function previewRoadStopReplayCaptureDiagnostics({bridgeDirectory,freshAfter}={}){
   try{

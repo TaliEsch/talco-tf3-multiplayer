@@ -28,6 +28,7 @@ const EXPECTED_CONTENT = Object.freeze([
   "tf3mp_status_panel.css.lua",
   "tf3mp_status_panel.res.lua",
   "tf3mp_status_panel.script.tl",
+  "tf3mp_stop_readback.lua",
   "tf3mp_vehicle_command.lua",
   "tf3mp_vehicle_test.res.lua",
   "tf3mp_vehicle_test.script.tl",
@@ -63,6 +64,11 @@ export async function validateReviewPackage(root) {
   const forbidden = files.filter((file) => FORBIDDEN_EXTENSIONS.has(path.extname(file).toLowerCase()));
   if (forbidden.length) throw new Error(`forbidden bundled file: ${forbidden[0]}`);
   const gameScript = await readFile(path.join(absoluteRoot, "content", "tf3mp_status.script.tl"), "utf8");
+  const stopReadbackSource=await readFile(path.join(absoluteRoot,'content','tf3mp_stop_readback.lua'),'utf8');
+  if(createHash('sha256').update(stopReadbackSource.replace(/\r\n/g,'\n')).digest('hex')!=='a09fa37ec58c9a7f3917217f96c45bae7cf34e3b315dc48a7f6d6f26e92ac80f')
+    throw new Error('stop readback differs from reviewed read-only source');
+  for(const event of ['tf3mp_stop_readback','tf3mp_get_stop_readback'])
+    if(!gameScript.includes(`state:subscribeToEvent("${event}")`))throw new Error('missing stop readback subscription');
   const serviceObservationSource=await readFile(path.join(absoluteRoot,'content','tf3mp_service_observation.lua'),'utf8');
   if(createHash('sha256').update(serviceObservationSource.replace(/\r\n/g,'\n')).digest('hex')!=='5c16102a5fc3f943d1bcbbe0a914b2852560f669ca2a59c8c2545f0f7a5c270f')
     throw new Error('service observation differs from reviewed read-only source');

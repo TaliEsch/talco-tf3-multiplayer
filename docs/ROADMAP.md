@@ -15,6 +15,17 @@ modelInstance nor the alternative model/edgeEntity/param fields; oneWay and name
 are present but insufficient. Next work must identify a supported data source or
 record the native boundary as blocked, not extend a field-guessing test loop.
 
+The next implementation batch adds read-only **post-apply** inspection of the
+actual returned stop entity via public EDGE_OBJECT, PLAYER_OWNED, BASE_EDGE and
+StreetSystem reads. It captures the construction resource, relative position,
+transform, typed parameters and observed side/options. This follows the agreed
+record/reload experiment, not a pre-spend multiplayer interception requirement.
+The diagnostic artifact is deliberately not accepted by the existing replay
+case loader. Mapping post-build edges to the untouched checkpoint and qualifying
+the public SimpleProposal construction path remain required before replay.
+Use [the placed-stop check](road-stop-readback-test.md) once staged; do not repeat
+preview-field probing or click the old Capture placed stop for this new path.
+
 Next local proof (user clarification): record one normal action, reload its
 exact pre-action disposable checkpoint, then explicitly replay it once and
 compare ownership, resulting construction and actual charge. This avoids double

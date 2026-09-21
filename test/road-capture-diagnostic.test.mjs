@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {mkdir,mkdtemp,writeFile,utimes} from 'node:fs/promises';
 import path from 'node:path';
 import {tmpdir} from 'node:os';
-import {parseRoadCaptureDiagnostic,previewRoadStopReplayCaptureDiagnostics,beginRoadStopReplayRecording,finishRoadStopReplayRecording} from '../src/road-stop-replay-session.mjs';
+import {parseRoadCaptureDiagnostic,previewRoadStopReplayCaptureDiagnostics,beginRoadStopReplayRecording,finishRoadStopReplayRecording,readRoadStopReadbackDiagnostic} from '../src/road-stop-replay-session.mjs';
 import {roadStopCaptureFixture} from './fixtures/road-stop-capture.mjs';
 
 const source=(stage='create',issues='RoadShapeMismatch')=>`function data() return {schemaVersion=1,kind="road_capture_diagnostic",stage="${stage}",sequence=1,issues="${issues}",} end`;
@@ -30,6 +30,26 @@ test('read-only capture preview only reports a fresh create mismatch and never r
 });
 
 const identity={saveSha256:'a'.repeat(64),gameSha256:'b'.repeat(64),modManifestSha256:'c'.repeat(64)};
+test('placed-object readback is fresh session/company-bound evidence, never a replay case',async()=>{
+  const bridge=await mkdtemp(path.join(tmpdir(),'tf3mp-stop-readback-'));
+  const nonce='a'.repeat(32),started=Date.now();
+  const options={bridgeDirectory:bridge,freshAfter:started,companyEntity:10};
+  assert.equal(await readRoadStopReadbackDiagnostic(options),null);
+  const snapshot={schemaVersion:1,kind:'road_stop_readback',nonce,observationId:2,companyEntity:10,updateCount:55,tickCount:60,stopEntity:25,edgeEntity:26,param:0.5,oneWay:false,name:'Test stop',left:true,transform:[1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1],constructionResource:'stop/basic.con',params:{kind:'table',entries:[]}};
+  const envelope=`function data() return {schemaVersion=1,kind="road_stop_readback",nonce="${nonce}",observationId=2,snapshotHex="${Buffer.from(JSON.stringify(snapshot)).toString('hex')}",} end`;
+  const file=path.join(bridge,'road_stop_readback.lua');
+  await writeFile(file,envelope);
+  await writeFile(path.join(bridge,'bridge.lua'),`function data() return {schemaVersion=1,nonce="${nonce}",mode="telemetry",} end`);
+  await utimes(file,new Date(started+1000),new Date(started+1000));
+  assert.deepEqual(await readRoadStopReadbackDiagnostic(options),{status:'PLACED_STOP_READBACK_ONLY_NOT_REPLAY_READY',companyEntity:10,updateCount:55});
+  assert.equal(await readRoadStopReadbackDiagnostic({...options,companyEntity:11}),null);
+  await writeFile(path.join(bridge,'bridge.lua'),`function data() return {schemaVersion=1,nonce="${'b'.repeat(32)}",mode="telemetry",} end`);
+  assert.equal(await readRoadStopReadbackDiagnostic(options),null);
+  await utimes(file,new Date(started-1000),new Date(started-1000));
+  assert.equal(await readRoadStopReadbackDiagnostic(options),null);
+  await writeFile(file,'invalid');await utimes(file,new Date(started+1000),new Date(started+1000));
+  assert.deepEqual(await readRoadStopReadbackDiagnostic(options),{status:'PLACED_STOP_READBACK_INVALID'});
+});
 const capture=()=>`function data() return {schemaVersion=2,observerRevision=7,kind="native_road_stop_capture",stage="apply",sequence=2,captureHex="${Buffer.from(JSON.stringify(roadStopCaptureFixture())).toString('hex')}",modelNameHex="${Buffer.from('models/station/road_stop.mdl').toString('hex')}",} end`;
 
 test('stale apply diagnostic does not block a fresh valid capture, while missing capture is explicit',async()=>{
