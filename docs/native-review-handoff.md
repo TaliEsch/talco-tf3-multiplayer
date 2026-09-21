@@ -274,9 +274,13 @@ status is a clean `main` matching `origin/main` after all three local commits.
 Authoritative pre-push status: the worktree is clean and `main` is three commits
 ahead of `origin/main` (`0` behind, `3` ahead). The first push attempt was denied
 by the execution approval layer because it updates the shared default branch; it
-did not change the remote. An explicit user approval and a successful push/status
-recheck are still required. Generated `dist/native` output remains ignored. No
-tag or release is created.
+did not change the remote. The user then explicitly authorized the push. The
+three commits through handoff commit `45ab324` were pushed successfully, after
+which local `main` and `origin/main` were `0` behind/`0` ahead. A final
+authenticated query confirmed the default branch is `main` and the repository is
+still `PRIVATE`/`isPrivate:true`. This post-push status correction is delivered as
+the next documentation-only commit. Generated `dist/native` output remains
+ignored. No tag or release is created.
 
 ## 12. Independent reviewer focus
 
