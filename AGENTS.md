@@ -1,9 +1,16 @@
 # Agent specific instructions
 
-- Use gpt-5.6-terra subagents with medium reasoning for independent additional
-  code work. The primary agent owns integration, reviews their changes and runs
-  final verification itself. Give agents bounded, non-overlapping file ownership;
-  do not treat their summaries or passing tests as a substitute for code review.
+- Delegation policy for the 21 September native-integration mission: use
+  gpt-5.6-terra/low for specified IPC, launcher, tooling, adapters and mechanical
+  fixes; gpt-5.6-terra/medium for synchronization, concurrency, ownership,
+  recovery and bounded native-boundary work; gpt-5.6-luna/low for mapping,
+  inventories, documentation and mechanical changes; and gpt-6-astra/high only
+  for difficult ABI/hook qualification, determinism questions or critical
+  independent review. Escalate when evidence exceeds the assigned scope rather
+  than repeating a failed cheaper approach. The primary agent owns architecture,
+  integration, review and final verification. Give agents bounded,
+  non-overlapping file ownership; do not treat their summaries or passing tests
+  as a substitute for code review.
 
 ## Working approach
 
@@ -40,10 +47,18 @@
   delta as authority. Custom remote pricing UI is not required. Native funds
   enforcement must be qualified; stale-client and concurrent requests still need
   host-side validation. Mismatch stops play, not automatic balance repair.
-- Do not launch or reload TF3 automatically. Do not patch game files, inject
-  native code, silently fund companies or publish a release without authorization.
-- Prefer script/public APIs. Record exact unsupported requirements rather than
-  bypassing them. GUI restrictions are not a global command firewall.
+- Do not patch installed game files, silently fund companies, or publish a
+  release. For this 21 September mission only, the user authorized deliberate,
+  bounded assistant-launched TF3 investigation or automated testing when useful;
+  record every launch and use disposable data without overwriting saves. The
+  same authorization established a
+  native-integration route toward multiplayer, superseding the script-first
+  preference. Develop original native code with exact-build gates; never reuse
+  TF2 offsets or deploy unqualified hooks. Start with isolated native harnesses,
+  then explicit controlled game tests. No stealth, persistence or protection bypass.
+- Retain useful public APIs, networking and launcher code, but prioritize real
+  two-game baseline determinism, simulation-thread control and command admission
+  over further script workarounds. GUI restrictions are not a command firewall.
 - Never treat file publication or a resolved promise as completed engine work.
   Require correlated receipts and observed postconditions. Keep receiving control
   traffic while paused; distinguish protocol halt from confirmed engine halt.

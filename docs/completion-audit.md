@@ -1,6 +1,50 @@
 # Completion audit against the build prompt
 
-## Current status — 20 September 2026
+## Current status — 21 September 2026
+
+### Native route: standalone foothold and static engine mapping
+
+The native priority and limits are recorded in `native-integration.md`. The
+original observation-only DLL and standalone host built successfully with MSVC;
+the host rejects malformed/null ABI requests and reports an unsupported caller,
+with zero gameplay capabilities. Its executable digest matched independent
+PowerShell SHA-256. This is not an in-game load or synchronization test.
+
+The read-only PE locator found 12 references in the installed, exact-hash TF3
+image. Root disassembly inspection distinguished assertion-only simulation-label
+fragments from a surrounding candidate routine and located a command-application
+candidate. No hook is qualified or installed. No game launch, game-file write,
+or multiplayer readiness claim follows from this static evidence. See the native
+document for precise RVAs, limitations and next investigation.
+
+Root verification: full `npm run check` completed with 741/741 passing; the first
+attempt terminated without a summary and was not counted. The four static-PE
+tests cover known references, wrong targets, malformed images, unordered ranges
+and overlap rejection. `Build-NativeProbe.ps1 -RunSmokeTest` passed independently.
+Neither verification exercises live engine hooks or two TF3 simulations.
+
+### 21 September: correct native matrix column access
+
+The 08:08:57 UTC run on manifest `cdfee99e54ed725a06766e2d82c6422ff7605a8106c0bcbab54f3ef9190518f1`
+reached `transform`. This establishes that request, world clock, paused state,
+candidate ownership, relative parameter and road membership checks passed in
+that run. It did not export a complete snapshot or execute replay.
+
+The installed `api/tealdef/api/type.d.tl:770-773` comment says column index 1–4.
+However, stock `gui.zip!gui/debug_panel/make_entity_debug_panel.tl:697-706` reads
+all columns with `m:cols(k - 1)` for k=1..4, and
+`gui/line_vehicle_mgmt/manager_window.tl:624` uses `transf:cols(3)` for position.
+The readback now follows those concrete callers: instance `:cols(0..3)`, copied
+into the same 16-number column-major output. Missing/nonfinite cells still fail;
+there is no identity-matrix fallback. The previous mocks mirrored the misleading
+comment; distinct-cell regression data now detects missing/shifted columns.
+
+Remaining source audit: EdgeObject.transf is declared Mat4f, construction resource
+is ResName (string), and params is table (`engine.d.tl:132-145`, `type.d.tl:15`).
+Stock `gui/entity_window/view_manager_util.tl:139` passes the resource directly
+to constructionRep.find. Resource/parameter live reads are still unverified.
+Legacy full-proposal capture also uses 1-based columns; it remains disabled for
+this readback workflow and needs the same qualification before any reuse.
 
 ### 21 September: use the native world handle unchanged
 

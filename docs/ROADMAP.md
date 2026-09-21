@@ -1,19 +1,26 @@
 # TalCo TF3 multiplayer — current delivery plan
 
+## Current priority — native integration, 21 September
+
+The user has authorized a native-first feasibility track, superseding the older
+script-first preference below. The active goal is a usable up-to-four-player,
+separate-company setup, not completion of isolated Phase 2 script diagnostics.
+See [native integration](native-integration.md) for the reference audit, actual
+native artifacts, missing engine hooks and ordered acceptance gates. Prioritize
+two real simulations staying aligned before expanding construction features.
+No further stop-placement test is requested for the pending matrix repair.
+
 Revised 20 September 2026 following the user's scope and economy clarification.
 This is the current plan. Historical status is in completion-audit.md and
 archive/roadmap-before-scope-review.md; historical blockers do not override this plan.
 
-21 September update: the repaired apply reader reached the read-only engine
-handler in the 07:43 run, then failed at `clock`; the 07:55 run narrowed the failure
-to `clockWorld`. Full readback is still unverified. The current repair forwards
-the API-returned integer world handle unchanged (not as a positive asset ID),
-and uses protected native calls without Lua function-type assumptions.
-The clock/component readers now use named API constants like the working bridge,
-without requiring native namespaces to be Lua tables. Paused-state and numeric
-checks remain mandatory; clock failures have precise stages. Negative proposal
-IDs are not live entities. Do not advance to replay or Phase 2 acceptance on the
-strength of the offline checks.
+21 September update: the 08:08 run passed clock, pause, ownership and road-membership
+checks, then failed at transform copying. The current repair follows stock TF3
+matrix callers (`matrix:cols(0..3)`), correcting the misleading declaration comment
+used by the first reader. Complete readback remains unverified; resource/params
+reads follow the matrix. Legacy full-proposal capture also needs its matrix
+access corrected before reuse; it is not this workflow's replay input. Do not
+advance to replay or Phase 2 acceptance on the strength of offline checks.
 
 Current pre-replay status: the 21:09 preview/cancel check is complete. Do not
 repeat it or request a placed stop to investigate the same missing fields.
@@ -172,8 +179,10 @@ One host orders and validates every player's requests, including its own.
 Automatic authenticated save download; LAN or host-side port forwarding.
 No shared-company feature, VPN requirement, relay infrastructure or host migration.
 
-Supported script/public APIs first. No automatic game launch, game-file patching,
-silent funding, save overwrite or public release. Native process attachment is
+Historical script-track rule: supported script/public APIs first and no automatic
+game launch. The current mission permits only deliberate, bounded assistant-launched
+TF3 investigation under `AGENTS.md`; game-file patching, silent funding, save
+overwrite and public release remain prohibited. Native process attachment is
 not part of the current implementation and is never implied by installing the
 mod; it is a separately authorized, opt-in compatibility phase described below.
 Unknown execution must remain unknown: no automatic retry or compensation of
@@ -185,7 +194,9 @@ Update, 20 September: the user approved considering an opt-in native companion
 for unsupported action capture. Bring forward the **feasibility investigation**
 from Phase 8 alongside Phase 2; this does not make native mode implemented or
 qualified. See native-compatibility-prototype.md for scope, failure boundaries and
-the staged validation plan. No automatic game launch or process attachment.
+the staged validation plan. The historical no-launch rule is superseded only by
+the bounded 21 September permission above; process attachment still requires its
+own qualified, fail-closed path.
 
 The shipping foundation is a host-authoritative, typed-action pipeline: capture
 or originate a supported intent, bind it to the authenticated player's company,

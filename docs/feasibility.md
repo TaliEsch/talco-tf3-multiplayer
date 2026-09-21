@@ -1,5 +1,14 @@
 # Feasibility decision
 
+## Revision — 21 September 2026
+
+The user has authorized a native engineering track; the earlier script-first
+restriction is superseded. See [native-integration.md](native-integration.md)
+for current artifacts and qualification gates. This authorization is not vendor
+endorsement or a licence interpretation. Historical findings below are retained
+as dated evidence, not a current prohibition on original native development.
+Native command/simulation hooks and cross-machine determinism remain unverified.
+
 Assessment date: 2026-09-13. Installation inspected read-only at
 `E:\Steam\steamapps\common\Transport Fever 3`.
 
