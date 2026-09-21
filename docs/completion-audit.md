@@ -23,8 +23,9 @@ remain failures. No clock values are invented and no execution/replay is enabled
 Root verification: 732/732 checks passed, including actual Lua userdata namespace
 regressions; source review and diff checks passed. Reviewed source manifest:
 `193f495f956db43a75223b4afbf6089a3ab01fbbba1571abb87513ce3f348e66`.
-Not staged yet: TF3 was still running at verification. Live confirmation remains
-required after safe staging; no game launch or live retry was performed.
+Staged at 07:52 UTC after the user closed TF3; all source/copy checks passed.
+Prior mod preserved in `tf3mp_backup_3026d79ce7df4197af71127f2cc5ccfc`.
+Live confirmation remains required; no game launch or live retry was performed.
 
 ### 21 September: apply-reader compatibility repair (live result pending)
 
