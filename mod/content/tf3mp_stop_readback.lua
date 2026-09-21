@@ -217,28 +217,50 @@ local function collect(api, request, stage)
   return {code="readback", json=json}
 end
 
-local function copyApply(proposal, results, observationId)
+local function copyApply(proposal, results, observationId, stage)
+  stage("applyShape")
   if not entity(observationId) or observationId > 16 or not native(proposal) then fail() end
   local street = proposal.proposal
   local objects = street and street.edgeObjectsToAdd
-  if not dense(objects, 1) or #objects ~= 1 then fail() end
+  stage("applyObjects")
+  if type(objects) ~= "table" or objects[1] == nil or objects[2] ~= nil then fail() end
   local edgeObject = objects[1]
+  stage("applyOptions")
   if not native(edgeObject) or edgeObject.category ~= 0 or not entity(edgeObject.playerEntity)
     or type(edgeObject.oneWay) ~= "boolean" or type(edgeObject.name) ~= "string" or #edgeObject.name > 1024 then fail() end
-  if not dense(results, 64) or #results < 1 then fail() end
-  local out, seen = {}, {}
-  for index, id in ipairs(results) do
-    if not entity(id) or seen[id] then fail() end
-    seen[id], out[index] = true, id
+  stage("applyResults")
+  if type(results) ~= "table" then fail() end
+  local out, seen, ended = {}, {}, false
+  -- Use the stock mission's indexed access rather than a native table's length
+  -- or metatable. Never retain the table, and cap access even for a proxy.
+  for index = 1, 65 do
+    local id = results[index]
+    if id == nil then
+      ended = true
+    else
+      if ended or index > 64 or not entity(id) or seen[id] then fail() end
+      seen[id], out[index] = true, id
+    end
+  end
+  if #out == 0 then
+    -- The native roadside-stop apply can return an empty result vector. The
+    -- public Proposal.EdgeObject declares its own resulting entity (type.d.tl).
+    -- Copy that exact positive ID, never a guessed replacement or a world scan.
+    -- collect() still requires the actual owned stop and its road membership.
+    stage("applyStopEntity")
+    local id = edgeObject.resultEntity
+    if not entity(id) then fail() end
+    out[1] = id
   end
   return {observationId=observationId, companyEntity=edgeObject.playerEntity, resultEntities=out,
     oneWay=edgeObject.oneWay, name=edgeObject.name}
 end
 
 function M.copyApply(proposal, results, observationId)
-  local ok, value = pcall(copyApply, proposal, results, observationId)
+  local field = "applyShape"
+  local ok, value = pcall(copyApply, proposal, results, observationId, function(name) field = name end)
   if ok then return value end
-  return {}
+  return {code="unavailable", field=field}
 end
 
 function M.collect(api, request)

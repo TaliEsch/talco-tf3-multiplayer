@@ -2,6 +2,39 @@
 
 ## Current status — 20 September 2026
 
+### 21 September: apply-reader compatibility repair (live result pending)
+
+The 07:15 UTC native apply on manifest `6a8b13a24361ff3885f82815dac8beafc1b96774cb628c78c62348dc45916a5a`
+reported a table with Lua length zero, then `INVALID_APPLY_RESULT`. No readback
+artifact was produced. This does not establish whether the table was empty or
+used native indexed access with different length behavior. Hosting recovered
+after an orphaned lock was moved aside; that is separate from this reader failure.
+
+The reader now copies at most 64 explicitly indexed result IDs, with a 65th-slot
+bound check and rejection of gaps/duplicates. It no longer relies on native
+result-table length or metatable inspection. If there are no indexed results,
+it can use the single stop's documented `Proposal.EdgeObject.resultEntity`, but
+only when strictly positive. Negative proposal placeholders are rejected, never
+used as live IDs. Engine checks still require the exact owned stop and road
+membership. Unknown maps are not interpreted as entity mappings.
+
+Source evidence: installed `api/tealdef/api/type.d.tl:2492-2504,2801-2806`
+and `mission.zip!mission/mission_sim.script.tl:248-262` declare the resulting
+entity and positional apply/result-list contract. None proves a positive stop ID
+is populated in this live event; that remains the native qualification boundary.
+Failures now identify the exact fixed copy stage instead of collapsing all
+failures into `INVALID_APPLY_RESULT`. No raw exception or native object is logged.
+
+Regression coverage includes zero-length indexed proxies, genuine empty results,
+positive/negative/missing fallback IDs, gaps, duplicates, bounds and copied-ID
+isolation. This is a reader repair, not replay or Phase 2 completion.
+
+Root verification: 730/730 checks passed; source review and diff checks passed.
+Staged at 07:36 UTC with TF3 closed, manifest
+`51df5fe7a104eb5c942687880609eda7213e8cdf5134f6622e4822bf98b17c12`.
+Previous mod preserved in `tf3mp_backup_0849c4e8c1574eefa4d983d62c6bd991`.
+No game was launched and no placement or live readback was performed by the agent.
+
 ### 21 September: post-apply placed-stop readback implemented
 
 The incomplete preview is no longer the only investigated source. The passive

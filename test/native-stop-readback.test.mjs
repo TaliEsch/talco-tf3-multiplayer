@@ -54,10 +54,34 @@ test('does not discover replacements outside the supplied result entities',()=>{
   assert.equal(code,'unavailable'); assert.equal(reads,4); // clock plus only entity 51 component reads
 });
 test('copyApply copies only bounded native-event scalars without aliases',()=>{
-  const script=`local m=(function()${source}end)();local p={proposal={edgeObjectsToAdd={{category=0,playerEntity=10,oneWay=true,name='Native name'}}}};local ids={50,51};local r=m.copyApply(p,ids,3);p.proposal.edgeObjectsToAdd[1].playerEntity=9;ids[1]=99;return r.observationId,r.companyEntity,r.resultEntities[1],r.resultEntities[2],r.oneWay and r.name=='Native name' and next(m.copyApply(p,{50,50},3))==nil`;
+  const script=`local m=(function()${source}end)();local p={proposal={edgeObjectsToAdd={{category=0,playerEntity=10,oneWay=true,name='Native name'}}}};local ids={50,51};local r=m.copyApply(p,ids,3);p.proposal.edgeObjectsToAdd[1].playerEntity=9;ids[1]=99;return r.observationId,r.companyEntity,r.resultEntities[1],r.resultEntities[2],r.oneWay and r.name=='Native name' and m.copyApply(p,{50,50},3).field=='applyResults'`;
   const L=lauxlib.luaL_newstate();lualib.luaL_openlibs(L);try{
     assert.equal(lauxlib.luaL_loadstring(L,to_luastring(script)),lua.LUA_OK,lua.lua_tojsstring(L,-1));
     assert.equal(lua.lua_pcall(L,0,5,0),lua.LUA_OK,lua.lua_tojsstring(L,-1));
     assert.deepEqual([lua.lua_tointeger(L,-5),lua.lua_tointeger(L,-4),lua.lua_tointeger(L,-3),lua.lua_tointeger(L,-2),lua.lua_toboolean(L,-1)],[3,10,50,51,true]);
   }finally{lua.lua_close(L);}
+});
+function copyApply(proposal, results){
+  const script=`local m=(function()${source}end)();local p=${proposal};local r=m.copyApply(p,${results},3);return (r.code or 'ok')..'|'..(r.field or '')..'|'..tostring(r.resultEntities and r.resultEntities[1] or 0)..'|'..tostring(r.companyEntity or 0)`;
+  const L=lauxlib.luaL_newstate();lualib.luaL_openlibs(L);try{
+    assert.equal(lauxlib.luaL_loadstring(L,to_luastring(script)),lua.LUA_OK,lua.lua_tojsstring(L,-1));
+    assert.equal(lua.lua_pcall(L,0,1,0),lua.LUA_OK,lua.lua_tojsstring(L,-1));
+    return lua.lua_tojsstring(L,-1);
+  }finally{lua.lua_close(L);}
+}
+const applyProposal=(resultEntity='50')=>`{proposal={edgeObjectsToAdd={{resultEntity=${resultEntity},category=0,playerEntity=10,oneWay=true,name='Native name'}}}}`;
+test('copyApply accepts an empty native apply result only through its declared positive stop entity',()=>{
+  assert.equal(copyApply(applyProposal(),'{}'),'ok||50|10');
+  assert.equal(copyApply(applyProposal('-4'),'{}'),'unavailable|applyStopEntity|0|0');
+  assert.equal(copyApply(applyProposal('nil'),'{}'),'unavailable|applyStopEntity|0|0');
+});
+test('copyApply reads an explicitly indexed result even when its Lua length is zero',()=>{
+  // Defensive proxy case; the live log alone does not prove proxy semantics.
+  assert.equal(copyApply(applyProposal('50'),"setmetatable({[1]=50},{__len=function() return 0 end})"),'ok||50|10');
+});
+test('copyApply rejects malformed apply-result maps and over-bound indexed results',()=>{
+  assert.equal(copyApply(applyProposal('nil'),'{stop=50}'),'unavailable|applyStopEntity|0|0');
+  const tooMany=`{${Array.from({length:65},(_,index)=>index+1).join(',')}}`;
+  assert.equal(copyApply(applyProposal(),tooMany),'unavailable|applyResults|0|0');
+  assert.equal(copyApply(applyProposal(),'{[1]=50,[3]=51}'),'unavailable|applyResults|0|0');
 });

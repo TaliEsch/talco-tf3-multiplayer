@@ -4,6 +4,12 @@ Revised 20 September 2026 following the user's scope and economy clarification.
 This is the current plan. Historical status is in completion-audit.md and
 archive/roadmap-before-scope-review.md; historical blockers do not override this plan.
 
+21 September update: the first live placed-stop readback failed at apply-result
+copying (native table length zero). A bounded indexed-reader repair and a strictly
+positive documented stop-result-ID fallback are implemented; native readback is
+still unverified. Negative proposal IDs are not live entities. Do not advance to
+replay or Phase 2 acceptance on the strength of the offline checks.
+
 Current pre-replay status: the 21:09 preview/cancel check is complete. Do not
 repeat it or request a placed stop to investigate the same missing fields.
 The 20:51 runtime report identified absent singular `laneConfig` on both road

@@ -166,6 +166,13 @@ local function exchangeStopReadback() : nil
     local response = api.gui.fireGuiScriptEvent("tf3mp_engine_bridge", "tf3mp_get_status", {}) as table
     if type(response) ~= "table" or type(response.roadStopReadbackCandidate) ~= "table" then return nil end
     local candidate = response.roadStopReadbackCandidate as table
+    if candidate.code == "unavailable" then
+      local field = "applyShape"
+      if candidate.field == "applyObjects" or candidate.field == "applyOptions" or candidate.field == "applyResults" or candidate.field == "applyStopEntity" then field = candidate.field as string end
+      stopReadbackFinished = true
+      log.message("{\"event\":\"native_stop_readback\",\"code\":\"APPLY_READBACK_UNAVAILABLE\",\"field\":\"" .. field .. "\",\"gameplayVerified\":false}")
+      return nil
+    end
     if type(candidate.observationId) ~= "number" or candidate.observationId < 1 or candidate.observationId > 16 or candidate.observationId % 1 ~= 0
       or type(candidate.companyEntity) ~= "number" or candidate.companyEntity < 1 or candidate.companyEntity > 2147483647 or candidate.companyEntity % 1 ~= 0
       or type(candidate.oneWay) ~= "boolean" or type(candidate.name) ~= "string" or #candidate.name > 1024
