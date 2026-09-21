@@ -5,7 +5,9 @@
 This section supersedes the older review-batch narrative below. The objective is
 full multiplayer readiness, and that objective is **not complete**. Commit
 `db22017` advances a real single-game vertical slice and fail-closed native
-tooling; it does not provide functioning multi-instance multiplayer.
+tooling; continuation commit `8333ae3` adds the production-gated live checkpoint
+producer, host-local authority path and bounded action-trace machinery. Neither
+commit provides functioning multi-instance multiplayer.
 
 ### What became functional
 
@@ -547,6 +549,13 @@ Items 1-6 are unfinished engineering work, not external blockers. Item 7 remains
 an acceptance gate requiring environments not currently controlled here.
 
 ## 11. Commits and repository status
+
+Current continuation status: implementation commit `8333ae3` (`Add live
+checkpoint coverage and host-local authority path`) was pushed to `origin/main`.
+An authenticated post-push query reported
+`TaliEsch/talco-tf3-multiplayer` as private, with default branch `main`; local
+`main` and `origin/main` were 0 behind/0 ahead. No tag or release was created.
+This documentation status update follows as a documentation-only commit.
 
 Implementation commit:
 

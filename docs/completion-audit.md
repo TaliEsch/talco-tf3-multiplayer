@@ -2,8 +2,8 @@
 
 ## Full-readiness continuation audit — 21 September 2026
 
-The goal is still active and incomplete. Commit `db22017` is not a completion
-claim. It adds real exact-build simulation observation, authenticated native
+The goal is still active and incomplete. Commits `db22017` and `8333ae3` are not
+completion claims. They add real exact-build simulation observation, authenticated native
 hold/release/halt IPC, fail-stop teardown, automatic disposable-save startup,
 game-produced checkpoint domains, and a single-game host-sequenced reversible
 vehicle stop/start proof. The live vehicle proof applied host sequences 1 and 2

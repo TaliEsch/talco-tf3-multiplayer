@@ -5,8 +5,10 @@
 The full multiplayer objective remains active. Commit `db22017` establishes a
 real single-game vertical slice through automatic disposable load, exact-build
 simulation observation, authenticated native hold/release, and one reversible
-HostAuthority-sequenced vehicle action with observed restoration. It does not
-establish multiplayer readiness.
+HostAuthority-sequenced vehicle action with observed restoration. Commit
+`8333ae3` adds the production-gated live checkpoint producer, host-local authority
+path and bounded action-trace machinery. Neither establishes multiplayer
+readiness.
 
 Continuation evidence: the native controller now uses strict tracked-thread,
 exception-address, RIP and execution-slot ownership; cleanup forwards all
