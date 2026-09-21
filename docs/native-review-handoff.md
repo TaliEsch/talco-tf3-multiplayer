@@ -222,9 +222,8 @@ rejects the non-production native runtime. For the next reviewed disposable run:
 Branch: `main`. Implementation commit: `db22017` (`Integrate guarded native
 runtime qualification`). Private remote: `origin` at
 `TaliEsch/talco-tf3-multiplayer`, independently confirmed `PRIVATE`. Commits
-`db22017`, `b20367d` and `8ef0711` were pushed to `origin/main`; the current
-trap/socket/live-loader continuation is not yet committed at the time of this
-record. No release was published. Preserved staging backups were moved intact
+`db22017`, `b20367d`, `8ef0711` and continuation commit `068d7eb` were pushed to
+`origin/main`. No release was published. Preserved staging backups were moved intact
 outside TF3's scanned `staging_area` after they caused a duplicate-ID selection;
 the corrected live run then matched the repository's 32-file source exactly.
 
