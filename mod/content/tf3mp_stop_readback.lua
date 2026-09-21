@@ -150,12 +150,15 @@ local function encodeTag(tag)
   return '{"kind":' .. jsonString(tag.kind) .. ',"value":' .. value .. '}'
 end
 
-local function transform(api, matrix)
+local function transform(matrix)
   local out = {}
-  for col = 1, 4 do
-    local vector = api.type.Mat4f.cols(matrix, col)
+  -- Match stock gui/debug_panel/make_entity_debug_panel.tl: m:cols(k - 1).
+  -- The installed type comment says 1..4, but stock callers use 0..3 and use
+  -- column 3 for translation. Do not call column 4 or fabricate a missing one.
+  for col = 0, 3 do
+    local vector = matrix:cols(col)
     if not native(vector) or not finite(vector.x) or not finite(vector.y) or not finite(vector.z) or not finite(vector.w) then fail() end
-    local i = (col - 1) * 4
+    local i = col * 4
     out[i + 1], out[i + 2], out[i + 3], out[i + 4] = vector.x, vector.y, vector.z, vector.w
   end
   return out
@@ -205,7 +208,7 @@ local function collect(api, request, stage)
   local stop, left = isStopOnEdge(api, edge, candidate)
   if edge == nil or not stop then fail() end
   stage("transform")
-  local transf = transform(api, object.transf)
+  local transf = transform(object.transf)
   stage("constructionResource")
   local construction = resource(object.edgeObjectConstruction)
   stage("params")

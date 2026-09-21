@@ -35,9 +35,9 @@ local m=(function()${source}end)()
 local reads=0
 local clockHandles={}
 local CT=${componentType}
-local stop={param=.25,transf={{x=1,y=0,z=0,w=0},{x=0,y=1,z=0,w=0},{x=0,y=0,z=1,w=0},{x=4,y=5,z=6,w=1}},edgeObjectConstruction='construction/road_stop.con',params={z='last',[9]='nine',a=true,nested={b=2}}}
+local stop={param=.25,transf={columns={{x=1,y=2,z=3,w=4},{x=5,y=6,z=7,w=8},{x=9,y=10,z=11,w=12},{x=13,y=14,z=15,w=16}},cols=function(self,col)return self.columns[col+1]end},edgeObjectConstruction='construction/road_stop.con',params={z='last',[9]='nine',a=true,nested={b=2}}}
 local data={[0]={GAME_SPEED={speedup=0},GAME_TIME={tickCount=77,updateCount=44}},[50]={EDGE_OBJECT=stop,PLAYER_OWNED={player=10}},[60]={BASE_EDGE={objects={{50,'STOP_LEFT'}}}},[51]={PLAYER_OWNED={player=11}}}
-local api={type={ComponentType=CT,enum={EdgeObjectType=${edgeObjectType}},Mat4f={cols=function(m,col)return m[col]end}},engine={util={getWorld=function()return 0 end},system={streetSystem={getEdgeForEdgeObject=function(id) if id==50 then return 60 end end}},entityExists=function(id)return data[id]~=nil end,getComponent=function(id,kind) reads=reads+1;if kind==CT.GAME_SPEED or kind==CT.GAME_TIME then clockHandles[#clockHandles+1]=tostring(id) end;return data[id] and data[id][kind] end}}
+local api={type={ComponentType=CT,enum={EdgeObjectType=${edgeObjectType}},Mat4f={}},engine={util={getWorld=function()return 0 end},system={streetSystem={getEdgeForEdgeObject=function(id) if id==50 then return 60 end end}},entityExists=function(id)return data[id]~=nil end,getComponent=function(id,kind) reads=reads+1;if kind==CT.GAME_SPEED or kind==CT.GAME_TIME then clockHandles[#clockHandles+1]=tostring(id) end;return data[id] and data[id][kind] end}}
 local request={schemaVersion=1,nonce=string.rep('a',32),observationId=3,companyEntity=10,resultEntities={50,51},oneWay=false,name='Observed stop'}
 ${mutation}
 local r=m.collect(api,request)
@@ -57,7 +57,7 @@ const nativeEdgeObjects={STOP_LEFT:'STOP_LEFT',STOP_RIGHT:'STOP_RIGHT',SIGNAL:'S
 test('copies one returned owned stop to bounded deterministic JSON',()=>{
   assert.doesNotMatch(source,/api\.cmd|sendCommand|makeWorldBuildProposalCmd|saveUserdata|io\.|os\./);
   const [code,json]=run(); assert.equal(code,'readback'); assert.ok(Buffer.byteLength(json)<=64*1024);
-  assert.deepEqual(JSON.parse(json),{schemaVersion:1,kind:'road_stop_readback',nonce:'a'.repeat(32),observationId:3,companyEntity:10,updateCount:44,tickCount:77,stopEntity:50,edgeEntity:60,param:.25,oneWay:false,name:'Observed stop',left:true,transform:[1,0,0,0,0,1,0,0,0,0,1,0,4,5,6,1],constructionResource:'construction/road_stop.con',params:{kind:'table',entries:[{keyType:'number',key:9,value:{kind:'string',value:'nine'}},{keyType:'string',key:'a',value:{kind:'boolean',value:true}},{keyType:'string',key:'nested',value:{kind:'table',entries:[{keyType:'string',key:'b',value:{kind:'number',value:2}}]}},{keyType:'string',key:'z',value:{kind:'string',value:'last'}}]}});
+  assert.deepEqual(JSON.parse(json),{schemaVersion:1,kind:'road_stop_readback',nonce:'a'.repeat(32),observationId:3,companyEntity:10,updateCount:44,tickCount:77,stopEntity:50,edgeEntity:60,param:.25,oneWay:false,name:'Observed stop',left:true,transform:[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16],constructionResource:'construction/road_stop.con',params:{kind:'table',entries:[{keyType:'number',key:9,value:{kind:'string',value:'nine'}},{keyType:'string',key:'a',value:{kind:'boolean',value:true}},{keyType:'string',key:'nested',value:{kind:'table',entries:[{keyType:'string',key:'b',value:{kind:'number',value:2}}]}},{keyType:'string',key:'z',value:{kind:'string',value:'last'}}]}});
 });
 test('the Lua snapshot is accepted by the JavaScript native-envelope codec',()=>{
   const [,json]=run(); const snapshotHex=Buffer.from(json,'utf8').toString('hex');
@@ -98,12 +98,12 @@ debug.setmetatable(NativeGetWorld,{__call=function() return 0 end})
 debug.setmetatable(NativeGetComponent,{__call=function(_,id,kind) reads=reads+1;if kind==CT.GAME_SPEED or kind==CT.GAME_TIME then clockHandles[#clockHandles+1]=tostring(id) end;return data[id] and data[id][kind] end})
 debug.setmetatable(NativeEntityExists,{__call=function(_,id) return data[id]~=nil end})
 debug.setmetatable(NativeGetEdge,{__call=function(_,id) if id==50 then return 60 end end})
-debug.setmetatable(NativeMat4Cols,{__call=function(_,m,col) return m[col] end})
+debug.setmetatable(NativeMat4Cols,{__call=function(_,m,col) return m.columns[col+1] end})
 api.engine.util.getWorld=NativeGetWorld
 api.engine.getComponent=NativeGetComponent
 api.engine.entityExists=NativeEntityExists
 api.engine.system.streetSystem.getEdgeForEdgeObject=NativeGetEdge
-api.type.Mat4f.cols=NativeMat4Cols`;
+stop.transf.cols=NativeMat4Cols`;
   assert.equal(run(mutation)[0],'readback');
 });
 test('missing or throwing native API calls fail closed at their lookup stage',()=>{
@@ -116,12 +116,18 @@ test('missing or throwing native API calls fail closed at their lookup stage',()
     ['api.engine.entityExists=function() error("private entity error") end','resultEntity'],
     ['api.engine.system.streetSystem.getEdgeForEdgeObject=nil','attachedEdge'],
     ['api.engine.system.streetSystem.getEdgeForEdgeObject=function() error("private edge error") end','attachedEdge'],
-    ['api.type.Mat4f.cols=nil','transform'],
-    ['api.type.Mat4f.cols=function() error("private transform error") end','transform'],
+    ['stop.transf.cols=nil','transform'],
+    ['stop.transf.cols=function() error("private transform error") end','transform'],
   ]){
     const [code,json,,actualField]=run(mutation);
     assert.deepEqual([code,json],['unavailable',''],mutation);
     assert.equal(actualField,field,mutation);
+  }
+});
+test('fails closed when the zero-based instance matrix accessor cannot provide its final column',()=>{
+  for(const mutation of ['stop.transf.columns[4]=nil', 'stop.transf.columns[4]={x=13,y=14,z=15}']){
+    const [code,json,,field]=run(mutation);
+    assert.deepEqual([code,json,field],['unavailable','','transform'],mutation);
   }
 });
 test('returns fixed unavailable for request, pause, candidate, edge, and copy boundaries',()=>{
