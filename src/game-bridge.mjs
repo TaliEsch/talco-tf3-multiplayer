@@ -477,6 +477,7 @@ export async function startGameBridge({ directory, logger = () => {}, intervalMs
     }
   }).catch(() => {}); }, intervalMs);
   return {
+    get directory() { return directory; },
     nonce,
     beginPhase2Setup() {
       const operation=pending.then(async()=>{

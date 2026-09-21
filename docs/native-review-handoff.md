@@ -84,16 +84,18 @@ commit provides functioning multi-instance multiplayer.
    framed client and `src/native-host-join.mjs` is the fail-closed admission gate.
 4. `src/cli.mjs` requires that native gate for normal Host/Join and offers a
    non-admitting diagnostic transport mode. This gate is not yet a working
-   gameplay adapter: no production-qualified runtime exists and normal network
-   Host/Join does not construct a per-game `EngineSessionAdapter`.
+   gameplay adapter because no production-qualified native runtime exists.
    `src/client.mjs` now permits a future adapter to subscribe to authenticated,
    schema-checked host frames while preserving the existing primary handler.
    `src/authenticated-engine-session.mjs` consumes that fanout after a strict
    two-to-four-player `coordination_capture`, derives the unique authoritative
    player/company map, queues at most 16 frames during asynchronous adapter
    construction, preserves their order and closes transport plus adapter on any
-   rejection. It is not yet invoked by Join CLI and does not manufacture a
-   production binding.
+   rejection. `src/join-engine-bootstrap.mjs` now invokes it from Join only
+   after the authenticated host-save download matches exactly and the provider
+   has loaded; it subscribes before sending `save_ready`. No-save production
+   sessions are rejected because the current protocol has no safe async-adapter
+   readiness barrier.
    `src/host-local-participant.mjs` additionally routes a host player's actions
    through that same authenticated loopback client/`HostAuthority` path as a
    remote player, and refuses `beginCoordination` while its injected engine
@@ -108,7 +110,12 @@ commit provides functioning multi-instance multiplayer.
    composition from host mode, but only for an explicit regular-file provider
    that receives the already-authenticated native binding/live bridge and returns
    a production-qualified engine binding, adapter factory and exact save proof.
-   No such real provider exists yet; there is no mock/default fallback.
+   `src/production-engine-binding-provider.mjs` is now the built-in provider for
+   Host and Join. It composes the existing `EngineSessionAdapter` only from the
+   live bridge directory, independently verified save and persistent native
+   binding. It is integrated and model-tested, but remains unreachable in a real
+   production session while the native controller truthfully advertises
+   `productionQualified:false`.
 5. `mod/content/tf3mp_status_panel.script.tl` exchanges the fixed vehicle
    discovery/request files. `mod/content/tf3mp_status.script.tl` checks live
    company ownership/revision, executes one native vehicle command and records a
@@ -149,12 +156,27 @@ Unresolved ABI assumptions include semantic factory/admission boundaries,
 output/callback ownership, command move/destruction rules, safe suppression,
 replay-origin distinction, post-apply result correlation, exception/unwind
 behavior and whether any proposed site is stable under all game workloads.
+
+The offline dump review separated three failures rather than assigning them one
+cause: Defender quarantined the custom observer; WinDbg's EngHost later faulted
+reading address `0x8` in `dbgeng.dll`; and TF3 later executed address zero on a
+different thread whose raw stack contained NVIDIA OpenGL and TF3 addresses.
+Those raw words are not an unwound call stack and do not prove a driver cause.
+The observer cleanup now verifies restored debug registers by readback, requires
+three drain quiet periods, never consumes a second-chance system breakpoint,
+reports teardown phases separately, and checks target survival after detach.
+This is source/owned-fixture hardening only; the quarantined executable was not
+rebuilt or restored, and no live profile was re-enabled.
 The disabled action-trace implementation can pair nested handler/apply entry and
 return observations by thread, entry RSP and return address in owned fixtures.
 Controlled WinDbg observation established two real handler pairs for the known
-vehicle stop/start and decoded the first eight payload bytes as entity 66005 plus
-high dword `0x201` (stop) / `0x200` (start). It also proved the outer apply
-wrapper runs continuously for background work. However the final detach ended
+vehicle stop/start and decoded payload bytes `+0..+3` as entity 66005 and byte
+`+4` as the stopped value. Static review also found the reported live caller
+RVAs fall inside instructions rather than after calls; they cannot be reconciled
+with verified dispatcher/apply returns by one base correction. Call-chain
+provenance is therefore unresolved, and bytes `+5..+7` are unqualified padding,
+not flags. The trace also proved the outer apply wrapper runs continuously for
+background work. However the final detach ended
 in TF3 `0xC0000005` execute-at-zero, and an earlier detach crashed WinDbg's
 engine. The custom observer rebuild was quarantined by Windows Security as
 `Behavior:Win32/DefenseEvasion.A!ml` before its second smoke invocation and was
@@ -199,13 +221,18 @@ prove determinism. No two-instance no-input baseline exists.
 
 ### Verification record
 
-- Current exact `npm run check`: **833 discovered, 804 passed, 0 failed, 29
-  skipped** (39.08 seconds). The skipped tests are precisely the native observer/
+- Last fully passing exact `npm run check` milestone: **833 discovered, 804
+  passed, 0 failed, 29 skipped** (39.08 seconds). The skipped tests are precisely the native observer/
   controller executable tests because Windows Security quarantined the rebuilt
   observer and the stale controller was removed. All 804 non-native tests also
   passed in a separate explicit run. The last pre-quarantine integration tree
   passed 830/830 in 98.53 seconds. The independent reviewer did obtain 756/756
   on its earlier tree; the reported 478/478 was an incomplete TAP count.
+- The added Join/bootstrap/provider group passed 12 tests with one Windows
+  symlink case skipped. The final full-suite attempt exposed six named-pipe/
+  native IPC failures and one bridge lease failure in the restricted run and
+  was stopped on the user's pause request before an aggregate summary. These
+  remain open verification failures for the next session.
 - Current native source passed MSVC x64 `/W4 /WX /Zs` syntax/type checking for
   both observer and controller. A current executable/smoke run was not performed
   after the security quarantine; protection was not bypassed.

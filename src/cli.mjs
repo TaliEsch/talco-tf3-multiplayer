@@ -21,6 +21,10 @@ import {openNativeHostJoinGate,resolveNativeHostJoinMode} from './native-host-jo
 import {prepareDisposableStartupLoad} from './startup-load.mjs';
 import {connectHostLocalParticipant} from './host-local-participant.mjs';
 import {loadHostLocalEngineFactory} from './host-local-cli-seam.mjs';
+import {createJoinEngineBootstrap} from './join-engine-bootstrap.mjs';
+import {fileURLToPath} from 'node:url';
+
+const firstPartyEngineProvider=fileURLToPath(new URL('./production-engine-binding-provider.mjs',import.meta.url));
 
 function options(args) {
   const result = {};
@@ -109,6 +113,15 @@ async function enableBridge() {
     bridge = await startGameBridge({ directory: opt["bridge-dir"], logger: log });
     log({ level: "info", event: "bridge_waiting" });
   }
+}
+async function waitForLiveBridge(timeoutMs=15000) {
+  if(!bridge)throw new Error('LIVE_GAME_BRIDGE_REQUIRED');
+  const deadline=Date.now()+timeoutMs;
+  while(Date.now()<deadline){
+    if(bridge.connected===true&&bridge.engineObservation?.available===true)return;
+    await new Promise(resolve=>setTimeout(resolve,100));
+  }
+  throw new Error('LIVE_GAME_BRIDGE_TIMEOUT');
 }
 let stopping = false;
 async function stop() {
@@ -306,6 +319,7 @@ if (command === "hash-game") {
 } else if (command === "host") {
   if (!sessionSecret || !opt["mod-hash"]) throw new Error("host requires TF3MP_SESSION_SECRET (or --secret) and --mod-hash");
   const nativeMode=resolveNativeHostJoinMode(opt);
+  if(!nativeMode.diagnosticOnly&&(!opt.save||!opt['bridge-dir']))throw new Error('host production mode requires --save and --bridge-dir');
   const exe = opt.exe ?? "E:\\Steam\\steamapps\\common\\Transport Fever 3\\TransportFever3.exe";
   const buildHash = await readGameBuild(exe);
   log({ level: describeBuild(buildHash).recommended ? "info" : "warn", event: "game_hash", ...describeBuild(buildHash) });
@@ -321,15 +335,17 @@ if (command === "hash-game") {
     observedSaveHash=transfer.sha256;
     log({ level: "info", event: "save_transfer_listening", bytes: transfer.bytes, sha256: transfer.sha256, port: transfer.port });
   }
-  const instance = startHost({ secret: sessionSecret, sessionId: hostSessionId, bind: opt.bind, port: opt.port ? Number(opt.port) : undefined, buildHash, modManifestHash: opt["mod-hash"], requiredSave, expiresAt, logger: log, admissionAllowed: () => !nativeMode.diagnosticOnly && nativeGate?.ready===true && !vehicleTestActive });
-  hostInstance = instance;
-  await once(instance.server, "listening");
   await enableBridge();
+  if(!nativeMode.diagnosticOnly)await waitForLiveBridge();
   // Do not synthesize an adapter from the native IPC gate or passive bridge
   // telemetry. A separately qualified provider is opt-in and must prove its
   // own live binding, production qualification, and save identity above.
-  const localFactory=await loadHostLocalEngineFactory({modulePath:opt['host-local-adapter-module'],bridge,nativeGate,
-    sessionId:hostSessionId,buildHash,modManifestHash:opt['mod-hash'],requiredSave,logger:log});
+  const localFactory=await loadHostLocalEngineFactory({modulePath:nativeMode.diagnosticOnly?undefined:(opt['host-local-adapter-module']??firstPartyEngineProvider),bridge,nativeGate,
+    sessionId:hostSessionId,buildHash,modManifestHash:opt['mod-hash'],requiredSave,verifiedSave:requiredSave,
+    engineSessionDirectory:opt['bridge-dir'],logger:log});
+  const instance = startHost({ secret: sessionSecret, sessionId: hostSessionId, bind: opt.bind, port: opt.port ? Number(opt.port) : undefined, buildHash, modManifestHash: opt["mod-hash"], requiredSave, expiresAt, logger: log, admissionAllowed: () => !nativeMode.diagnosticOnly && nativeGate?.ready===true && localFactory!==null && !vehicleTestActive });
+  hostInstance = instance;
+  await once(instance.server, "listening");
   if(localFactory){
     const local=connectHostLocalParticipant({host:instance,displayName:opt['host-local-name']??'Host',
       engineBinding:localFactory.engineBinding,createAdapter:localFactory.createAdapter,verifiedSave:localFactory.verifiedSave,
@@ -349,30 +365,38 @@ if (command === "hash-game") {
   if (!sessionSecret) throw new Error("join requires TF3MP_SESSION_SECRET (or --secret)");
   for (const required of ["session", "name", "mod-hash"]) if (!opt[required]) throw new Error(`join requires --${required}`);
   const nativeMode=resolveNativeHostJoinMode(opt);
+  if(!nativeMode.diagnosticOnly&&(!opt['save-dir']||!opt['bridge-dir']))throw new Error('join production mode requires --save-dir and --bridge-dir');
   const buildHash = await readGameBuild(opt.exe ?? "E:\\Steam\\steamapps\\common\\Transport Fever 3\\TransportFever3.exe");
   log({ level: describeBuild(buildHash).recommended ? "info" : "warn", event: "game_hash", ...describeBuild(buildHash) });
   if(nativeMode.diagnosticOnly)log({level:'warn',event:'diagnostic_transport_only',coordinatedGameplayAdmission:false});
   else nativeGate=await openNativeHostJoinGate({options:opt,sessionId:opt.session,role:'join',logger:log,onDisconnect:()=>stop()});
   await enableBridge();
-  let testSent = false, saveStarted = false;
-  connectClient({ secret: sessionSecret, sessionId: opt.session, host: opt.host, port: opt.port ? Number(opt.port) : undefined, displayName: opt.name, buildHash, modManifestHash: opt["mod-hash"], diagnosticOnly:nativeMode.diagnosticOnly, onMessage: (message, context) => {
+  if(!nativeMode.diagnosticOnly)await waitForLiveBridge();
+  let testSent = false, bootstrapStarted = false, joinBootstrap;
+  const connection=connectClient({ secret: sessionSecret, sessionId: opt.session, host: opt.host, port: opt.port ? Number(opt.port) : undefined, displayName: opt.name, buildHash, modManifestHash: opt["mod-hash"], diagnosticOnly:nativeMode.diagnosticOnly, onMessage: (message, context) => {
     if (message.kind === "session_ended") stop();
     log({ level: "info", event: "message", kind: message.kind, code: message.payload?.code, payload: message.payload });
     if (message.kind === "admitted" && opt["test-message"] && !testSent) {
       testSent = true;
       context.send("test", { value: String(opt["test-message"]) });
     }
-    if (message.kind === "admitted" && opt["save-dir"] && !saveStarted) {
-      saveStarted = true;
-      downloadSave({ secret: sessionSecret, sessionId: opt.session, host: opt.host, port: opt["save-port"] ? Number(opt["save-port"]) : undefined, destinationDir: opt["save-dir"] })
-        .then((result) => {
-          if (!message.payload.save || result.bytes !== message.payload.save.bytes || result.sha256 !== message.payload.save.sha256) throw new Error("control/save channel metadata mismatch");
-          log({ level: "info", event: "save_received", bytes: result.bytes, sha256: result.sha256 });
-          context.send("save_ready", { bytes: result.bytes, sha256: result.sha256 });
-        })
-        .catch((error) => { log({ level: "error", event: "save_receive_failed", code: error.code ?? "SAVE_TRANSFER_FAILED" }); context.socket.destroy(); });
+    if (!nativeMode.diagnosticOnly&&message.kind === "admitted"&&!bootstrapStarted) {
+      bootstrapStarted=true;
+      joinBootstrap.admitted(message).then(()=>log({level:'info',event:'join_engine_provider_ready',gameplayVerified:false}))
+        .catch((error)=>log({level:'error',event:'join_engine_bootstrap_failed',code:error.code??error.message??'JOIN_ENGINE_BOOTSTRAP_FAILED'}));
     }
   } });
+  if(!nativeMode.diagnosticOnly)joinBootstrap=createJoinEngineBootstrap({connection,
+    modulePath:opt['join-adapter-module']??firstPartyEngineProvider,bridge,nativeGate,
+    sessionId:opt.session,buildHash,modManifestHash:opt['mod-hash'],logger:log,
+    downloadSave:async requiredSave=>{
+      const result=await downloadSave({secret:sessionSecret,sessionId:opt.session,host:opt.host,
+        port:opt['save-port']?Number(opt['save-port']):undefined,destinationDir:opt['save-dir']});
+      if(result.bytes!==requiredSave.bytes||result.sha256!==requiredSave.sha256)throw new Error('CONTROL_SAVE_CHANNEL_METADATA_MISMATCH');
+      log({level:'info',event:'save_received',bytes:result.bytes,sha256:result.sha256});
+      return result;
+    },onAdapter:()=>log({level:'info',event:'join_engine_adapter_attached',gameplayVerified:false}),
+    onFailure:error=>log({level:'error',event:'join_engine_adapter_failed',code:error.code??error.message??'JOIN_ENGINE_ADAPTER_FAILED'})});
 } else if (command === "generate-secret") {
   process.stdout.write(`${randomBytes(32).toString("hex")}\n`);
 } else if (command === "probe-ipc") {

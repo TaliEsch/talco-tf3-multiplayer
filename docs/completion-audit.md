@@ -30,9 +30,11 @@ The participant-side authenticated adapter lifecycle is now implemented as a
 bounded composition unit: it waits for the signed coordinator capture, validates
 a unique two-to-four-player company roster containing the admitted player,
 orders frames through asynchronous adapter construction and tears down both
-engine and socket on rejection. Join CLI does not yet supply or invoke a real
-production provider, so this is implemented lifecycle plumbing rather than a
-working participant engine connection.
+engine and socket on rejection. Join CLI now downloads and exactly verifies the
+authenticated host save, loads the built-in provider, subscribes the adapter and
+only then sends `save_ready`. Host uses the same first-party provider. This path
+is integrated and model-tested but cannot yet run against TF3 because the native
+runtime correctly remains `productionQualified:false`.
 
 A fresh ordinary-UI load of disposable save
 `tf3mp_disposable_43b49d368fbbd409ae2614ada7b0c757` then passed the real
@@ -53,8 +55,10 @@ engine fail-stop evidence; it does not establish peer coordination or recovery.
 Host CLI now has an explicit `--host-local-adapter-module` composition seam. It
 will import only a regular absolute-path provider after live bridge observation,
 authenticated production native binding and exact session/build/mod/save checks.
-The repository does not contain a production-qualified provider, so this is
-integration plumbing rather than a claim that ordinary Host mode can control TF3.
+The repository now contains a first-party provider shared with Join, which
+constructs the real existing engine-session adapter from the verified save,
+live bridge directory and persistent native binding. The native binding itself
+is not production-qualified, so ordinary Host mode still cannot control TF3.
 
 A fresh live startup check first exposed that TF3 was selecting a preserved
 same-ID backup from its scanned staging directory. Both backups were moved intact
@@ -76,17 +80,27 @@ constructed.
 The narrower handler/apply investigation then produced genuine routing evidence:
 an idle WinDbg trace saw only continuous background apply pairs; each known
 reversible vehicle action produced one nested handler pair; and the first handler
-qword encoded entity 66005 with high dword `0x201` for stop and `0x200` for
-start. This still failed qualification. The final detach ended in TF3
+payload encoded entity 66005 in bytes `+0..+3` and stop/start in byte `+4`.
+Exact-build review found the recorded caller RVAs land inside instructions and
+cannot be reconciled by one base correction, so the apparent live nesting is
+not yet qualified call-chain provenance. Bytes `+5..+7` are uninitialized
+padding, not a flags word. This still failed qualification. The final detach ended in TF3
 `0xC0000005` execute-at-zero, while Windows Security separately quarantined the
 rebuilt custom observer as `Behavior:Win32/DefenseEvasion.A!ml` before its second
 smoke run. Protection was not bypassed. Both live command/action profiles remain
 disabled, and the original save hash remained unchanged.
 
-Current `npm run check` discovered 833 tests: 804 passed, 0 failed and 29 native
-executable tests were skipped because Windows Security quarantined the rebuilt
-observer and the stale controller artifact was removed. A separate explicit
-non-native run also passed 804/804. The last pre-quarantine integration tree
+The last fully passing current-tree milestone discovered 833 tests: 804 passed,
+0 failed and 29 native executable tests were skipped because Windows Security
+quarantined the rebuilt observer and the stale controller artifact was removed.
+A separate explicit non-native run also passed 804/804. This final integration
+batch's 13 focused provider/bootstrap tests passed 12 with the Windows symlink
+case skipped. MSVC `/W4 /WX /Zs` passed for the hardened observer source. A
+full-suite attempt during wrap-up was not clean: six Windows named-pipe/native
+IPC tests and one real bridge lease test failed in this restricted run, and the
+run was stopped at the user's pause request before an aggregate count was
+captured. These failures remain open and are not represented as passing. The
+last pre-quarantine integration tree
 passed 830/830 in 98.53 seconds. The independent review correctly recorded
 756/756 on its earlier tree; 478/478 was an incomplete TAP count. Current native
 source passes MSVC `/W4 /WX /Zs` syntax/type checking; the last pre-quarantine

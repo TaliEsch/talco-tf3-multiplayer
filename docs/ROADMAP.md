@@ -27,16 +27,19 @@ observed MainMenu/WindowContainer faults. Automatic load remains implementation
 work, not completed functionality. A fresh ordinary-UI disposable run passed the
 production public-domain checkpoint gate at exact held/released update 3052;
 this is single-game evidence only. A separate lease-loss run proved the actual
-TF3 engine halted at update 3335 after helper renewal stopped. The current exact
-suite discovers 833 tests: 804 pass, 0 fail and 29 native executable tests are
-skipped because Windows Security quarantined the rebuilt observer. The prior
+TF3 engine halted at update 3335 after helper renewal stopped. The last fully
+passing exact suite discovered 833 tests: 804 passed, 0 failed and 29 native
+executable tests were skipped because Windows Security quarantined the rebuilt observer. The prior
 pre-quarantine integration tree passed 830/830; current native source passes
 MSVC `/W4 /WX /Zs` syntax/type checking.
 
 The reviewed handler/apply sites were exercised through bounded WinDbg trials.
 They show continuous autonomous apply traffic, exactly one nested vehicle
-handler pair for each reversible stop/start action, and a first-qword encoding
-of entity 66005 plus high dword `0x201`/`0x200`. This narrowed the next ABI work,
+handler pair for each reversible stop/start action, and payload bytes encoding
+entity 66005 at `+0..+3` plus stopped state at `+4`. Exact-build static review
+found the reported caller RVAs are interior instruction bytes and cannot be
+reconciled with the verified call returns by one base correction; bytes
+`+5..+7` are unqualified padding rather than a flags word. This narrowed the next ABI work,
 but did not pass safety: the final detach produced a TF3 execute-at-zero access
 violation, and Windows Security quarantined the rebuilt custom observer as a
 behavioral defense-evasion detection. Do not bypass protection or enable either
@@ -60,7 +63,10 @@ Work in this order:
    control traffic while simulation is paused.
    The reusable participant lifecycle now validates the signed two-to-four-
    company capture, bounds frames while attaching, preserves order and fails
-   closed; Join CLI still needs the real production provider and composition.
+   closed. Host and Join CLI now use the first-party provider, and Join verifies
+   the downloaded save and subscribes before `save_ready`. This is integrated
+   composition, not live multiplayer proof: the native controller still reports
+   `productionQualified:false`.
 4. Resolve background synchronization. The game producer now reads public
    `Town`/`TownBuilding` growth controls and bounded construction parameters in
    addition to the other public domains. Production admission now requires all

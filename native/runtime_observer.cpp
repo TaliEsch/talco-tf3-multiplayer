@@ -394,7 +394,36 @@ struct SavedThread {
     CONTEXT cleanupTrap{};
     int cleanupTrapSite = -1;
     bool cleanupMayHaveQueuedTrap = false;
+    // A successful SetThreadContext is not proof that the target retained our
+    // original values.  Keep this separate from `armed`: teardown is only
+    // allowed to detach after an independent debug-register readback.
+    bool restorationReadbackVerified = false;
 };
+enum class TeardownState {
+    NotStarted,
+    Restoring,
+    RestorationReadbackFailed,
+    Draining,
+    DrainTimedOut,
+    DetachFailed,
+    Detached,
+    TargetExited,
+    TargetSurvivalFailed,
+};
+const char* TeardownStateName(TeardownState state) {
+    switch (state) {
+    case TeardownState::NotStarted: return "not-started";
+    case TeardownState::Restoring: return "restoring";
+    case TeardownState::RestorationReadbackFailed: return "restoration-readback-failed";
+    case TeardownState::Draining: return "draining";
+    case TeardownState::DrainTimedOut: return "drain-timed-out";
+    case TeardownState::DetachFailed: return "detach-failed";
+    case TeardownState::Detached: return "detached";
+    case TeardownState::TargetExited: return "target-exited";
+    case TeardownState::TargetSurvivalFailed: return "target-survival-failed";
+    }
+    return "invalid";
+}
 struct Session {
     DWORD pid = 0;
     bool attached = false;
@@ -412,8 +441,26 @@ struct Session {
     ULONG64 base = 0;
     std::array<Site, 4> sites{};
     std::map<DWORD, SavedThread> threads;
+    TeardownState teardownState = TeardownState::NotStarted;
+    bool restorationReadbackVerified = false;
+    bool drainCompleted = false;
+    bool detachAttempted = false;
+    bool targetAliveAfterDetach = false;
+    DWORD teardownError = ERROR_SUCCESS;
+    bool ReportCleanup(bool ok) const noexcept {
+        fprintf(stderr, "teardown_state=%s restoration_readback=%s drain_completed=%s detach_attempted=%s target_alive_after_detach=%s error=%lu\n",
+            TeardownStateName(teardownState), restorationReadbackVerified ? "true" : "false",
+            drainCompleted ? "true" : "false", detachAttempted ? "true" : "false",
+            targetAliveAfterDetach ? "true" : "false", teardownError);
+        return ok;
+    }
     bool Clean() noexcept {
         bool ok = true;
+        teardownState = TeardownState::Restoring;
+        restorationReadbackVerified = false;
+        drainCompleted = false;
+        targetAliveAfterDetach = false;
+        teardownError = ERROR_SUCCESS;
         for (auto& pair : threads) {
             auto& thread = pair.second;
             if (thread.armed && !exited) {
@@ -439,13 +486,36 @@ struct Session {
                     context.Dr2 = thread.original.Dr2; context.Dr3 = thread.original.Dr3;
                     context.Dr6 = thread.original.Dr6; context.Dr7 = thread.original.Dr7;
                     if (!SetThreadContext(thread.handle, &context)) { fprintf(stderr, "restore_set_context_failed thread=%lu error=%lu\n", pair.first, GetLastError()); ok = false; }
-                    else thread.armed = false;
+                    else {
+                        CONTEXT verified{}; verified.ContextFlags = CONTEXT_DEBUG_REGISTERS;
+                        const bool readback = GetThreadContext(thread.handle, &verified) != FALSE &&
+                            verified.Dr0 == thread.original.Dr0 && verified.Dr1 == thread.original.Dr1 &&
+                            verified.Dr2 == thread.original.Dr2 && verified.Dr3 == thread.original.Dr3 &&
+                            verified.Dr6 == thread.original.Dr6 && verified.Dr7 == thread.original.Dr7;
+                        if (!readback) {
+                            teardownState = TeardownState::RestorationReadbackFailed;
+                            teardownError = GetLastError();
+                            fprintf(stderr, "restore_readback_failed thread=%lu error=%lu\n", pair.first, teardownError);
+                            ok = false;
+                        } else {
+                            thread.armed = false;
+                            thread.restorationReadbackVerified = true;
+                        }
+                    }
                 }
             }
         }
         // Do not continue the stopped target after a failed restoration. Keep
         // our explicit suspension counts for a later cleanup retry as well.
-        if (!ok) return false;
+        if (!ok) return ReportCleanup(false);
+        restorationReadbackVerified = true;
+        for (const auto& pair : threads) {
+            if (!pair.second.restorationReadbackVerified && !exited) {
+                restorationReadbackVerified = false;
+                teardownState = TeardownState::RestorationReadbackFailed;
+                return ReportCleanup(false);
+            }
+        }
         // A trap already raised by another thread may not reach the debug port
         // until that thread resumes. Remove our suspend counts while the
         // debugger is still attached, so the following drain can handle it.
@@ -459,7 +529,7 @@ struct Session {
                 fprintf(stderr, "restore_resume_failed thread=%lu error=%lu\n", pair.first, GetLastError()); ok = false;
             } else thread.cleanupSuspended = false;
         }
-        if (!ok) return false;
+        if (!ok) return ReportCleanup(false);
         if (pending) {
             if (!ContinueDebugEvent(event.dwProcessId, event.dwThreadId, disposition)) ok = false;
             else pending = false;
@@ -473,20 +543,35 @@ struct Session {
                 // first-chance event, leaving an unhandled trap in the target.
                 // Drain BEFORE detach after lifting explicit suspensions. All
                 // owned debug registers have already been restored.
+                teardownState = TeardownState::Draining;
                 bool detached = false;
+                unsigned quietWindows = 0;
                 for (unsigned attempt = 0; attempt < 100 && !detached; ++attempt) {
                     DEBUG_EVENT queued{};
-                    if (!WaitForDebugEvent(&queued, 50)) {
-                        if (GetLastError() != ERROR_SEM_TIMEOUT) { ok = false; break; }
+                    if (!WaitForDebugEvent(&queued, 25)) {
+                        if (GetLastError() != ERROR_SEM_TIMEOUT) { teardownError = GetLastError(); ok = false; break; }
+                        // Require multiple quiet waits after every drained
+                        // event. This remains bounded (at most 2.5 seconds)
+                        // but avoids treating one scheduler gap as a drained
+                        // debug port.
+                        if (++quietWindows < 3) continue;
+                        drainCompleted = true;
+                        detachAttempted = true;
                         if (DebugActiveProcessStop(pid)) { detached = true; break; }
+                        teardownError = GetLastError();
                         continue;
                     }
+                    quietWindows = 0;
                     event = queued; pending = true;
                     disposition = queued.dwDebugEventCode == EXCEPTION_DEBUG_EVENT ? DBG_EXCEPTION_NOT_HANDLED : DBG_CONTINUE;
                     DWORD action = DBG_CONTINUE;
                     if (queued.dwDebugEventCode == EXCEPTION_DEBUG_EVENT) {
                         action = DBG_EXCEPTION_NOT_HANDLED;
-                        if (IsSystemAttachBreakpoint(process, queued.u.Exception.ExceptionRecord)) action = DBG_CONTINUE;
+                        // Only the documented first-chance attach breakpoint
+                        // belongs to the debugger. A second-chance breakpoint
+                        // is the target's failure and must be forwarded.
+                        if (queued.u.Exception.dwFirstChance &&
+                            IsSystemAttachBreakpoint(process, queued.u.Exception.ExceptionRecord)) action = DBG_CONTINUE;
                         if (queued.u.Exception.ExceptionRecord.ExceptionCode == EXCEPTION_SINGLE_STEP) {
                             const auto found = threads.find(queued.dwThreadId);
                             if (found != threads.end()) {
@@ -532,10 +617,32 @@ struct Session {
                     if (!ContinueDebugEvent(queued.dwProcessId, queued.dwThreadId, action)) { ok = false; break; }
                     pending = false;
                 }
-                if (detached) attached = false;
-                else { fprintf(stderr, "detach_failed error=%lu\n", GetLastError()); ok = false; }
+                if (detached) {
+                    attached = false;
+                    teardownState = exited ? TeardownState::TargetExited : TeardownState::Detached;
+                    if (!exited) {
+                        // Verify survival only through our independently-owned
+                        // synchronization handle and for a fixed window. This
+                        // is deliberately not a liveness claim beyond teardown.
+                        const DWORD survival = WaitForSingleObject(process, 250);
+                        targetAliveAfterDetach = survival == WAIT_TIMEOUT;
+                        if (!targetAliveAfterDetach) {
+                            teardownError = survival == WAIT_FAILED ? GetLastError() : ERROR_PROCESS_ABORTED;
+                            teardownState = TeardownState::TargetSurvivalFailed;
+                            ok = false;
+                        }
+                    }
+                } else {
+                    teardownState = drainCompleted ? TeardownState::DetachFailed : TeardownState::DrainTimedOut;
+                    if (teardownError == ERROR_SUCCESS) teardownError = GetLastError();
+                    fprintf(stderr, "detach_failed state=%s error=%lu\n", TeardownStateName(teardownState), teardownError);
+                    ok = false;
+                }
             }
-        } else attached = false;
+        } else {
+            attached = false;
+            if (exited) teardownState = TeardownState::TargetExited;
+        }
         // This flag is process-wide, not per debuggee.  Crucially, clear it
         // only after DebugActiveProcessStop has detached the target.  Clearing
         // it before a failed detach would make an abrupt debugger death resume
@@ -546,7 +653,7 @@ struct Session {
                 ok = false;
             } else killOnExit = false;
         }
-        return ok;
+        return ReportCleanup(ok);
     }
     ~Session() {
         // A controller in fail-stop mode deliberately relies on the OS to end
@@ -975,7 +1082,8 @@ int Observe(DWORD pid, bool selftest, bool mismatch, unsigned seconds, unsigned 
             case EXCEPTION_DEBUG_EVENT: {
                 const auto& exception = event.u.Exception;
                 session.disposition = DBG_EXCEPTION_NOT_HANDLED;
-                if (!initialBreakpointSeen && IsSystemAttachBreakpoint(process.value, exception.ExceptionRecord)) {
+                if (!initialBreakpointSeen && exception.dwFirstChance &&
+                    IsSystemAttachBreakpoint(process.value, exception.ExceptionRecord)) {
                     initialBreakpointSeen = true; session.disposition = DBG_CONTINUE;
                 } else if (exception.ExceptionRecord.ExceptionCode == EXCEPTION_SINGLE_STEP) {
                     auto found = session.threads.find(event.dwThreadId);
@@ -1063,10 +1171,14 @@ int Observe(DWORD pid, bool selftest, bool mismatch, unsigned seconds, unsigned 
         "\"incomplete\":%u,\"commandControlQualified\":false}\n",
         actionTrace.paired, actionTrace.orphan, actionTrace.mismatched, actionTrace.incomplete);
     printf("{\"event\":\"complete\",\"hits\":%u,\"observedThreadCount\":%zu,\"siteHits\":[%u,%u,%u,%u],"
-           "\"restoredAndDetached\":%s,\"targetExited\":%s,\"targetExitCode\":%lu,\"missingDr6Hits\":%u,\"fixturePassed\":%s,\"simulationControlQualified\":false,"
+           "\"restoredAndDetached\":%s,\"restorationReadbackVerified\":%s,\"teardownState\":\"%s\",\"drainCompleted\":%s,\"detachAttempted\":%s,\"targetAliveAfterDetach\":%s,\"teardownError\":%lu,"
+           "\"targetExited\":%s,\"targetExitCode\":%lu,\"missingDr6Hits\":%u,\"fixturePassed\":%s,\"simulationControlQualified\":false,"
            "\"commandControlQualified\":false,\"captureComplete\":false,\"stopReason\":\"%s\"}\n",
            hits, hitThreads.size(), siteHits[0], siteHits[1], siteHits[2], siteHits[3],
-           session.exited ? "false" : "true", session.exited ? "true" : "false", targetExitCode, missingDr6Hits,
+           session.exited ? "false" : "true", session.restorationReadbackVerified ? "true" : "false",
+           TeardownStateName(session.teardownState), session.drainCompleted ? "true" : "false",
+           session.detachAttempted ? "true" : "false", session.targetAliveAfterDetach ? "true" : "false", session.teardownError,
+           session.exited ? "true" : "false", targetExitCode, missingDr6Hits,
            selftest ? (fixturePassed ? "true" : "false") : "null",
            interrupted.load() ? "interrupted" : hits >= maxHits ? "event-cap" : session.exited ? "target-exited" : "duration-cap");
     return fixturePassed && (selftest || !session.exited) ? 0 : 3;

@@ -11,7 +11,8 @@ const exactKeys = (value, names) => value && typeof value === 'object' && !Array
 // separately qualified local binding provider. It neither offers a fallback
 // adapter nor treats the bridge's passive telemetry as binding proof.
 export async function loadHostLocalEngineFactory({ modulePath, bridge, nativeGate,
-  sessionId, buildHash, modManifestHash, requiredSave, logger = () => {} } = {}) {
+  sessionId, buildHash, modManifestHash, requiredSave, verifiedSave,
+  engineSessionDirectory, logger = () => {} } = {}) {
   if (modulePath === undefined || modulePath === null) return null;
   if (typeof modulePath !== 'string' || !path.isAbsolute(modulePath)) throw new Error('HOST_LOCAL_ADAPTER_MODULE_ABSOLUTE_PATH_REQUIRED');
   if (!bridge || bridge.connected !== true || bridge.engineObservation?.available !== true
@@ -24,6 +25,11 @@ export async function loadHostLocalEngineFactory({ modulePath, bridge, nativeGat
   if (requiredSave !== null && (!requiredSave || !Number.isSafeInteger(requiredSave.bytes) || requiredSave.bytes < 0 || !hash(requiredSave.sha256))) {
     throw new TypeError('INVALID_HOST_LOCAL_REQUIRED_SAVE');
   }
+  if (!path.isAbsolute(engineSessionDirectory ?? '') || path.basename(engineSessionDirectory) !== 'tf3mp_status_1') {
+    throw new Error('HOST_LOCAL_ENGINE_SESSION_DIRECTORY_REQUIRED');
+  }
+  if (!requiredSave || !verifiedSave || verifiedSave.bytes !== requiredSave.bytes
+    || verifiedSave.sha256 !== requiredSave.sha256) throw new Error('HOST_LOCAL_SAVE_VERIFICATION_REQUIRED');
 
   const info = await lstat(modulePath);
   if (!info.isFile() || info.isSymbolicLink()) throw new Error('HOST_LOCAL_ADAPTER_MODULE_REGULAR_FILE_REQUIRED');
@@ -46,6 +52,8 @@ export async function loadHostLocalEngineFactory({ modulePath, bridge, nativeGat
     buildHash,
     modManifestHash,
     requiredSave: requiredSave && Object.freeze({ ...requiredSave }),
+    verifiedSave: Object.freeze({ ...verifiedSave }),
+    engineSessionDirectory,
   }));
   if (!exactKeys(provided, ['engineBinding', 'createAdapter', 'productionQualified', 'verifiedSave'])
     || provided.productionQualified !== true || !provided.engineBinding

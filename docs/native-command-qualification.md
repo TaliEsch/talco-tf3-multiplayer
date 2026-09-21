@@ -482,16 +482,26 @@ original running state. The trace recorded exactly two handler entry/return
 pairs on the same thread. Each handler was nested inside two apply calls:
 hits `153/154 -> 155/156 -> 157/158` and
 `193/194 -> 195/196 -> 197/198`. Handler RSP was `0x85af6fd068` and caller
-return RVA was `0x9b8e3d`. This is strong call-routing correlation, not yet a
-native receipt.
+return value was reported as RVA `0x9b8e3d`. Exact-build static review found
+that value lies inside the instruction at `0x9b8e3c`, not after a call. The two
+reported nested apply returns have the same problem: `0x7febbb` and `0x8004e4`
+are interior instruction bytes, while the verified apply call returns are
+`0x11ebbb` and `0x1204e4`. The vehicle dispatcher call at `0x9d8e38` returns at
+`0x9d8e3d`. No single base correction reconciles these values. The paired live
+events and timing remain useful observations, but their call-chain provenance
+is unqualified until a future trace preserves each raw absolute return address
+and the exact module base from that recording.
 
 A final bounded repeat captured only the first 512 readable bytes at handler
 RDX for each already-known reversible action. The first qword was
 `0x00000201000101D5` for stop and `0x00000200000101D5` for restore/start. Thus
-the low 32 bits equal observed entity 66005 (`0x101D5`) and the high 32 bits
-changed from `0x201` to `0x200` with the public stopped boolean. No larger layout
-is claimed: bytes beyond that field differed radically and may be adjacent or
-reused storage.
+bytes `+0..+3` equal observed entity 66005 (`0x101D5`) and byte `+4` is the
+stopped value (`1`/`0`). Exact-build disassembly proves the handler reads that
+byte at `0x9e1767`, `0x9e17fc` and `0x9e1819`, and writes it to component
+`+0xac`. Bytes `+5..+7` are unqualified padding: the factory at `0x9eee87` and
+`0x9eee8b` initializes only the first five bytes before copying a qword. The
+high dword must not be described as a flags field. No larger serialization
+layout is claimed.
 
 This trial did **not** pass the safety gate. Windows Error Reporting recorded
 TF3 exception `0xC0000005`, execute violation (`P9=8`), unknown module and fault

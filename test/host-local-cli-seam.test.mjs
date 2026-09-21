@@ -18,7 +18,9 @@ const nativeGate = {
   binding: { sessionId, role: 'host' },
   client: { requireCapability() {} },
 };
-const options = modulePath => ({ modulePath, bridge, nativeGate, sessionId, buildHash, modManifestHash, requiredSave });
+const engineSessionDirectory = path.join(path.parse(process.cwd()).root, 'tf3mp_status_1');
+const options = modulePath => ({ modulePath, bridge, nativeGate, sessionId, buildHash,
+  modManifestHash, requiredSave, verifiedSave: requiredSave, engineSessionDirectory });
 
 test('host-local CLI seam is absent unless an explicit adapter module is selected', async () => {
   assert.equal(await loadHostLocalEngineFactory(options(undefined)), null);

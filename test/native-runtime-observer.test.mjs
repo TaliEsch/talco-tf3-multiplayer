@@ -34,6 +34,11 @@ test('native observer captures real hardware traps on two owned threads and deta
   }
   const complete = result.events.at(-1);
   assert.equal(complete.restoredAndDetached, true);
+  assert.equal(complete.restorationReadbackVerified, true);
+  assert.equal(complete.teardownState, 'detached');
+  assert.equal(complete.drainCompleted, true);
+  assert.equal(complete.detachAttempted, true);
+  assert.equal(complete.targetAliveAfterDetach, true);
   assert.equal(complete.fixturePassed, true);
   assert.equal(complete.simulationControlQualified, false);
   assert.ok(complete.siteHits.every(count => count > 0));
@@ -52,6 +57,9 @@ test('native observer attaches to an already-running owned process and restores 
   assert.equal(result.events.at(-1).hits, 32);
   assert.equal(result.events.at(-1).observedThreadCount, 2);
   assert.equal(result.events.at(-1).restoredAndDetached, true);
+  assert.equal(result.events.at(-1).restorationReadbackVerified, true);
+  assert.equal(result.events.at(-1).teardownState, 'detached');
+  assert.equal(result.events.at(-1).targetAliveAfterDetach, true);
   assert.equal(result.events.at(-1).fixturePassed, true);
 });
 
@@ -60,6 +68,9 @@ test('native observer timeout restores debug registers even without any observat
   assert.equal(result.status, 0, result.stderr);
   assert.equal(result.events.at(-1).hits, 0);
   assert.equal(result.events.at(-1).restoredAndDetached, true);
+  assert.equal(result.events.at(-1).restorationReadbackVerified, true);
+  assert.equal(result.events.at(-1).teardownState, 'detached');
+  assert.equal(result.events.at(-1).targetAliveAfterDetach, true);
   assert.equal(result.events.at(-1).fixturePassed, true);
 });
 
@@ -320,6 +331,11 @@ test('stress cutoff restores non-current threads and drains concurrent traps bef
     assert.equal(complete.hits, 256);
     assert.equal(complete.fixturePassed, true); // VEH saw no leaked trap, including during teardown.
     assert.equal(complete.restoredAndDetached, true);
+    assert.equal(complete.restorationReadbackVerified, true);
+    assert.equal(complete.teardownState, 'detached');
+    assert.equal(complete.drainCompleted, true);
+    assert.equal(complete.detachAttempted, true);
+    assert.equal(complete.targetAliveAfterDetach, true);
     assert.equal(complete.targetExited, false);
     assert.equal(complete.stopReason, 'event-cap');
   }
