@@ -14,7 +14,63 @@
 #pragma comment(lib, "advapi32.lib")
 
 namespace controller {
-struct FixtureState { volatile LONG64 iterations; volatile LONG64 background; volatile LONG stop; DWORD iterationDelay; };
+struct FixtureState {
+    volatile LONG64 iterations;
+    volatile LONG64 background;
+    volatile LONG stop;
+    volatile LONG workersReady;
+    volatile LONG unownedTrapDelivered;
+    DWORD iterationDelay;
+    DWORD workerCount;
+    bool unownedTrap;
+};
+// A configured register is evidence only for a thread we actually armed.
+// DR6 hit bits are advisory: Windows can omit them from an execution-trap
+// context. The shared classifier also requires exception address, RIP, slot
+// address and execution mode to agree, and rejects TF / BD / BS / BT causes.
+int OwnedTrapSite(const SavedThread* thread, const EXCEPTION_RECORD& exception,
+                  const CONTEXT& context, ULONG64 base, const std::array<Site, 4>& sites) {
+    return thread && thread->armed ? ConfiguredTrapSite(exception, context, base, sites) : -1;
+}
+int TrapOwnershipFixture() {
+    SavedThread thread{}; thread.armed = true;
+    constexpr ULONG64 base = 0x140000000;
+    unsigned rejected = 0;
+    for (size_t i = 0; i < tf3Sites.size(); ++i) {
+        CONTEXT context{};
+        context.Dr0 = base + tf3Sites[0].rva; context.Dr1 = base + tf3Sites[1].rva;
+        context.Dr2 = base + tf3Sites[2].rva; context.Dr3 = base + tf3Sites[3].rva;
+        context.Dr7 = 0x55; context.Rip = base + tf3Sites[i].rva;
+        EXCEPTION_RECORD exception{}; exception.ExceptionCode = EXCEPTION_SINGLE_STEP;
+        exception.ExceptionAddress = reinterpret_cast<void*>(context.Rip);
+        Require(OwnedTrapSite(&thread, exception, context, base, tf3Sites) == static_cast<int>(i),
+                "controller missing-DR6 trap rejected");
+        context.Dr6 = 1ULL << i;
+        Require(OwnedTrapSite(&thread, exception, context, base, tf3Sites) == static_cast<int>(i),
+                "controller normal trap rejected");
+        auto reject = [&](const SavedThread* owner, const CONTEXT& candidate, const EXCEPTION_RECORD& record) {
+            Require(OwnedTrapSite(owner, record, candidate, base, tf3Sites) == -1, "controller accepted unowned trap");
+            ++rejected;
+        };
+        reject(nullptr, context, exception);
+        thread.armed = false; reject(&thread, context, exception); thread.armed = true;
+        auto changed = context; changed.Rip++; reject(&thread, changed, exception);
+        changed = context; changed.EFlags |= 0x100; reject(&thread, changed, exception);
+        for (unsigned bit : {13U, 14U, 15U}) {
+            changed = context; changed.Dr6 |= 1ULL << bit; reject(&thread, changed, exception);
+        }
+        changed = context; changed.Dr7 &= ~(1ULL << (2 * i)); reject(&thread, changed, exception);
+        changed = context; changed.Dr7 |= 1ULL << (16 + 4 * i); reject(&thread, changed, exception);
+        changed = context; changed.Dr7 |= 1ULL << (18 + 4 * i); reject(&thread, changed, exception);
+        changed = context; changed.Dr0++; changed.Dr1++; changed.Dr2++; changed.Dr3++;
+        reject(&thread, changed, exception);
+        auto other = exception; other.ExceptionAddress = reinterpret_cast<void*>(context.Rip + 1);
+        reject(&thread, context, other);
+        other = exception; other.ExceptionCode = EXCEPTION_BREAKPOINT; reject(&thread, context, other);
+    }
+    printf("{\"event\":\"controller-trap-ownership-passed\",\"sites\":4,\"rejectedCases\":%u,\"missingDr6Accepted\":true}\n", rejected);
+    return 0;
+}
 struct Request { std::uint64_t id; std::uint64_t generation; std::string control; std::string sessionId; std::string role; };
 struct Reply { std::uint64_t id; std::uint64_t generation; bool error; std::string body; };
 struct Channel {
@@ -188,27 +244,69 @@ void Worker(Channel& channel, const std::wstring& name, const std::string& token
 }
 
 volatile LONG64 fixtureValue = 0;
-extern "C" __declspec(dllexport) __declspec(noinline) void ControllerFixturePre() { fixtureValue = 1; }
-extern "C" __declspec(dllexport) __declspec(noinline) void ControllerFixturePost() { fixtureValue = 2; }
+extern "C" __declspec(dllexport) __declspec(noinline) void ControllerFixturePre() { InterlockedExchange64(&fixtureValue, 1); }
+extern "C" __declspec(dllexport) __declspec(noinline) void ControllerFixturePost() { InterlockedExchange64(&fixtureValue, 2); }
+extern "C" __declspec(dllexport) __declspec(noinline) void ControllerFixtureAuxPre() { InterlockedIncrement64(&fixtureValue); }
+extern "C" __declspec(dllexport) __declspec(noinline) void ControllerFixtureAuxPost() { InterlockedDecrement64(&fixtureValue); }
+FixtureState* exceptionFixtureState = nullptr;
+LONG CALLBACK FixtureException(PEXCEPTION_POINTERS exception) {
+    if (exception->ExceptionRecord->ExceptionCode != EXCEPTION_SINGLE_STEP) return EXCEPTION_CONTINUE_SEARCH;
+    if (!exceptionFixtureState || !exceptionFixtureState->unownedTrap) return RejectLeakedSingleStep(exception);
+    if (exception->ExceptionRecord->ExceptionAddress != reinterpret_cast<void*>(&ControllerFixturePre)) ExitProcess(85);
+    InterlockedIncrement(&exceptionFixtureState->unownedTrapDelivered);
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+__declspec(noinline) void RaiseUnownedFixtureTrap() {
+    // A real OS exception whose address coincides with a configured site, but
+    // whose instruction context is unrelated. Address-only teardown used to
+    // swallow its second chance. No game or external process uses this path.
+    using RaiseNativeException = LONG (NTAPI*)(PEXCEPTION_RECORD, PCONTEXT, BOOLEAN);
+    const auto raise = reinterpret_cast<RaiseNativeException>(GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "NtRaiseException"));
+    if (!raise) ExitProcess(86);
+    CONTEXT context{}; RtlCaptureContext(&context);
+    EXCEPTION_RECORD exception{}; exception.ExceptionCode = EXCEPTION_SINGLE_STEP;
+    exception.ExceptionAddress = reinterpret_cast<void*>(&ControllerFixturePre);
+    raise(&exception, &context, TRUE);
+    ExitProcess(87); // The fixture deliberately leaves this exception unhandled.
+}
 DWORD WINAPI Background(void* pointer) {
     auto* state = static_cast<FixtureState*>(pointer);
-    while (!InterlockedCompareExchange(&state->stop, 0, 0)) { InterlockedIncrement64(&state->background); Sleep(2); }
+    ControllerFixtureAuxPre(); ControllerFixtureAuxPost();
+    InterlockedIncrement(&state->workersReady);
+    while (!InterlockedCompareExchange(&state->stop, 0, 0)) {
+        ControllerFixtureAuxPre();
+        InterlockedIncrement64(&state->background);
+        ControllerFixtureAuxPost();
+        Sleep(2);
+    }
     return 0;
 }
 int Fixture(const std::wstring& name) {
+    // Any debugger-owned trap leaked during release or detach is a hard test
+    // failure, rather than a silently handled fixture exception.
     Handle mapping(OpenFileMappingW(FILE_MAP_ALL_ACCESS, FALSE, name.c_str()));
     if (!mapping.value) return 80;
     auto* state = static_cast<FixtureState*>(MapViewOfFile(mapping.value, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(FixtureState)));
     if (!state) return 81;
-    Handle background(CreateThread(nullptr, 0, Background, state, 0, nullptr));
-    if (!background.value) return 82;
+    exceptionFixtureState = state;
+    SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
+    if (!AddVectoredExceptionHandler(1, FixtureException)) return 84;
+    std::vector<HANDLE> workers;
+    for (DWORD i = 0; i < state->workerCount; ++i) {
+        const HANDLE worker = CreateThread(nullptr, 0, Background, state, 0, nullptr);
+        if (!worker) return 82;
+        workers.push_back(worker);
+    }
+    while (static_cast<DWORD>(InterlockedCompareExchange(&state->workersReady, 0, 0)) != state->workerCount) Sleep(1);
     while (!InterlockedCompareExchange(&state->stop, 0, 0)) {
         ControllerFixturePre();
         InterlockedIncrement64(&state->iterations);
+        if (state->unownedTrap) RaiseUnownedFixtureTrap();
         Sleep(state->iterationDelay);
         ControllerFixturePost();
     }
-    const bool exited = WaitForSingleObject(background.value, 2000) == WAIT_OBJECT_0;
+    const bool exited = WaitForMultipleObjects(static_cast<DWORD>(workers.size()), workers.data(), TRUE, 2000) == WAIT_OBJECT_0;
+    for (HANDLE worker : workers) CloseHandle(worker);
     UnmapViewOfFile(state);
     return exited ? 0 : 83;
 }
@@ -230,10 +328,12 @@ std::string StateReceipt(const Request& request, const char* state, bool held, U
         ",\"gateReady\":" + (held && !channel.boundSession.empty() && std::string(state) == "held_at_pre" ? "true" : "false") +
         ",\"boundSessionId\":\"" + channel.boundSession + "\",\"boundRole\":\"" + channel.boundRole + "\"";
     if (fixture) result += ",\"fixtureIterations\":" + std::to_string(InterlockedCompareExchange64(&fixture->iterations, 0, 0)) +
-        ",\"fixtureBackground\":" + std::to_string(InterlockedCompareExchange64(&fixture->background, 0, 0));
+        ",\"fixtureBackground\":" + std::to_string(InterlockedCompareExchange64(&fixture->background, 0, 0)) +
+        ",\"fixtureUnownedTrapDelivered\":" + std::to_string(InterlockedCompareExchange(&fixture->unownedTrapDelivered, 0, 0));
     return result + "}";
 }
-int Run(DWORD targetPid, bool owned, const std::wstring& pipeName, const std::string& token, bool slowFixture) {
+int Run(DWORD targetPid, bool owned, const std::wstring& pipeName, const std::string& token,
+        bool slowFixture, bool multithreadFixture, bool missingDr6Fixture, bool unownedTrapFixture) {
     Handle initial(owned ? nullptr : OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ | SYNCHRONIZE, FALSE, targetPid));
     Require(owned || initial.value, "cannot open explicit target PID");
     const std::wstring path = ImagePath(owned ? GetCurrentProcess() : initial.value);
@@ -255,11 +355,13 @@ int Run(DWORD targetPid, bool owned, const std::wstring& pipeName, const std::st
         Require(fixtureState != nullptr, "cannot map fixture counters");
         memset(fixtureState, 0, sizeof(*fixtureState));
         fixtureState->iterationDelay = slowFixture ? 3000 : 5;
+        fixtureState->workerCount = multithreadFixture ? 15 : 1;
+        fixtureState->unownedTrap = unownedTrapFixture;
         const auto base = reinterpret_cast<ULONG64>(GetModuleHandleW(nullptr));
         sites = {{{"owned_pre", static_cast<DWORD>(reinterpret_cast<ULONG64>(&ControllerFixturePre) - base)},
                   {"owned_post", static_cast<DWORD>(reinterpret_cast<ULONG64>(&ControllerFixturePost) - base)},
-                  {"unused_fixture_batch", static_cast<DWORD>(reinterpret_cast<ULONG64>(&ObserverFixtureBatch) - base)},
-                  {"unused_fixture_command", static_cast<DWORD>(reinterpret_cast<ULONG64>(&ObserverFixtureCommand) - base)}}};
+                  {"owned_aux_pre", static_cast<DWORD>(reinterpret_cast<ULONG64>(&ControllerFixtureAuxPre) - base)},
+                  {"owned_aux_post", static_cast<DWORD>(reinterpret_cast<ULONG64>(&ControllerFixtureAuxPost) - base)}}};
     } else {
         // Only use two sites for the gate: the known pre/post inner-iteration
         // instruction boundaries. Remaining slots are still read-only leads.
@@ -290,6 +392,8 @@ int Run(DWORD targetPid, bool owned, const std::wstring& pipeName, const std::st
     bool initialBreak = false, targetExited = false;
     DWORD simulationThread = 0;
     ULONG64 iterations = 0;
+    ULONG64 trapHits = 0, missingDr6Hits = 0;
+    std::set<DWORD> trapThreads;
     Request releaseRequest{};
     Request shutdownRequest{};
     std::vector<Request> waitingHolds;
@@ -381,10 +485,13 @@ int Run(DWORD targetPid, bool owned, const std::wstring& pipeName, const std::st
                 Require(found != session.threads.end(), "unknown controller trap thread");
                 CONTEXT context{}; context.ContextFlags = CONTEXT_FULL | CONTEXT_DEBUG_REGISTERS;
                 Require(GetThreadContext(found->second.handle, &context) != FALSE, "cannot inspect controller boundary");
-                int index = -1;
-                for (size_t i = 0; i < sites.size(); ++i)
-                    if ((context.Dr6 & (1ULL << i)) && context.Rip == session.base + sites[i].rva) index = static_cast<int>(i);
+                // Fault injection affects only the owned-fixture classification
+                // input; the target still raises real hardware execution traps.
+                if (missingDr6Fixture) context.Dr6 &= ~0xfULL;
+                const int index = OwnedTrapSite(&found->second, exception, context, session.base, sites);
                 if (index >= 0) {
+                    ++trapHits; trapThreads.insert(event.dwThreadId);
+                    if ((context.Dr6 & (1ULL << index)) == 0) ++missingDr6Hits;
                     context.EFlags |= 0x10000; context.Dr6 = 0;
                     Require(SetThreadContext(found->second.handle, &context) != FALSE, "cannot prepare gate instruction resume");
                     session.disposition = DBG_CONTINUE;
@@ -405,6 +512,12 @@ int Run(DWORD targetPid, bool owned, const std::wstring& pipeName, const std::st
                         } else if (!releasing || sawPost || event.dwThreadId != simulationThread) { emergency = true; held = true; }
                         else { sawPost = true; ++iterations; }
                     }
+                } else {
+                    // Do not consume an unrelated trap or let it execute while
+                    // the gate claims control. Preserve its context/disposition
+                    // and retain the event until authenticated shutdown.
+                    EmitTrapDiagnostic("controller-unowned-single-step", event, context);
+                    emergency = true; held = true;
                 }
             } else if (!event.u.Exception.dwFirstChance) { emergency = true; held = true; }
         }
@@ -440,26 +553,38 @@ int Run(DWORD targetPid, bool owned, const std::wstring& pipeName, const std::st
     // failStop so destruction (or a crash) kills an attached target.
     Require(session.Clean(), "controller restore/detach failed");
     session.failStop = false;
-    if (shutdownRequest.id) channel.ReplyTo(shutdownRequest, false, StateReceipt(shutdownRequest, "resumed_and_detached", false, iterations, fixtureState, channel));
+    if (shutdownRequest.id) channel.ReplyTo(shutdownRequest, false, StateReceipt(shutdownRequest,
+        session.exited ? "target_exited" : "resumed_and_detached", false, iterations, fixtureState, channel));
     if (fixtureState) {
         InterlockedExchange(&fixtureState->stop, 1);
         DWORD code = 999;
-        Require(WaitForSingleObject(childProcess.value, 3000) == WAIT_OBJECT_0 && GetExitCodeProcess(childProcess.value, &code) && code == 0,
+        const DWORD expectedCode = unownedTrapFixture ? EXCEPTION_SINGLE_STEP : 0;
+        Require(WaitForSingleObject(childProcess.value, 3000) == WAIT_OBJECT_0 && GetExitCodeProcess(childProcess.value, &code) && code == expectedCode,
                 "owned fixture failed after explicit resume/detach");
+        if (unownedTrapFixture) {
+            const LONG delivered = InterlockedCompareExchange(&fixtureState->unownedTrapDelivered, 0, 0);
+            Require(delivered == 1, "unowned fixture exception was not delivered exactly once");
+            printf("{\"event\":\"controller-unowned-trap-delivered\",\"handlerDeliveries\":%ld,\"exitCode\":%lu}\n", delivered, code);
+        }
         UnmapViewOfFile(fixtureState);
     }
     // Allow the isolated worker to flush the explicit shutdown receipt.
     Sleep(30);
-    printf("{\"event\":\"controller-detached\",\"completedIterations\":%llu,\"restoredAndDetached\":true}\n", iterations); fflush(stdout);
+    printf("{\"event\":\"controller-detached\",\"completedIterations\":%llu,\"trapHits\":%llu,\"trapThreads\":%zu,"
+           "\"missingDr6Hits\":%llu,\"restoredAndDetached\":true}\n", iterations, trapHits, trapThreads.size(), missingDr6Hits); fflush(stdout);
     return 0;
 }
 }
 int wmain(int argc, wchar_t** argv) {
     SetConsoleCtrlHandler(Control, TRUE);
     try {
+        if (argc == 2 && wcscmp(argv[1], L"--self-test-trap-ownership") == 0) return controller::TrapOwnershipFixture();
         if (argc == 3 && wcscmp(argv[1], L"--controller-fixture") == 0) return controller::Fixture(argv[2]);
         const bool slowFixture = argc == 4 && wcscmp(argv[1], L"--fixture-slow") == 0;
-        const bool fixture = argc == 4 && (wcscmp(argv[1], L"--fixture") == 0 || slowFixture) && wcscmp(argv[2], L"--pipe") == 0;
+        const bool missingDr6Fixture = argc == 4 && wcscmp(argv[1], L"--fixture-missing-dr6") == 0;
+        const bool unownedTrapFixture = argc == 4 && wcscmp(argv[1], L"--fixture-unowned-trap") == 0;
+        const bool multithreadFixture = missingDr6Fixture || (argc == 4 && wcscmp(argv[1], L"--fixture-multithread") == 0);
+        const bool fixture = argc == 4 && (wcscmp(argv[1], L"--fixture") == 0 || slowFixture || multithreadFixture || unownedTrapFixture) && wcscmp(argv[2], L"--pipe") == 0;
         const bool target = argc == 5 && wcscmp(argv[1], L"--pid") == 0 && wcscmp(argv[3], L"--pipe") == 0;
         Require(fixture || target, "usage: TF3RuntimeController --fixture --pipe NAME | --pid PID --pipe NAME; token in TF3_RUNTIME_TOKEN");
         const std::wstring name = argv[fixture ? 3 : 4];
@@ -469,6 +594,7 @@ int wmain(int argc, wchar_t** argv) {
         char token[65]{};
         Require(GetEnvironmentVariableA("TF3_RUNTIME_TOKEN", token, sizeof(token)) == 64, "TF3_RUNTIME_TOKEN must contain 64 lowercase hex characters");
         for (size_t i = 0; i < 64; ++i) Require((token[i] >= '0' && token[i] <= '9') || (token[i] >= 'a' && token[i] <= 'f'), "invalid IPC token");
-        return controller::Run(target ? Number(argv[2], 1, MAXDWORD) : 0, fixture, name, token, slowFixture);
+        return controller::Run(target ? Number(argv[2], 1, MAXDWORD) : 0, fixture, name, token,
+                               slowFixture, multithreadFixture, missingDr6Fixture, unownedTrapFixture);
     } catch (const std::exception& error) { fprintf(stderr, "controller_error: %s\n", error.what()); return 2; }
 }

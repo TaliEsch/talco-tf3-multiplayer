@@ -9,12 +9,16 @@ tooling; it does not provide functioning multi-instance multiplayer.
 
 ### What became functional
 
-- A launcher-prepared, exclusive disposable save copy can be hash/size verified,
-  requested through a one-shot userdata record and automatically loaded by TF3.
-  The live run proved the corrected empty `SavegameId.path` behavior and reached
-  `Game is ready`. The final source additionally defers loading until two update
-  callbacks after `mainMenuReady`; that timing repair is source/review tested but
-  was not restaged or live-retested after the later observer crash.
+- A launcher-prepared, exclusive disposable save copy can be hash/size verified
+  and requested through a one-shot userdata record. A corrected live run with
+  exactly one staged mod selected the intended 32-file source, consumed nonce
+  `43b49d368fbbd409ae2614ada7b0c757`, loaded the disposable save and reached
+  `Game is ready`. It also reproduced `GetApi() must not be called in the recipe`
+  and `WindowContainer is not available`. Shipped TF3 source shows that stock
+  loading first mounts `ProgressPage` and calls `app.loadGame` from its second
+  React `onStep`; `--script` exposes no equivalent main-menu mount point. The
+  direct loader is therefore a successful single-game diagnostic, not a clean
+  production startup mechanism.
 - The exact installed build was observed on a real simulation thread with four
   hardware execution sites, 128 hits, stable site order and verified register
   restoration/detach. This is an observed update boundary, not yet a canonical
@@ -37,6 +41,9 @@ tooling; it does not provide functioning multi-instance multiplayer.
   the legacy company-only path is explicitly `local_diagnostic`.
 - Native IPC, client framing, persistent session binding, Host/Join admission
   gating, disconnect/halt fencing and diagnostic-only transport are implemented.
+  Authenticated socket clients now expose stable snapshot fanout for verified
+  host frames without replacing the existing admission/save handler; locally
+  synthesized transport/lifecycle events never enter that authoritative stream.
   The current controller advertises `productionQualified:false`, so ordinary
   Host/Join correctly remains closed rather than mistaking debugger receipts for
   world evidence.
@@ -45,7 +52,8 @@ tooling; it does not provide functioning multi-instance multiplayer.
 
 1. `src/startup-load.mjs` creates and verifies a random disposable copy and the
    exact one-shot request. `mod/content/tf3mp_startup_load.script.lua` consumes
-   that request before calling `app.loadGame`.
+   that request before calling `app.loadGame`. This path reaches the world but
+   violates the verified TF3 main-menu React lifecycle and is diagnostic-only.
 2. `native/runtime_observer.cpp` performs exact-build, mapped-byte-gated
    observation. The default simulation profile is the only live profile still
    selectable. `Build-NativeRuntime.ps1` builds it with `/W4 /WX`.
@@ -56,6 +64,8 @@ tooling; it does not provide functioning multi-instance multiplayer.
    non-admitting diagnostic transport mode. This gate is not yet a working
    gameplay adapter: no production-qualified runtime exists and normal network
    Host/Join does not construct a per-game `EngineSessionAdapter`.
+   `src/client.mjs` now permits a future adapter to subscribe to authenticated,
+   schema-checked host frames while preserving the existing primary handler.
 5. `mod/content/tf3mp_status_panel.script.tl` exchanges the fixed vehicle
    discovery/request files. `mod/content/tf3mp_status.script.tl` checks live
    company ownership/revision, executes one native vehicle command and records a
@@ -79,14 +89,15 @@ vehicle discovery or mutation. Windows Error Reporting recorded exception
 only 42 background apply-candidate hits and then target exit; the bridge reported
 disconnect and no action receipt. Therefore no uncertain mutation was retried.
 
-The observer previously forwarded a single-step unless DR6 and RIP both matched.
-The owned implementation now classifies exception address, RIP and the armed
-execution slot, reports rejected traps, treats target exit as failure and passes
-16-thread/all-site, missing-DR6 and cutoff/cleanup fixtures. Nevertheless the
-precise live crash mechanism is unproven. Live `--profile command` is quarantined
-before process access, and RVA `0x9D3120` remains unsafe/unqualified. The native
-controller has a related DR6-only classification path that also requires review
-before production use.
+The observer and controller now classify exception address, RIP, tracked/armed
+thread identity and the matching enabled execution slot; TF and DR6 BD/BS/BT
+causes are rejected. Teardown records strict per-thread ownership evidence,
+consumes at most one qualifying queued first-chance trap and always forwards
+second chance. An owned negative fixture proves an unowned trap remains held,
+release is refused, control stays responsive and shutdown delivers the exception
+exactly once. Nevertheless the precise live crash mechanism is unproven. Live
+`--profile command` is quarantined before process access, and RVA `0x9D3120`
+remains unsafe/unqualified. Owned-process tests do not requalify that TF3 site.
 
 Unresolved ABI assumptions include semantic factory/admission boundaries,
 output/callback ownership, command move/destruction rules, safe suppression,
@@ -127,18 +138,23 @@ production checkpoint agreement. No two-instance no-input baseline exists.
 
 ### Verification record
 
-- Full regression suite after integration: **808 passed, 0 failed, 0 skipped or
-  cancelled** (`npm run check`, 86.4 seconds). This supersedes both the incorrect
-  478 count and the earlier independently verified 756-test baseline.
+- Full regression suite after this integration: **813 passed, 0 failed, 0 skipped
+  or cancelled** (`npm run check`, 88.55 seconds). This supersedes the prior 808
+  result, the incorrect 478 count and the independently verified 756 baseline.
 - `Build-NativeRuntime.ps1 -RunSmokeTest`: passed MSVC x64 `/W4 /WX` build and
   owned observer/controller smoke tests.
-- Observer/controller focused suite: 21/21 passed, including fail-stop and
-  multi-thread single-step stress.
+- Observer/controller focused suite: 25/25 passed in 36.00 seconds, including
+  strict trap ownership, 16-thread/missing-DR6 stress, cleanup races, fail-stop
+  and real unowned-exception forwarding.
+- Authenticated network focused suite: 11/11 passed, including a signed
+  post-admission coordination frame, primary-before-observer ordering, stable
+  fanout, observer fault isolation and lifecycle separation.
 - `Build-NativeIpc.ps1`: passed MSVC x64 `/W4 /WX` build.
 - Mod review: 29 content files, zero executables, manifest
   `80ed637bb9c609d7e990616ebd1797b3571d1d536a39f447779af4b905fe1dc7`.
 - `git diff --check`: passed before the implementation commit.
-- Single-game verified: startup direct-path load, simulation observation,
+- Single-game verified: startup direct-path load with the UI lifecycle faults
+  above, simulation observation,
   controller hold/one-release/teardown, vehicle discovery and reversible
   host-sequenced stop/start.
 - Isolated/model-tested: native IPC/authentication/fail-stop, Host/Join gating,
@@ -149,7 +165,9 @@ production checkpoint agreement. No two-instance no-input baseline exists.
 
 ### Remaining implementation versus acceptance
 
-Implementation still required: a safe qualified command interception boundary;
+Implementation still required: a clean supported/native route into TF3's stock
+`ProgressPage` load lifecycle (or another qualified automatic load mechanism);
+a safe qualified command interception boundary;
 copy/suppress/replay and exact result correlation; production wiring from
 Host/Join into one game adapter per process; a canonical cross-instance identity
 map; complete or deliberately authoritative background-state synchronization;
@@ -176,10 +194,11 @@ rejects the non-production native runtime. For the next reviewed disposable run:
 
 1. Verify exact game, mod and native hashes; ensure TF3 is closed; stage the
    reviewed 29-file mod; create a fresh exclusive disposable copy of a known save.
-2. Launch via Steam with
-   `-applaunch 3493540 --script tf3mp_status_1::/tf3mp_startup_load.script.lua`
-   and manually confirm Steam's custom-parameter prompt. Require request
-   consumption and `Game is ready`; never use the original save.
+2. Until an automatic stock-lifecycle integration exists, use TF3's ordinary
+   Load Game UI to select the hash-verified disposable copy; never use the
+   original save. The `--script .../tf3mp_startup_load.script.lua` route is a
+   diagnostic only: its reaching `Game is ready` does not waive the observed
+   MainMenu/WindowContainer faults.
 3. Run only a separately reviewed exact-build native profile. Require mapped-byte
    validation, no instruction/game-data writes, controlled teardown and a live
    process after detach. The quarantined command profile is forbidden.
@@ -203,17 +222,19 @@ rejects the non-production native runtime. For the next reviewed disposable run:
 Branch: `main`. Implementation commit: `db22017` (`Integrate guarded native
 runtime qualification`). Private remote: `origin` at
 `TaliEsch/talco-tf3-multiplayer`, independently confirmed `PRIVATE`. Commits
-`db22017` and `b20367d` were pushed to `origin/main`; this final status correction
-is the only later documentation change. No release was published. The final
-source mod was not restaged after the loader timing repair and command-profile
-quarantine.
+`db22017`, `b20367d` and `8ef0711` were pushed to `origin/main`; the current
+trap/socket/live-loader continuation is not yet committed at the time of this
+record. No release was published. Preserved staging backups were moved intact
+outside TF3's scanned `staging_area` after they caused a duplicate-ID selection;
+the corrected live run then matched the repository's 32-file source exactly.
 
-Independent review should focus on debugger exception forwarding and controller
-DR6 handling; kill-on-exit teardown semantics; command lifetime/output contracts;
+Independent review should focus on the new cleanup ownership proof and remaining
+Windows debug-event races; kill-on-exit teardown semantics; command lifetime/output contracts;
 checkpoint digest coverage/collision properties; the missing production
 Host/Join-to-adapter construction; prevention of stock-UI bypasses; and whether
 the single-game vehicle result can be generalized without carrying local entity
-IDs across instances.
+IDs across instances. It should also review whether any supported, unmodified
+TF3 entry point can reproduce the stock `ProgressPage` load sequence.
 
 **Readiness verdict: not multiplayer-ready.** Real single-game engine observation,
 control and one reversible host-ordered vehicle mutation are now demonstrated,

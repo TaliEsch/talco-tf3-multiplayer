@@ -281,7 +281,18 @@ void ValidateMapped(HANDLE process, ULONG64 base, const Image& image, const std:
         Require(!mismatch && memcmp(actual.data(), image.bytes.data() + offset, length) == 0, "mapped observation bytes mismatch");
     }
 }
-struct SavedThread { HANDLE handle = nullptr; CONTEXT original{}; bool armed = false; bool cleanupSuspended = false; };
+struct SavedThread {
+    HANDLE handle = nullptr;
+    CONTEXT original{};
+    bool armed = false;
+    bool cleanupSuspended = false;
+    // One queued execution trap can be hidden behind another thread's event.
+    // Capture its ownership before restoring the debug registers, never infer
+    // ownership from an exception address after restoration.
+    CONTEXT cleanupTrap{};
+    int cleanupTrapSite = -1;
+    bool cleanupMayHaveQueuedTrap = false;
+};
 struct Session {
     DWORD pid = 0;
     bool attached = false;
@@ -311,9 +322,17 @@ struct Session {
                     if (suspended == static_cast<DWORD>(-1)) { fprintf(stderr, "restore_suspend_failed thread=%lu error=%lu\n", pair.first, GetLastError()); ok = false; continue; }
                     thread.cleanupSuspended = true;
                 }
-                CONTEXT context{}; context.ContextFlags = CONTEXT_DEBUG_REGISTERS;
+                CONTEXT context{}; context.ContextFlags = CONTEXT_CONTROL | CONTEXT_DEBUG_REGISTERS;
                 if (!GetThreadContext(thread.handle, &context)) { fprintf(stderr, "restore_get_context_failed thread=%lu error=%lu\n", pair.first, GetLastError()); ok = false; }
                 else {
+                    if (!pending || event.dwThreadId != pair.first) {
+                        thread.cleanupMayHaveQueuedTrap = true;
+                        EXCEPTION_RECORD candidate{}; candidate.ExceptionCode = EXCEPTION_SINGLE_STEP;
+                        candidate.ExceptionAddress = reinterpret_cast<void*>(context.Rip);
+                        thread.cleanupTrapSite = ConfiguredTrapSite(candidate, context, base, sites);
+                        thread.cleanupTrap = context;
+                    }
+                    context.ContextFlags = CONTEXT_DEBUG_REGISTERS;
                     context.Dr0 = thread.original.Dr0; context.Dr1 = thread.original.Dr1;
                     context.Dr2 = thread.original.Dr2; context.Dr3 = thread.original.Dr3;
                     context.Dr6 = thread.original.Dr6; context.Dr7 = thread.original.Dr7;
@@ -367,23 +386,38 @@ struct Session {
                         action = DBG_EXCEPTION_NOT_HANDLED;
                         if (IsSystemAttachBreakpoint(process, queued.u.Exception.ExceptionRecord)) action = DBG_CONTINUE;
                         if (queued.u.Exception.ExceptionRecord.ExceptionCode == EXCEPTION_SINGLE_STEP) {
-                            const auto address = reinterpret_cast<ULONG64>(queued.u.Exception.ExceptionRecord.ExceptionAddress);
-                            for (const auto& site : sites) if (base && address == base + site.rva) action = DBG_CONTINUE;
-                            if (action == DBG_CONTINUE) {
-                                // A thread that trapped concurrently can expose
-                                // its exception context only when this event is
-                                // delivered. Restore that context too; otherwise
-                                // continuing can retrigger its stale DR address.
-                                const auto found = threads.find(queued.dwThreadId);
-                                if (found == threads.end()) { ok = false; break; }
+                            const auto found = threads.find(queued.dwThreadId);
+                            if (found != threads.end()) {
                                 CONTEXT context{}; context.ContextFlags = CONTEXT_CONTROL | CONTEXT_DEBUG_REGISTERS;
                                 if (!GetThreadContext(found->second.handle, &context)) { ok = false; break; }
-                                const auto& original = found->second.original;
-                                context.Dr0 = original.Dr0; context.Dr1 = original.Dr1;
-                                context.Dr2 = original.Dr2; context.Dr3 = original.Dr3;
-                                context.Dr6 = original.Dr6; context.Dr7 = original.Dr7;
-                                context.EFlags |= 0x10000;
-                                if (!SetThreadContext(found->second.handle, &context)) { ok = false; break; }
+                                auto& thread = found->second;
+                                // The pending rejected event is never a saved
+                                // cleanup candidate. Second chance is always the
+                                // target's exception, even at one of our sites.
+                                CONTEXT proof = context;
+                                proof.Dr0 = thread.cleanupTrap.Dr0; proof.Dr1 = thread.cleanupTrap.Dr1;
+                                proof.Dr2 = thread.cleanupTrap.Dr2; proof.Dr3 = thread.cleanupTrap.Dr3;
+                                proof.Dr7 = thread.cleanupTrap.Dr7;
+                                const int index = ConfiguredTrapSite(queued.u.Exception.ExceptionRecord, proof, base, sites);
+                                const auto& original = thread.original;
+                                const bool restoredRegisters = context.Dr0 == original.Dr0 && context.Dr1 == original.Dr1 &&
+                                    context.Dr2 == original.Dr2 && context.Dr3 == original.Dr3 && context.Dr7 == original.Dr7;
+                                // A concurrently trapped thread may expose its
+                                // actual exception context only at delivery.
+                                const bool ownedRegisters = ConfiguredTrapSite(queued.u.Exception.ExceptionRecord, context, base, sites) >= 0;
+                                const bool savedTrap = thread.cleanupTrapSite >= 0 && index == thread.cleanupTrapSite &&
+                                    context.Rip == thread.cleanupTrap.Rip && restoredRegisters;
+                                if (queued.u.Exception.dwFirstChance && thread.cleanupMayHaveQueuedTrap &&
+                                    (ownedRegisters || savedTrap)) {
+                                    action = DBG_CONTINUE;
+                                    context.Dr0 = original.Dr0; context.Dr1 = original.Dr1;
+                                    context.Dr2 = original.Dr2; context.Dr3 = original.Dr3;
+                                    context.Dr6 = original.Dr6; context.Dr7 = original.Dr7;
+                                    context.EFlags |= 0x10000;
+                                    if (!SetThreadContext(thread.handle, &context)) { ok = false; break; }
+                                } else EmitTrapDiagnostic("cleanup-forwarded-unowned-single-step", queued, context);
+                                thread.cleanupTrapSite = -1;
+                                thread.cleanupMayHaveQueuedTrap = false;
                             }
                         }
                     } else if (queued.dwDebugEventCode == LOAD_DLL_DEBUG_EVENT && queued.u.LoadDll.hFile) CloseHandle(queued.u.LoadDll.hFile);

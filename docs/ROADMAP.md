@@ -8,18 +8,29 @@ simulation observation, authenticated native hold/release, and one reversible
 HostAuthority-sequenced vehicle action with observed restoration. It does not
 establish multiplayer readiness.
 
+Continuation evidence: the native controller now uses strict tracked-thread,
+exception-address, RIP and execution-slot ownership; cleanup forwards all
+second-chance traps and has a real unowned-exception regression. Authenticated
+client fanout now carries only verified host frames, providing a safe prerequisite
+for later production adapter construction. A corrected disposable launch reached
+`Game is ready`, but TF3's shipped UI source proves the direct `--script`
+`app.loadGame` call bypasses the stock `ProgressPage` React mount and causes the
+observed MainMenu/WindowContainer faults. Automatic load remains implementation
+work, not completed functionality. Current regression count is 813/813.
+
 Work in this order:
 
-1. Keep live `--profile command` quarantined. Independently review the
-   `0x80000004` crash at admission RVA `0x9D3120`, apply equivalent strict trap
-   ownership to the controller, and qualify a safe semantic command boundary on
+1. Keep live `--profile command` quarantined. Strict trap ownership and teardown
+   regressions are implemented, but independently review the `0x80000004` crash
+   at admission RVA `0x9D3120` and qualify a safe semantic command boundary on
    disposable instances before any suppression experiment.
 2. Implement immutable command capture, origin suppression, host admission for
    host and participant actions, per-instance entity resolution, exactly-once
    replay and correlated native postconditions. Cover both stock vehicle-window
    and bulk-manager paths; do not leave unsynchronized bypasses enabled.
 3. Construct the real production `EngineSessionAdapter` in Host and Join. Reuse
-   the gate's persistent binding, keep transport receipts outside world evidence,
+   the gate's persistent binding and authenticated client subscription, keep
+   transport receipts outside world evidence,
    and provide a complete hold/release/halt lifecycle that continues receiving
    control traffic while simulation is paused.
 4. Resolve background synchronization. The game producer now covers six public
@@ -29,6 +40,8 @@ Work in this order:
 5. Implement coordinated save checkpoints/reload, authenticated redistribution,
    persistent company assignment, fresh epochs and duplicate barriers after
    recovery. Never retry unknown mutations or repair balances.
+   This includes a supported or qualified way to enter TF3's stock
+   `ProgressPage` load lifecycle; the current direct startup script is diagnostic.
 6. Complete the road loop and native accounting: roads, depots, stops, purchase,
    assignment, start/stop, sale, lines, construction/purchase costs, operating
    costs and income, including cross-company rejection.

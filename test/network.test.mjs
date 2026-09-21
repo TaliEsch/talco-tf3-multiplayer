@@ -72,6 +72,62 @@ test("authenticated client is admitted and exchanges test message", async () => 
   await shutdown(instance.server, [handle.socket]);
 });
 
+test("authenticated socket subscribers observe signed coordination frames with stable ordered fanout", async () => {
+  const instance = startHost({ secret: SECRET, sessionId: "subscriber-session", port: 0, buildHash: BUILD, modManifestHash: MODS });
+  await once(instance.server, "listening");
+  const primary = [], observed = [], order = [], late = [];
+  let handle, peer, primaryContext, observerContext, removeStable;
+  const admitted = new Set();
+  let started = false;
+  const maybeStart = () => {
+    if (started || admitted.size !== 2) return;
+    started = true;
+    for (const [playerId, companyEntity] of admitted) instance.authority.bindCompanyEntity(playerId, companyEntity);
+    instance.beginCoordination({ checkpointHash: "d".repeat(64), updateCount: 100 });
+  };
+  try {
+    await new Promise((resolve, reject) => {
+      handle = connectClient({ secret: SECRET, sessionId: instance.sessionId, port: instance.server.address().port, displayName: "Subscriber", buildHash: BUILD, modManifestHash: MODS,
+        onMessage(message, context) {
+          primary.push(message.kind); order.push(`primary:${message.kind}`);
+          if (message.kind === "admitted") { primaryContext = context; admitted.add([message.payload.player.playerId, 101]); maybeStart(); }
+          if (message.kind === "coordination_prepare") resolve();
+          if (message.kind === "error") reject(new Error(message.payload.code));
+        } });
+      handle.subscribe((message, context) => {
+        observed.push({ kind: message.kind, playerId: context.playerId }); observerContext = context; order.push(`observer:${message.kind}`);
+        if (message.kind === "coordination_prepare") {
+          removeStable();
+          handle.subscribe(lateObserver);
+          throw new Error("observer failure is isolated");
+        }
+      });
+      const lateObserver = message => late.push(message.kind);
+      removeStable = handle.subscribe(message => { if (message.kind === "coordination_prepare") order.push(`stable:${message.kind}`); });
+      peer = connectClient({ secret: SECRET, sessionId: instance.sessionId, port: instance.server.address().port, displayName: "Peer", buildHash: BUILD, modManifestHash: MODS,
+        onMessage(message) {
+          if (message.kind === "admitted") { admitted.add([message.payload.player.playerId, 102]); maybeStart(); }
+          if (message.kind === "error") reject(new Error(message.payload.code));
+        } });
+    });
+    assert.equal(primary.includes("admitted"), true);
+    assert.equal(observed.some(message => message.kind === "coordination_prepare"), true);
+    assert.equal(observed.find(message => message.kind === "coordination_prepare").playerId, handle.playerId);
+    assert.equal(primaryContext, observerContext);
+    assert.equal(order.indexOf("primary:coordination_prepare") < order.indexOf("observer:coordination_prepare"), true);
+    assert.equal(order.includes("stable:coordination_prepare"), true);
+    assert.deepEqual(late, []);
+    const unsubscribe = handle.subscribe(() => assert.fail("unsubscribed observer ran"));
+    unsubscribe();
+    assert.throws(() => handle.subscribe(null), /INVALID_MESSAGE_SUBSCRIBER/);
+  } finally {
+    await shutdown(instance.server, [handle, peer].filter(Boolean).map(connection => connection.socket));
+  }
+  assert.equal(observed.some(message => message.kind === "session_ended"), false);
+  assert.deepEqual(late, []);
+  assert.throws(() => handle.subscribe(() => {}), /CLIENT_CONNECTION_CLOSED/);
+});
+
 test("test-message payload is strictly bounded", async () => {
   const instance = startHost({ legacyModelRelay: true, secret: SECRET, sessionId: "bad-test-session", port: 0, buildHash: BUILD, modManifestHash: MODS });
   await once(instance.server, "listening");

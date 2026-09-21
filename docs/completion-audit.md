@@ -9,6 +9,22 @@ game-produced checkpoint domains, and a single-game host-sequenced reversible
 vehicle stop/start proof. The live vehicle proof applied host sequences 1 and 2
 to company 3141/entity 66005 and restored the original running state.
 
+The continuation batch hardened trap ownership and teardown: accepted traps now
+require a tracked armed thread plus matching exception address, RIP and enabled
+execution slot; an owned real-exception regression verifies emergency hold,
+release refusal, responsive control and exact second-chance forwarding. The
+authenticated socket client now exposes stable subscriptions only for verified
+server frames, not local transport/lifecycle notifications.
+
+A fresh live startup check first exposed that TF3 was selecting a preserved
+same-ID backup from its scanned staging directory. Both backups were moved intact
+to `local/tf3mp_stage_backups`; the remaining 32 staged files then matched the
+repository. The corrected run consumed its one-shot request, loaded the exact
+disposable and reached `Game is ready`, but still produced the MainMenu `GetApi`
+and missing `WindowContainer` faults. Local shipped UI source confirms stock TF3
+loads from `ProgressPage`'s second React step; `--script` has no public main-menu
+mount point. Automatic clean load therefore remains unfinished.
+
 The later command-profile run failed: TF3 crashed with Windows exception
 `0x80000004` at proposed admission RVA `0x9D3120` before discovery or mutation.
 No uncertain action was retried. That profile is now disabled before process
@@ -17,12 +33,15 @@ unqualified. Normal Host/Join also remains deliberately closed because the nativ
 runtime reports `productionQualified:false` and no production game adapter is
 constructed.
 
-Current verification is 808/808 passing, not 478/478 and not the earlier 756-test
-baseline. Both native builds pass MSVC `/W4 /WX`; mod review passes with 29 files,
+Current verification is 813/813 passing in 88.55 seconds, not 478/478 and not the
+earlier 756-test baseline. The focused observer/controller suite is 25/25 and the
+focused authenticated-network suite is 11/11. Both native builds pass MSVC
+`/W4 /WX`; mod review passes with 29 files,
 zero executables and manifest
 `80ed637bb9c609d7e990616ebd1797b3571d1d536a39f447779af4b905fe1dc7`.
 
-Unfinished implementation: safe capture/suppression/replay, per-instance identity,
+Unfinished implementation: clean automatic entry into the stock save-load
+lifecycle, safe capture/suppression/replay, per-instance identity,
 complete background-state agreement, checkpoint save/reload recovery, production
 Host/Join adapter wiring, separate-company accounting and the full road loop.
 Unperformed acceptance: two TF3 instances, cross-machine, LAN/Internet and four

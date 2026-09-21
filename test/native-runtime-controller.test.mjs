@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { existsSync, statSync } from 'node:fs';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import net from 'node:net';
 import { fileURLToPath } from 'node:url';
@@ -11,6 +11,10 @@ const sources = ['runtime_controller.cpp', 'runtime_observer.cpp', 'runtime_ipc.
   .map(name => fileURLToPath(new URL(`../native/${name}`, import.meta.url)));
 const skip = process.platform !== 'win32' || !existsSync(exe);
 const sleep = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
+function assertFreshBinary() {
+  assert.ok(sources.every(source => statSync(exe).mtimeMs >= statSync(source).mtimeMs),
+    'Run Build-NativeRuntime.ps1 first; controller executable or an included dependency is stale.');
+}
 function frame(type, id, session, payload) {
   const body = Buffer.from(JSON.stringify(payload));
   const result = Buffer.alloc(36 + body.length);
@@ -59,8 +63,7 @@ async function connect(credentials, overrideToken) {
   } catch (error) { socket.destroy(); throw error; }
 }
 async function start(t, mode = '--fixture', bind = true) {
-  assert.ok(sources.every(source => statSync(exe).mtimeMs >= statSync(source).mtimeMs),
-    'Run Build-NativeRuntime.ps1 first; controller executable or an included dependency is stale.');
+  assertFreshBinary();
   const credentials = { pipe: `tf3_gate_${randomBytes(10).toString('hex')}`, token: randomBytes(32).toString('hex') };
   const child = spawn(exe, [mode, '--pipe', credentials.pipe], {
     windowsHide: true, env: { ...process.env, TF3_RUNTIME_TOKEN: credentials.token }, stdio: ['ignore', 'pipe', 'pipe']
@@ -111,6 +114,74 @@ async function waitForProcessExit(pid, timeout = 5000) {
   }
   assert.fail(`owned fixture ${pid} remained alive after controller termination`);
 }
+
+test('native controller trap ownership requires tracked armed execution slots, matching exception address and RIP, and excludes TF/BD/BS/BT', { skip }, () => {
+  assertFreshBinary();
+  const result = spawnSync(exe, ['--self-test-trap-ownership'], { encoding: 'utf8', windowsHide: true, timeout: 5000 });
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout.trim()), {
+    event: 'controller-trap-ownership-passed', sites: 4, rejectedCases: 52, missingDr6Accepted: true
+  });
+});
+
+for (const mode of ['--fixture-multithread', '--fixture-missing-dr6']) {
+  test(`native controller ${mode} owns traps across 16 threads and restores cleanly after repeated iteration releases`, { skip, timeout: 25000 }, async t => {
+    const runtime = await start(t, mode), client = runtime.client;
+    const before = await held(client);
+    for (let iteration = 1; iteration <= 12; iteration++) {
+      const release = await client.control('release');
+      assert.equal(release.type, 4);
+      assert.equal(release.payload.engineHalted, true);
+      assert.equal(release.payload.completedIterations, iteration);
+      assert.equal(release.payload.fixtureIterations, before.fixtureIterations + iteration);
+    }
+    const paused = (await client.control('ping')).payload;
+    await sleep(100);
+    const after = (await client.control('ping')).payload;
+    assert.equal(after.fixtureIterations, paused.fixtureIterations);
+    assert.equal(after.fixtureBackground, paused.fixtureBackground);
+    assert.equal((await client.control('shutdown')).payload.state, 'resumed_and_detached');
+    assert.equal((await runtime.exited).code, 0, runtime.errors());
+    const detached = runtime.output().trim().split(/\r?\n/).map(line => JSON.parse(line))
+      .find(value => value.event === 'controller-detached');
+    assert.equal(detached.trapThreads, 16, 'every owned fixture worker and the iteration thread must trap');
+    assert.ok(detached.trapHits >= 55, 'requires worker pre/post traps and all iteration boundaries');
+    if (mode === '--fixture-missing-dr6') assert.equal(detached.missingDr6Hits, detached.trapHits);
+    assert.equal(detached.restoredAndDetached, true);
+    assert.equal(runtime.errors(), '');
+  });
+}
+
+test('native controller preserves an unowned trap through emergency hold and shutdown second chance', { skip, timeout: 25000 }, async t => {
+  const runtime = await start(t, '--fixture-unowned-trap'), client = runtime.client;
+  await held(client);
+  const release = await client.control('release');
+  assert.equal(release.type, 6);
+  assert.equal(release.payload.code, 'UNKNOWN_ITERATION_OUTCOME');
+  const before = (await client.control('ping')).payload;
+  assert.equal(before.state, 'emergency_halted');
+  assert.equal(before.engineHalted, true);
+  assert.equal(before.fixtureUnownedTrapDelivered, 0, 'original exception stays held before shutdown');
+  assert.equal((await client.control('release')).payload.code, 'GATE_NOT_RELEASABLE');
+  await sleep(100);
+  const after = (await client.control('ping')).payload;
+  assert.equal(after.fixtureIterations, before.fixtureIterations);
+  assert.equal(after.fixtureBackground, before.fixtureBackground);
+  assert.equal(after.fixtureUnownedTrapDelivered, 0);
+  assert.equal((await client.control('shutdown')).type, 4);
+  assert.equal((await runtime.exited).code, 0, runtime.errors());
+  const events = runtime.output().trim().split(/\r?\n/).map(line => JSON.parse(line));
+  const rejected = events.find(value => value.reason === 'controller-unowned-single-step');
+  assert.equal(rejected.firstChance, 1);
+  assert.notEqual(rejected.exceptionAddress, rejected.rip);
+  const forwarded = events.find(value => value.reason === 'cleanup-forwarded-unowned-single-step');
+  assert.equal(forwarded.firstChance, 0, 'shutdown must forward the unhandled second chance');
+  assert.equal(forwarded.exceptionAddress, rejected.exceptionAddress);
+  assert.deepEqual(events.find(value => value.event === 'controller-unowned-trap-delivered'), {
+    event: 'controller-unowned-trap-delivered', handlerDeliveries: 1, exitCode: 0x80000004
+  });
+  assert.equal(runtime.errors(), '');
+});
 
 test('native controller holds all fixture threads, receives control while held, and releases exactly one real iteration', { skip, timeout: 25000 }, async t => {
   const runtime = await start(t), client = runtime.client;
