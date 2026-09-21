@@ -43,23 +43,26 @@ end
 
 local function component(api, id, name)
   local kind = api and api.type and api.type.ComponentType and api.type.ComponentType[name]
-  if not entity(id) or kind == nil
-    or not api.engine or type(api.engine.getComponent) ~= "function" then fail() end
+  if not entity(id) or kind == nil then fail() end
   return api.engine.getComponent(id, kind)
 end
 
 local function clock(api, stage)
-  stage("clockWorld")
-  if not api or not api.engine or not api.engine.util or type(api.engine.util.getWorld) ~= "function" then fail() end
+  stage("clockLookup")
   local world = api.engine.util.getWorld()
-  if not safeint(world) or world < 0 or world > MAX_INT then fail() end
+  stage("clockIdentity")
+  -- Engine-owned world handles are not placed-asset IDs. The public contract is
+  -- integer, with no positive/int32 restriction. Forward the returned handle
+  -- unchanged, as the working bridge does; never accept it from a request.
+  if not safeint(world) then fail() end
   stage("clockComponents")
   -- Native API namespaces need not be Lua tables. Match the working bridge's
   -- named constant access; validate the returned data, not the binding wrapper.
   local types = api.type and api.type.ComponentType
   local speedType, timeType = types and types.GAME_SPEED, types and types.GAME_TIME
-  if speedType == nil or timeType == nil or type(api.engine.getComponent) ~= "function" then fail() end
-  -- World entity zero is valid, unlike ordinary result and company entities.
+  if speedType == nil or timeType == nil then fail() end
+  -- All native calls are protected by collect's pcall. Callable bindings need
+  -- not report Lua type "function"; missing/throwing calls still fail closed.
   local speed = api.engine.getComponent(world, speedType)
   local time = api.engine.getComponent(world, timeType)
   stage("clockPaused")
@@ -148,7 +151,6 @@ local function encodeTag(tag)
 end
 
 local function transform(api, matrix)
-  if not api or not api.type or not api.type.Mat4f or type(api.type.Mat4f.cols) ~= "function" then fail() end
   local out = {}
   for col = 1, 4 do
     local vector = api.type.Mat4f.cols(matrix, col)
@@ -180,9 +182,7 @@ local function collect(api, request, stage)
   stage("clock")
   local updateCount, tickCount = clock(api, stage)
   stage("streetApi")
-  if not api.engine or not api.engine.system or not api.engine.system.streetSystem
-    or type(api.engine.system.streetSystem.getEdgeForEdgeObject) ~= "function"
-    or type(api.engine.entityExists) ~= "function" then fail() end
+  if not api.engine.system or not api.engine.system.streetSystem then fail() end
   local candidate, object = nil, nil
   for _, id in ipairs(request.resultEntities) do
     stage("resultEntity")

@@ -5,7 +5,10 @@ This is the current plan. Historical status is in completion-audit.md and
 archive/roadmap-before-scope-review.md; historical blockers do not override this plan.
 
 21 September update: the repaired apply reader reached the read-only engine
-handler in the 07:43 run, then failed at `clock`. Full readback is still unverified.
+handler in the 07:43 run, then failed at `clock`; the 07:55 run narrowed the failure
+to `clockWorld`. Full readback is still unverified. The current repair forwards
+the API-returned integer world handle unchanged (not as a positive asset ID),
+and uses protected native calls without Lua function-type assumptions.
 The clock/component readers now use named API constants like the working bridge,
 without requiring native namespaces to be Lua tables. Paused-state and numeric
 checks remain mandatory; clock failures have precise stages. Negative proposal

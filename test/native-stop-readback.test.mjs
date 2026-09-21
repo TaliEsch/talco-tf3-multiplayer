@@ -19,6 +19,12 @@ function nativeNamespace(L, globalName, constants){
   lua.lua_setmetatable(L,-2);
   lua.lua_setglobal(L,to_luastring(globalName));
 }
+function nativeCallable(L, globalName){
+  // Model callable userdata without assuming the live TF3 representation. The
+  // Lua side supplies __call so these exercise the public binding shape directly.
+  lua.lua_newuserdata(L,0);
+  lua.lua_setglobal(L,to_luastring(globalName));
+}
 function run(mutation='', namespaces={}){
   const componentConstants=namespaces.component;
   const edgeConstants=namespaces.edge;
@@ -27,21 +33,23 @@ function run(mutation='', namespaces={}){
   const script=`
 local m=(function()${source}end)()
 local reads=0
+local clockHandles={}
 local CT=${componentType}
 local stop={param=.25,transf={{x=1,y=0,z=0,w=0},{x=0,y=1,z=0,w=0},{x=0,y=0,z=1,w=0},{x=4,y=5,z=6,w=1}},edgeObjectConstruction='construction/road_stop.con',params={z='last',[9]='nine',a=true,nested={b=2}}}
 local data={[0]={GAME_SPEED={speedup=0},GAME_TIME={tickCount=77,updateCount=44}},[50]={EDGE_OBJECT=stop,PLAYER_OWNED={player=10}},[60]={BASE_EDGE={objects={{50,'STOP_LEFT'}}}},[51]={PLAYER_OWNED={player=11}}}
-local api={type={ComponentType=CT,enum={EdgeObjectType=${edgeObjectType}},Mat4f={cols=function(m,col)return m[col]end}},engine={util={getWorld=function()return 0 end},system={streetSystem={getEdgeForEdgeObject=function(id) if id==50 then return 60 end end}},entityExists=function(id)return data[id]~=nil end,getComponent=function(id,kind) reads=reads+1;return data[id] and data[id][kind] end}}
+local api={type={ComponentType=CT,enum={EdgeObjectType=${edgeObjectType}},Mat4f={cols=function(m,col)return m[col]end}},engine={util={getWorld=function()return 0 end},system={streetSystem={getEdgeForEdgeObject=function(id) if id==50 then return 60 end end}},entityExists=function(id)return data[id]~=nil end,getComponent=function(id,kind) reads=reads+1;if kind==CT.GAME_SPEED or kind==CT.GAME_TIME then clockHandles[#clockHandles+1]=tostring(id) end;return data[id] and data[id][kind] end}}
 local request={schemaVersion=1,nonce=string.rep('a',32),observationId=3,companyEntity=10,resultEntities={50,51},oneWay=false,name='Observed stop'}
 ${mutation}
 local r=m.collect(api,request)
-return r.code,r.json or '',reads,r.field or ''
+return r.code,r.json or '',reads,r.field or '',table.concat(clockHandles, ',')
 `;
   const L=lauxlib.luaL_newstate();lualib.luaL_openlibs(L);try{
     if(componentConstants) nativeNamespace(L,'NativeComponentType',componentConstants);
     if(edgeConstants) nativeNamespace(L,'NativeEdgeObjectType',edgeConstants);
+    for(const name of ['NativeGetWorld','NativeGetComponent','NativeEntityExists','NativeGetEdge','NativeMat4Cols']) nativeCallable(L,name);
     assert.equal(lauxlib.luaL_loadstring(L,to_luastring(script)),lua.LUA_OK,lua.lua_tojsstring(L,-1));
-    assert.equal(lua.lua_pcall(L,0,4,0),lua.LUA_OK,lua.lua_tojsstring(L,-1));
-    return [lua.lua_tojsstring(L,-4),lua.lua_tojsstring(L,-3),lua.lua_tointeger(L,-2),lua.lua_tojsstring(L,-1)];
+    assert.equal(lua.lua_pcall(L,0,5,0),lua.LUA_OK,lua.lua_tojsstring(L,-1));
+    return [lua.lua_tojsstring(L,-5),lua.lua_tojsstring(L,-4),lua.lua_tointeger(L,-3),lua.lua_tojsstring(L,-2),lua.lua_tojsstring(L,-1)];
   }finally{lua.lua_close(L);}
 }
 const nativeComponents={GAME_SPEED:'GAME_SPEED',GAME_TIME:'GAME_TIME',EDGE_OBJECT:'EDGE_OBJECT',PLAYER_OWNED:'PLAYER_OWNED',BASE_EDGE:'BASE_EDGE'};
@@ -69,6 +77,52 @@ test('denies missing or malformed native clock and enum reads without leaking er
   assert.deepEqual(run('',{component:nativeComponents,edge:{STOP_RIGHT:'STOP_RIGHT'}}).slice(0,4),['unavailable','',7,'attachedEdge']);
   assert.deepEqual(run('data[0].GAME_SPEED.speedup=1',{component:nativeComponents,edge:nativeEdgeObjects}).slice(0,4),['unavailable','',2,'clockPaused']);
   assert.deepEqual(run('data[0].GAME_TIME.tickCount=-1',{component:nativeComponents,edge:nativeEdgeObjects}).slice(0,4),['unavailable','',2,'clockValues']);
+});
+test('accepts trusted signed and unsigned 32-bit world handles unchanged',()=>{
+  for(const world of [-1,4294967295]){
+    const [code,json,,field,handles]=run(`data[${world}]=data[0];data[0]=nil;api.engine.util.getWorld=function()return ${world} end`);
+    assert.equal(code,'readback',`${world}: ${field}`);
+    assert.equal(JSON.parse(json).tickCount,77);
+    assert.deepEqual(handles.split(',').map(Number),[world,world]);
+  }
+});
+test('denies malformed world handles before any component read',()=>{
+  for(const value of ['nil',"'0'",'0.5','0/0']){
+    const [code,json,reads,field]=run(`api.engine.util.getWorld=function()return ${value} end`);
+    assert.deepEqual([code,json,reads,field],['unavailable','',0,'clockIdentity'],value);
+  }
+});
+test('calls callable native userdata APIs without requiring Lua function bindings',()=>{
+  const mutation=`
+debug.setmetatable(NativeGetWorld,{__call=function() return 0 end})
+debug.setmetatable(NativeGetComponent,{__call=function(_,id,kind) reads=reads+1;if kind==CT.GAME_SPEED or kind==CT.GAME_TIME then clockHandles[#clockHandles+1]=tostring(id) end;return data[id] and data[id][kind] end})
+debug.setmetatable(NativeEntityExists,{__call=function(_,id) return data[id]~=nil end})
+debug.setmetatable(NativeGetEdge,{__call=function(_,id) if id==50 then return 60 end end})
+debug.setmetatable(NativeMat4Cols,{__call=function(_,m,col) return m[col] end})
+api.engine.util.getWorld=NativeGetWorld
+api.engine.getComponent=NativeGetComponent
+api.engine.entityExists=NativeEntityExists
+api.engine.system.streetSystem.getEdgeForEdgeObject=NativeGetEdge
+api.type.Mat4f.cols=NativeMat4Cols`;
+  assert.equal(run(mutation)[0],'readback');
+});
+test('missing or throwing native API calls fail closed at their lookup stage',()=>{
+  for(const [mutation,field] of [
+    ['api.engine.util.getWorld=nil','clockLookup'],
+    ['api.engine.util.getWorld=function() error("private getWorld error") end','clockLookup'],
+    ['api.engine.getComponent=nil','clockComponents'],
+    ['api.engine.getComponent=function() error("private component error") end','clockComponents'],
+    ['api.engine.entityExists=nil','resultEntity'],
+    ['api.engine.entityExists=function() error("private entity error") end','resultEntity'],
+    ['api.engine.system.streetSystem.getEdgeForEdgeObject=nil','attachedEdge'],
+    ['api.engine.system.streetSystem.getEdgeForEdgeObject=function() error("private edge error") end','attachedEdge'],
+    ['api.type.Mat4f.cols=nil','transform'],
+    ['api.type.Mat4f.cols=function() error("private transform error") end','transform'],
+  ]){
+    const [code,json,,actualField]=run(mutation);
+    assert.deepEqual([code,json],['unavailable',''],mutation);
+    assert.equal(actualField,field,mutation);
+  }
 });
 test('returns fixed unavailable for request, pause, candidate, edge, and copy boundaries',()=>{
   for(const change of [

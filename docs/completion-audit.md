@@ -2,6 +2,34 @@
 
 ## Current status — 20 September 2026
 
+### 21 September: use the native world handle unchanged
+
+The 07:55:46 UTC run reached `clockWorld` and stopped, on manifest
+`193f495f956db43a75223b4afbf6089a3ab01fbbba1571abb87513ce3f348e66`.
+Thus the earlier namespace change did not resolve the live clock failure. That
+stage combined a Lua function-type check, the native call, and a nonnegative-int32
+world-ID restriction; the evidence cannot identify which condition failed.
+
+The reader now matches the working bridge's direct protected API calls. The
+world handle comes only from `getWorld()`, is checked as a finite safe integer,
+and is forwarded unchanged to component reads. Installed `engine.d.tl:13` defines
+Entity as integer and `engine/util.d.tl:1026` returns Entity; neither declares
+the world to be a positive placed-asset ID. Request, stop, edge and company IDs
+remain strictly positive int32 values. This is not a relaxation of input identity.
+
+All readback native-call sites now rely on the enclosing protected call rather
+than requiring callable native bindings to have Lua type `function`. Results,
+paused state, ownership, road membership and output bounds remain checked.
+Missing/throwing calls remain failures. `clockLookup` and `clockIdentity` now
+separate call failure from invalid returned identity. No live world handle or
+callable representation has been observed, so the precise native cause remains
+unconfirmed until the repaired reader runs; no successful readback/replay claimed.
+
+Root verification: 736/736 checks passed, including world-handle and callable
+userdata regressions; source review and diff checks passed. Staged at 08:06 UTC
+with TF3 closed, manifest `cdfee99e54ed725a06766e2d82c6422ff7605a8106c0bcbab54f3ef9190518f1`.
+Prior mod preserved in `tf3mp_backup_4dcfc61e8e4a49488c64dba6a3d27eac`.
+
 ### 21 September: clock/component namespace compatibility repair
 
 The 07:43:44 UTC apply on manifest `51df5fe7a104eb5c942687880609eda7213e8cdf5134f6622e4822bf98b17c12`
