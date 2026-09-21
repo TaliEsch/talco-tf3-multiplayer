@@ -1,6 +1,89 @@
 # Completion audit against the build prompt
 
-## Current status — 20 September 2026
+## Review-ready native qualification batch — 21 September 2026
+
+The supplied TF2 reference clone was verified clean at exact requested/default
+revision `9f99097cb05333db18015da8296b7356c76a1612`. Its licence is MIT,
+copyright 2026 silver2127; no implementation code was copied. The concrete
+source/symbol map and transplant exclusions are in `tf2-reference-audit.md`.
+
+Native qualification advanced without installing a hook. The exact TF3 static
+profile now binds file SHA-256, PE timestamp, image size, 12 candidate references,
+file-backed runtime-range digests, primary/chained unwind metadata and an evidence
+digest. An exact match remains explicitly non-activating. Bounded unwind parsing
+shows the three `GameSim::Step` assertion references chain to primary runtime
+entry `[0x1593B0,0x1593CF)`; it does not prove a semantic function boundary or
+canonical clock. Independent disassembly showed the common labelled marker at
+RVA `0x55B70` is only `ret` followed by `int3`, not an instrumentation API.
+
+The standalone native probe still has inert `DllMain` and zero gameplay/hook
+capabilities. It now rejects structural mismatch between the calling process's
+mapped PE64 main-module header/extent and loader metadata; the smoke test exercises
+that negative path by temporarily changing and restoring only its owned host
+header. This is not full live code-page integrity. The disassembly helper now
+holds its hash-verified, no-write/no-delete-sharing file handle through `dumpbin`
+and validates bounded executable ranges and VA overflow.
+
+Held-snapshot schema v2 now defines deterministic, exact-field coverage for
+towns/growth, economy, topology, vehicles, companies/ownership, lines/services
+and RNG/hidden state. Unavailable/unsupported/read-failed domains remain explicit
+and non-comparison-ready. Schema v1 remains backward compatible but is explicitly
+selected-state-only. The current game producer is still v1, so whole-world
+divergence detection is not yet operational.
+
+Integrated verification: the first sandboxed `npm run check` encountered one
+`spawn EPERM` at the owned helper lifecycle subprocess; the permitted rerun passed
+all 478 TAP tests, including that test. The MSVC x64 native build/smoke passed.
+The exact installed image matched the non-activating static profile. No launcher
+or mod source changed, so launcher build and mod review were not rerun. TF3 was not
+launched: no qualified observer/hook existed to justify a bounded game run. See
+`native-review-handoff.md` for the full evidence, risks and acceptance procedure.
+
+## Current status — 21 September 2026
+
+### Native route: standalone foothold and static engine mapping
+
+The native priority and limits are recorded in `native-integration.md`. The
+original observation-only DLL and standalone host built successfully with MSVC;
+the host rejects malformed/null ABI requests and reports an unsupported caller,
+with zero gameplay capabilities. Its executable digest matched independent
+PowerShell SHA-256. This is not an in-game load or synchronization test.
+
+The read-only PE locator found 12 references in the installed, exact-hash TF3
+image. Root disassembly inspection distinguished assertion-only simulation-label
+fragments from a surrounding candidate routine and located a command-application
+candidate. No hook is qualified or installed. No game launch, game-file write,
+or multiplayer readiness claim follows from this static evidence. See the native
+document for precise RVAs, limitations and next investigation.
+
+Root verification: full `npm run check` completed with 741/741 passing; the first
+attempt terminated without a summary and was not counted. The four static-PE
+tests cover known references, wrong targets, malformed images, unordered ranges
+and overlap rejection. `Build-NativeProbe.ps1 -RunSmokeTest` passed independently.
+Neither verification exercises live engine hooks or two TF3 simulations.
+
+### 21 September: correct native matrix column access
+
+The 08:08:57 UTC run on manifest `cdfee99e54ed725a06766e2d82c6422ff7605a8106c0bcbab54f3ef9190518f1`
+reached `transform`. This establishes that request, world clock, paused state,
+candidate ownership, relative parameter and road membership checks passed in
+that run. It did not export a complete snapshot or execute replay.
+
+The installed `api/tealdef/api/type.d.tl:770-773` comment says column index 1–4.
+However, stock `gui.zip!gui/debug_panel/make_entity_debug_panel.tl:697-706` reads
+all columns with `m:cols(k - 1)` for k=1..4, and
+`gui/line_vehicle_mgmt/manager_window.tl:624` uses `transf:cols(3)` for position.
+The readback now follows those concrete callers: instance `:cols(0..3)`, copied
+into the same 16-number column-major output. Missing/nonfinite cells still fail;
+there is no identity-matrix fallback. The previous mocks mirrored the misleading
+comment; distinct-cell regression data now detects missing/shifted columns.
+
+Remaining source audit: EdgeObject.transf is declared Mat4f, construction resource
+is ResName (string), and params is table (`engine.d.tl:132-145`, `type.d.tl:15`).
+Stock `gui/entity_window/view_manager_util.tl:139` passes the resource directly
+to constructionRep.find. Resource/parameter live reads are still unverified.
+Legacy full-proposal capture also uses 1-based columns; it remains disabled for
+this readback workflow and needs the same qualification before any reuse.
 
 ### 21 September: use the native world handle unchanged
 

@@ -1,5 +1,15 @@
 # Reference architecture review
 
+## Current direction — 21 September 2026
+
+The user authorized original native integration. The current pinned TF2 review,
+TF3-specific evidence and remaining qualification gates are in
+[native-integration.md](native-integration.md). Earlier restrictions and findings
+below are historical. No TF2 addresses or implementation were imported; no TF3
+hook has yet been qualified. For this mission, deliberate bounded assistant launch
+is allowed under the safeguards recorded in `AGENTS.md`; installed-file,
+save-safety and evidence requirements remain unchanged.
+
 ## Follow-up review — 18 September 2026
 
 Read the reference's current public README and architecture page again:

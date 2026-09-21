@@ -7,12 +7,33 @@ const lua=p=>`function data() return {${Object.entries(p).map(([k,v])=>`${k}=${J
 const req={nonce,requestId:1,entity:42,companyEntity:7,heldUpdate:90,issuedTick:100,expiresTick:400};
 const data={schemaVersion:1,kind:"held_snapshot",nonce,requestId:1,entity:42,companyEntity:7,heldUpdate:90,tickCount:101,updateCount:90,
   speedup:0,ownerCompanyEntity:7,revision:12,stopFlag:1,balance:100,balanceNegative:0,outcome:"captured"};
+const coverage={townsGrowth:"1",economy:"2",topology:"3",vehicles:"4",companies:"5",linesServices:"6",rngHiddenState:"7"};
+const canonicalData=(overrides={})=>Object.assign({...data,schemaVersion:2},...Object.entries(coverage).map(([name,value])=>({[`${name}Status`]:"observed",[`${name}Hash`]:value.repeat(64)})),overrides);
 test("selected-state hash excludes receipt identity and paused clock ticks, but includes money/ownership/action",()=>{
   const a=parseHeldSnapshot(lua(data),req);
   assert.equal(a.hash,parseHeldSnapshot(lua({...data,tickCount:102,revision:13}),req).hash);
   for(const changes of [{balance:99},{balanceNegative:1},{stopFlag:0}]) assert.notEqual(a.hash,parseHeldSnapshot(lua({...data,...changes}),req).hash);
   assert.equal(a.state.scope,"held_vehicle_company_v1");
 });
+test("canonical world v2 covers every required domain and is invariant to receipt field ordering",()=>{
+  const first=canonicalData(), reversed=Object.fromEntries(Object.entries(first).reverse());
+  const a=parseHeldSnapshot(lua(first),req), b=parseHeldSnapshot(lua(reversed),req);
+  assert.equal(a.hash,b.hash); assert.equal(a.state.scope,"held_canonical_world_v2");
+  assert.equal(a.comparisonReady,true); assert.deepEqual(a.coverage.unavailable,[]);
+  for(const [name,value] of Object.entries(coverage)) assert.notEqual(a.hash,parseHeldSnapshot(lua(canonicalData({[`${name}Hash`]:"f".repeat(64)})),req).hash,`${name} divergence must alter hash`);
+});
+test("canonical v2 represents missing hidden state explicitly and is not comparable",()=>{
+  const parsed=parseHeldSnapshot(lua(canonicalData({rngHiddenStateStatus:"unavailable",rngHiddenStateHash:"unavailable"})),req);
+  assert.equal(parsed.comparisonReady,false); assert.deepEqual(parsed.state.domains.rngHiddenState,{availability:"unavailable"});
+  assert.deepEqual(parsed.coverage.unavailable,["rngHiddenState"]);
+});
+for(const changes of [
+  {townsGrowthStatus:"observed",townsGrowthHash:"unavailable"},
+  {economyStatus:"unavailable",economyHash:"read_failed"},
+  {topologyStatus:"invented",topologyHash:"invented"},
+  {vehiclesHash:"F".repeat(64)},
+  {rngHiddenStateStatus:"unsupported",rngHiddenStateHash:"unavailable"},
+]) test(`canonical v2 rejects malformed coverage ${JSON.stringify(changes)}`,()=>assert.throws(()=>parseHeldSnapshot(lua(canonicalData(changes)),req)));
 for(const changes of [{nonce:"b".repeat(32)},{requestId:2},{entity:43},{ownerCompanyEntity:8},{updateCount:91},{speedup:1},{tickCount:401},{balanceNegative:2},{extra:true},{outcome:"hold_lost"}]) test(`snapshot rejects mismatched or unsafe evidence ${JSON.stringify(changes)}`,()=>{
   assert.throws(()=>parseHeldSnapshot(lua({...data,...changes}),req));
 });
@@ -30,6 +51,12 @@ test("two fresh paused snapshots are required before completion",async()=>{
   f.reply({tickCount:101}); await f.p.poll(); assert.equal(f.completed(),0);
   f.reply({tickCount:102}); await f.p.poll(); await f.p.poll();
   assert.equal(f.p.phase,"passed"); assert.equal(f.completed(),1); assert.equal(f.sent.length,2);
+});
+test("strict coverage option fails closed on the legacy selected-state receipt",async()=>{
+  // Recreate with the option while keeping the same observable held state.
+  const p=createHeldSnapshotProbe({nonce,entity:42,companyEntity:7,heldUpdate:90,stopFlag:1,firstRequestId:1,requireCompleteCoverage:true,
+    observe:()=>({available:true,sample:{updateCount:90,tickCount:100,companyEntity:7,speedup:0}}),publish:async()=>{},read:async()=>lua(data),remove:async()=>{},logger:()=>{},complete:async()=>{}});
+  await p.start(); await p.poll(); assert.equal(p.phase,"failed");
 });
 for(const fault of ["changed","timeout","lost","wrong_state","close"]) test(`snapshot pair fails closed: ${fault}`,async()=>{
   const f=fixture(); await f.p.start(); f.reply({tickCount:101}); await f.p.poll();
