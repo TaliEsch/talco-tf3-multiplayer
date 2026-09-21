@@ -202,9 +202,11 @@ rejects the non-production native runtime. For the next reviewed disposable run:
 
 Branch: `main`. Implementation commit: `db22017` (`Integrate guarded native
 runtime qualification`). Private remote: `origin` at
-`TaliEsch/talco-tf3-multiplayer`; push status is recorded after the documentation
-commit. No release was published. The final source mod was not restaged after the
-loader timing repair and command-profile quarantine.
+`TaliEsch/talco-tf3-multiplayer`, independently confirmed `PRIVATE`. Commits
+`db22017` and `b20367d` were pushed to `origin/main`; this final status correction
+is the only later documentation change. No release was published. The final
+source mod was not restaged after the loader timing repair and command-profile
+quarantine.
 
 Independent review should focus on debugger exception forwarding and controller
 DR6 handling; kill-on-exit teardown semantics; command lifetime/output contracts;
