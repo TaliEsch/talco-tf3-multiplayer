@@ -1,6 +1,6 @@
 # TF2 → TF3 implementation coverage matrix
 
-Reference inspected: `C:\Users\olihf\Downloads\Temp\TF2 Mp\tpf2-multiplayer`, exact HEAD `9f99097cb05333db18015da8296b7356c76a1612`. TF2 source is evidence of one implementation on TF2 build 35924, not evidence that its addresses, ABI, data layouts, APIs, clocks or behavior apply to TF3. TF3 evidence below is current through `110d405` (including checkpoint work from `8333ae3`); runtime evidence is distinguished from model/source tests.
+Reference inspected: `C:\Users\olihf\Downloads\Temp\TF2 Mp\tpf2-multiplayer`, exact HEAD `9f99097cb05333db18015da8296b7356c76a1612`. TF2 source is evidence of one implementation on TF2 build 35924, not evidence that its addresses, ABI, data layouts, APIs, clocks or behavior apply to TF3. TF3 evidence below is current through `95d79c8` (including checkpoint work from `8333ae3`); runtime evidence is distinguished from model/source tests.
 
 “Owner” names the implementation workstream, not an external dependency. These assignments are concrete next work; they do not delegate away the root agent’s integration and evidence responsibility.
 
@@ -29,9 +29,17 @@ The TF2 reference root LICENSE is MIT, copyright 2026 silver2127. There is no co
 
 The matrix is an assignment and gap map. It is not evidence that the listed TF3 capabilities work.
 
-## Current evidence correction and critical path (through `110d405`)
+## Current evidence correction and critical path (through `95d79c8`)
 
-The older TF3 cells above predate the native observer/controller and live checkpoint work. Read them with these current facts:
+The older TF3 cells above predate the latest in-process observer and live
+checkpoint work. Read them with these current facts:
+
+- `native/inprocess_post_observer.cpp` is now exact-image/site gated and live-game
+  verified at post-iteration RVA `0x159581`. It reported one hit on one TF3
+  thread through `native/runtime_ipc.cpp`, restored the original byte on
+  authenticated shutdown and left the disposable world running. This qualifies
+  read-only in-process observation only: the counter is intra-batch, not a
+  canonical world update, and hold/halt/command capabilities remain absent.
 
 - `native/runtime_observer.cpp` and `native/runtime_controller.cpp`, with `native/runtime_ipc*`, implement a TF3 exact-build observation/control path. It is not a qualified gameplay command hook. `docs/native-integration.md` records the disassembly evidence: candidate `GameSim::Step` entry `0x1593b0` may loop over multiple updates, so its entry count is not a canonical clock.
 - `docs/pause-barrier-test.md` records user-confirmed local pause/event/resume at update 2879 and exact hold at 2904; `docs/vehicle-hold-test.md` records an owned vehicle action inside a local hold. These are solo diagnostics, not synchronized peers, global input veto, or multiplayer command execution.

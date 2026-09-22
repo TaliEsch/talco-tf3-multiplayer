@@ -1,5 +1,164 @@
 # Native-integration review handoff — 21 September 2026
 
+## In-process post-iteration observation — 22 September 2026
+
+The full-readiness goal remains active. Commit `95d79c8` crosses the first real
+in-process engine boundary: the exact audited TF3 build now loads the TalCo
+runtime transparently, passes an exact image/site gate, observes execution at the
+qualified post-iteration instruction and reports that observation over the
+authenticated IPC connection. It is not yet engine control or multiplayer.
+
+### What became functional and the real execution path
+
+- `Stage-NativeLoader.ps1` verifies `TransportFever3.exe` SHA-256
+  `a4843accd706b9c476c645860e2b68f6488c9b89f33ef97efe00cffb74a47be5`,
+  refuses every collision and atomically stages only three TalCo files. The
+  original executable and installed DLLs are never overwritten.
+- `native/native_session_handoff.cpp` writes one 316-byte, owner-only,
+  `CREATE_NEW`, 120-second credential record. `native/winhttp_proxy.cpp`
+  consumes it delete-on-close after Steam's relaunch, forwards the exact 14
+  imported WinHTTP exports unchanged to the absolute System32 DLL, and starts
+  `TF3InProcessRuntime.dll` from an ordinary WinHTTP call rather than `DllMain`.
+- `native/inprocess_runtime.cpp` loads only the exact sibling probe and requires
+  its observation-only exact-build result. `native/inprocess_post_observer.cpp`
+  then verifies the disk hash, mapped PE identity, executable/non-writable
+  section, mapped bytes and exact 12-byte instruction sequence at RVA
+  `0x159581` (`inc r15d; cmp r15d,r12d; jl 0x1594c0`). Only after those checks
+  does it install a one-byte `INT3` and vectored handler.
+- The handler accepts only a first-chance breakpoint whose exception address and
+  RIP are the exact owned site. It emulates `inc r15d`, including zero extension
+  and the five affected flags while preserving CF/unrelated flags, records only
+  lock-free counters/thread identity, and resumes at the following instruction.
+  No allocation, lock, IPC, logging or game-memory traversal occurs in VEH.
+- `native/runtime_ipc.cpp` serves an owner-only, local-only pipe, strict
+  fixed-shape JSON, one persistent session binding and duplicate-correlation
+  barriers. Partial frames and writes have a fixed five-second deadline. The
+  observer capability is advertised only after successful activation; hold,
+  release and halt still truthfully describe transport state, not engine state.
+- `tools/live-inprocess-loader-check.mjs` completed an authenticated host bind
+  in real TF3 process 13820. Its final ping reported
+  `engineObserver:true`, `observationHits:1`, owner thread 16196,
+  `observationActive:true`, no cross-thread hit and no saturation. This was a
+  real execution at the qualified site during disposable-save loading, not a
+  synthetic callback or DLL-load inference.
+- Authenticated shutdown restored the original instruction byte and left the
+  observer inert. The disposable world subsequently ran from displayed TF3MP
+  update 3037 to 4368, its town grew from 81 to 86 and the date/account changed,
+  showing that the game continued normally after teardown. The game ignored UI
+  and `WM_CLOSE` requests, so the exact disposable process was finally stopped;
+  it was not allowed to write into any user save.
+- `Unstage-NativeLoader.ps1` removed only manifest/hash-matched TalCo files. The
+  post-run executable hash remained the value above, stock `alut.dll` remained
+  `814c615139b129c14897382fd30df164e5461d82b5329985907f0ef6b7a5ed19`,
+  and the proxy, runtime, probe, manifest and one-shot handoff are all absent.
+
+### Qualification evidence and unresolved assumptions
+
+The owned-process harness passes 576 hardware-comparison flag cases, 1,004 real
+traps, owner/cross-thread classification, counter saturation, concurrent stop,
+late-trap handling after restore, pinned-module lifetime, dynamic-code-policy
+rejection and foreign-byte preservation/retry. The live target has CFG enabled;
+that is compatible because this observer creates no indirect call target and
+changes no call/return stack. Dynamic-code prohibition and an active debugger
+remain fail-closed. An earlier gate incorrectly compared the ASLR-rewritten
+mapped ImageBase byte-for-byte; the corrected gate accepts only the disk
+preferred base or the actual loaded module base while retaining all other PE,
+section, hash and byte checks.
+
+The site is a genuine post-iteration boundary and its live hit establishes one
+simulation-thread owner. `r15d` is an intra-batch iteration index, not a proven
+persistent world-update number, and `rbp` remains an opaque GameSim candidate.
+The one live hit occurred while the disposable save was loading and was not
+correlated to the existing public checkpoint receipt. Therefore this does not
+yet qualify a canonical multiplayer clock, deterministic execution, hold,
+release, halt, command interception or replay.
+
+### Gameplay, state and recovery boundary
+
+No normal TF3 gameplay family is presently enabled as synchronized multiplayer
+through this runtime. Existing repository work has a single-game reversible
+vehicle stop/start proof and experimental road/depot/station/vehicle/line
+adapters, but stock UI capture/suppression, two-instance apply and complete road
+loop accounting remain absent. Rail, shipping, aviation, terrain and every
+other uncaptured mutation are unsupported in multiplayer, not implicitly
+working. Normal single-player functionality remains untouched when the loader
+is not staged.
+
+The game-side checkpoint producer has separately observed six public domains at
+one held update: towns/buildings/growth, economy, topology, vehicles, companies
+and lines/services. Hidden RNG is explicitly unavailable. This observer batch
+adds no new world reader and no two-instance comparison; update-to-checkpoint
+correlation is the next prerequisite. Recovery still needs coordinated native
+hold, save/reload on each instance, fresh epochs and post-load duplicate fences.
+
+### Exact verification and evidence tiers
+
+- Native builds passed MSVC `/W4 /WX`: post observer, in-process runtime,
+  WinHTTP proxy and native IPC. Proxy ABI/System32 path/`LastError`, exact probe
+  rejection, handoff collision and rollback were exercised.
+- Owned/model-tested: observer safety cases above; strict bind/authentication,
+  malformed/duplicate JSON rejection, partial-frame deadline and shutdown
+  delivery; full unrestricted suite: 858 discovered, 828 passed, 0 failed,
+  30 skipped. The 30 skips are older unavailable/quarantined observer/controller
+  executable tests and are not counted as passes.
+- Historical correction: the independent reviewer reran its earlier tree and
+  obtained 756/756, not the incomplete 478/478 count. Neither historical number
+  is used as current evidence.
+- Single-game verified: transparent load, exact gate, real post-iteration hit,
+  authenticated bind/ping/shutdown, instruction restore, continued disposable
+  simulation and hash-checked cleanup.
+- Two-instance, cross-machine, four-player and port-forwarded Internet: not
+  performed. A local mirror is not counted as a second game.
+
+### Remaining implementation, acceptance and blocker status
+
+Implementation remains: qualify safe in-process hold/release/halt while the IPC
+thread stays responsive; correlate this boundary with public update/checkpoint
+receipts; connect the production adapter to Host/Join; capture/suppress/order and
+apply one reversible vehicle command exactly once on two instances; then finish
+the road loop, company-bound finances, supported-action veto and checkpoint
+recovery. Cross-machine/four-player/Internet checks are acceptance work only
+after those paths exist. There is no current external blocker to the next
+in-process-control investigation. The unavailable second physical machine and
+port-forwarded environment leave those later acceptance gates open; access to a
+second installed TF3 machine/network would remove that acceptance limitation.
+
+### Consolidated current-slice acceptance procedure
+
+1. Build with `Build-InProcessPostObserver.ps1 -RunSmokeTest`,
+   `Build-InProcessRuntime.ps1 -RunSmokeTest`, `Build-WinHttpProxy.ps1
+   -RunSmokeTest` and `Build-NativeIpc.ps1`; then run the unrestricted full
+   Node suite.
+2. Close TF3 and run `Stage-NativeLoader.ps1`. It must refuse unexpected files
+   or a nonmatching executable. Run `node tools/live-inprocess-loader-check.mjs`
+   and manually approve Steam's custom-parameter launch confirmation.
+3. Load only the named disposable save. Accept only a JSON result containing the
+   observer capability, a nonzero hit count/thread, no cross-thread hit and an
+   authenticated shutdown receipt. Do not treat the result as hold or gameplay.
+4. Close the disposable TF3 process, run `Unstage-NativeLoader.ps1`, and verify
+   the five TalCo staging/session files are absent and the two stock hashes above
+   are unchanged. Do not use a user save.
+
+Branch is `main`; functional code is commit `95d79c8`, based on prior pushed
+`221052f`. The private `origin` remains the only configured publication target;
+no release was created. Independent review should focus on exact-site semantic
+meaning, VEH/teardown races, the ASLR PE comparison, pipe shutdown/deadline
+behavior and the proposed control primitive before any live hold is activated.
+
+### TF2 baseline and licence
+
+The TF2 baseline at `9f99097cb05333db18015da8296b7356c76a1612` uses an
+`alut.dll` proxy plus renamed original and supplies useful command, pacing,
+identity, economy and recovery patterns. Its MIT licence and silver2127
+attribution were reviewed. No TF2 source was copied into this WinHTTP loader,
+observer or IPC implementation. Any later copied/substantially adapted source
+must retain its copyright/MIT notice. TF2 addresses, object layouts and calling
+conventions remain inadmissible as TF3 evidence.
+
+Readiness verdict: approximately **4.5/10**. Real in-process observation is now
+working in TF3, but engine control, two-instance command execution and integrated
+recovery are still required before 5/10, and full multiplayer is far from done.
+
 ## Superseding full-readiness handoff
 
 This section supersedes the older review-batch narrative below. The objective is

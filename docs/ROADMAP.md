@@ -1,5 +1,49 @@
 # TalCo TF3 multiplayer — current delivery plan
 
+## Current critical path — 22 September 2026
+
+Commit `95d79c8` now provides the shortest genuine path from Steam launch into a
+real TF3 engine instruction: exact-hash collision-refusing staging, one-shot
+owner-only credential handoff, exact WinHTTP ABI forwarding, probe-gated runtime,
+exact mapped-image/site qualification, post-iteration `INT3`/VEH observation and
+authenticated IPC reporting. A disposable live run reported one hit on one
+thread with no cross-thread fault, restored the byte on authenticated shutdown,
+and TF3 continued from displayed update 3037 to 4368 before cleanup. This passes
+the read-only observation gate, not the engine-control or multiplayer gate.
+
+The implementation order is now:
+
+1. Turn the qualified boundary into a bounded real hold/release/halt primitive
+   while its separate IPC worker continues receiving traffic. Prove failure and
+   disconnect halt the actual simulation, then correlate the boundary with the
+   existing game-side update and six-domain checkpoint receipt.
+2. Bind that production adapter into the retained Host/Join composition. Run two
+   local TF3 instances from one transferred disposable checkpoint and compare
+   all public domains at the same engine update; report hidden RNG explicitly
+   and investigate divergence before broadening action replication.
+3. Capture and suppress one stock reversible vehicle stop/start action, route
+   host and participant origins through the same authoritative sequence, resolve
+   instance-local identity, apply once and require correlated native ownership,
+   state, update and finance postconditions. Unknown execution halts without
+   retry.
+4. Complete the supported road loop: roads, depots, stops, vehicle
+   purchase/assignment/start-stop/sale, line create/edit/remove, separate-company
+   controls, native charges, operating cost/income and cross-company rejection.
+   Veto every unsynchronized native action during multiplayer while leaving
+   ordinary single-player behavior alone.
+5. Integrate coordinated checkpoints, authenticated save transfer/reload, fresh
+   epochs and duplicate fences; then execute disconnect, lateness, divergence,
+   native-exception and rejoin recovery. Only after that run cross-machine,
+   four-player LAN and port-forwarded Internet acceptance.
+
+Current verification is 858 discovered, 828 passed, 0 failed and 30 explicitly
+skipped in the unrestricted suite. All four native builds pass MSVC `/W4 /WX`.
+Single-game in-process observation is verified; two-instance/cross-machine/
+four-player/Internet remain unperformed. There is no external blocker to the
+next control investigation. Readiness is approximately 4.5/10: observation is
+real, but actual in-process control and the first two-instance ordered action are
+still below the 5/10 gate.
+
 ## Superseding next critical path — 21 September 2026
 
 The full multiplayer objective remains active. Commit `db22017` establishes a

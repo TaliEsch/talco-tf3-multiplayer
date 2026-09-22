@@ -1,5 +1,64 @@
 # Completion audit against the build prompt
 
+## Continuation audit — 22 September 2026
+
+The full multiplayer objective is active and incomplete. Commit `95d79c8`
+advances the evidence tier from “DLL and pipe loaded” to a functioning,
+exact-build-gated in-process observer of a real TF3 post-iteration instruction.
+It does not establish simulation control, command replication or multiplayer.
+
+Implemented and isolated/model-tested:
+
+- collision-refusing application-local WinHTTP proxy staging, exact 14-export
+  forwarding to absolute System32 and hash-validated removal without modifying
+  installed binaries;
+- fixed-size owner-only Steam-relaunch handoff, exact sibling/probe gate,
+  owner/local-only authenticated pipe, persistent one-session binding,
+  duplicate-correlation barriers, strict JSON and fixed partial-frame deadlines;
+- exact disk/mapped PE and instruction-byte qualification at RVA `0x159581`;
+  one-byte INT3/VEH observer with exact exception ownership, faithful `inc r15d`
+  emulation, lock-free telemetry, pinned late-trap safety, byte/protection restore
+  and no rearm after teardown;
+- owned native qualification covering 576 flag cases, 1,004 hardware traps,
+  cross-thread detection, saturation, concurrent teardown, dynamic-code-policy
+  rejection and foreign-patch preservation/recovery.
+
+Single-game verified:
+
+- the audited TF3 process loaded the local proxy, signed System32 WinHTTP and
+  gated runtime; authenticated host bind/ping reported a real post-iteration hit
+  on thread 16196 with no cross-thread hit;
+- authenticated shutdown restored the instruction. The disposable world then
+  continued from displayed TF3MP update 3037 to 4368 and town population 81 to
+  86 before the exact test process was stopped;
+- cleanup removed every TalCo staged/session file. The exact game hash and stock
+  `alut.dll` hash remained unchanged. No user save or unrelated file was used.
+
+Not implemented or not yet verified:
+
+- the observer counter is not yet correlated to the canonical public update or
+  checkpoint receipt; its `r15d` value is intra-batch, not a world clock;
+- actual in-process hold/release/halt, command object capture/lifetime,
+  origin suppression, exactly-once replay and stock-action veto;
+- production Host/Join adapter binding and two-instance matching-update state
+  comparison, ordered vehicle action or checkpoint reload/recovery;
+- the complete synchronized road loop and real multi-company construction,
+  purchase, operating-cost and revenue effects;
+- cross-machine, four-player LAN and port-forwarded Internet acceptance.
+
+Evidence accounting: the final unrestricted suite discovered 858 tests: 828
+passed, 0 failed and 30 skipped. The historical independent-review correction is
+756/756 on its earlier tree; 478/478 was an incomplete TAP count. Native builds
+for observer, runtime, proxy and IPC all passed MSVC `/W4 /WX`. Single-game
+observer evidence is real; two-instance and wider acceptance are open.
+
+No external dependency currently blocks the next implementation step. A second
+physical TF3 machine/network is unavailable for later cross-machine acceptance,
+but that does not block local control or two-instance engineering. Honest
+readiness is **4.5/10**: the required in-process observation boundary exists;
+actual engine control and a two-instance authoritative action are still needed
+before 5/10.
+
 ## Full-readiness continuation audit — 21 September 2026
 
 The goal is still active and incomplete. Commits `db22017` and `8333ae3` are not
