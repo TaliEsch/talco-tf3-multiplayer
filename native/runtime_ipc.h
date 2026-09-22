@@ -45,6 +45,26 @@ struct RuntimeObservation {
 };
 using RuntimeObservationProvider = RuntimeObservation (*)() noexcept;
 
+// A candidate action is deliberately a diagnostic, not a command.  It is a
+// pointer-free snapshot copied at an exact instruction boundary; it carries no
+// game allocation, callback, object lifetime, or replay authority.  The
+// native worker reads this only after authentication, never from VEH.
+struct PassiveVehicleActionObservation {
+  std::uint64_t factory_hits;
+  std::uint64_t admission_hits;
+  std::uint64_t correlated_hits;
+  std::uint64_t dropped_candidates;
+  std::uint32_t owner_thread;
+  std::int32_t latest_entity;
+  std::uint8_t latest_stopped;
+  bool latest_valid;
+  bool active;
+  bool cross_thread;
+  bool saturated;
+};
+using PassiveVehicleActionObservationProvider =
+  PassiveVehicleActionObservation (*)() noexcept;
+
 // A deliberately small bridge from the transport to a qualified native update
 // boundary.  It does not expose a game pointer or permit the pipe worker to
 // wait on the simulation thread. Submit must be bounded and non-blocking;
@@ -100,6 +120,7 @@ int ServeInProcess(const std::wstring& name, const std::string& token,
                    std::uint32_t observer_start_status = 0,
                    const GateProvider* gate_provider = nullptr,
                    std::uint32_t authenticated_session_lease_ms =
-                     TF3_RUNTIME_IPC_INPROCESS_GATE_LEASE_MS);
+                     TF3_RUNTIME_IPC_INPROCESS_GATE_LEASE_MS,
+                   PassiveVehicleActionObservationProvider passive_vehicle = nullptr);
 
 }  // namespace tf3runtimeipc

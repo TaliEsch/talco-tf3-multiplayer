@@ -1,5 +1,73 @@
 # Native-integration review handoff — 21 September 2026
 
+## Live passive stock-action addendum — 22 September 2026
+
+Current readiness is **5.7/10**; the full multiplayer objective remains active.
+`native/inprocess_vehicle_observer.cpp` now passively observes the exact-build
+factory at `0x9eee72`, its constructed-output post site at `0x9eeee8`, and the
+common scripting submission move at `0xe26a2c`. It correlates the five-byte
+semantic action across moving entry addresses by bounded command-storage
+identity; it does not suppress, execute or serialize an engine pointer.
+`native/inprocess_runtime.cpp` arms the sites before the separate engine gate,
+publishes a diagnostic-only snapshot over authenticated `native/runtime_ipc.cpp`,
+and disarms the sites on teardown. `src/native-runtime-client.mjs` validates
+the pointer-free snapshot. No Host/Join gameplay authority is granted by this
+diagnostic capability.
+
+An actual disposable TF3 run selected stock Train 1 and issued one stop action.
+The observed counters were factory **1**, submission **1**, correlated **1**,
+dropped **0**, entity **163575**, stopped **1**, latestValid true and
+`crossThread:true`. The latest action-site thread was **18796**; the world
+update thread was **28196**. The observer then passed held → single release →
+re-held → detached/resumed with authenticated control traffic. This establishes
+a real vehicle command route and safe bounded teardown for this run, but not
+the factory-thread ID, safe suppression, native application outcome or a
+two-instance result. The first trial's action window expired before the click
+and returned `PASSIVE_VEHICLE_FACTORY_NOT_OBSERVED`; no success is inferred
+from that trial. `tools/live-inprocess-loader-check.mjs` now emits an explicit
+ready boundary and exact counter diagnostics for failed trials.
+
+The factory entry trap precedes `mov rdi,rcx`; its output argument is **RCX**.
+The owned fixture initially mirrored an incorrect RDI assumption and was
+corrected to set RDI independently before the trap. That correction passed
+the owned fixture and the live trial. Static command-lifetime findings in
+`docs/vehicle-abi-static-evidence.md` remain applicable, including the Add-
+bypass path and callback/progress obligations. The observed cross-thread route
+rules out a same-thread-only command-lifetime design. The next independent
+review should focus on trap register emulation, candidate-slot publication,
+cross-thread storage identity/ABA, exception/unwind/teardown, and whether the
+common send-body boundary can safely defer without leaking or double-owning
+callbacks and progress.
+
+Further exact-build read-only analysis found a specific cancellation candidate,
+not an activated hook: the current trap at `0xe26a2c` emulates `mov rdx,rbx`
+and resumes at the unpatched indirect call `0xe26a2f`. After the entry move,
+the normal return path destroys the owned entry and releases progress,
+callback and scripting references. A selected native failure-completion
+callback target could let the stock UI decrement its pending-command counter
+without executing the original action. The installed vehicle UI requires that
+callback; skipping the call alone would leave its state refresh pending.
+The proposed target substitution still lacks an owned exact-callsite fixture,
+exception/unwind and callback-once tests, and a bounded live no-mutation check.
+It is therefore not production-qualified suppression, and it is a rejection
+of the original action rather than accepted deferral or replay. See
+`docs/vehicle-abi-static-evidence.md` for the exact register/cleanup evidence.
+
+Native builds and owned fixture passed. Full regression: **909 discovered,
+879 passed, 0 failed, 30 skipped** in 54.244 seconds. The game's installed
+binaries were not overwritten. The exact nonce-tagged disposable save,
+preview and startup request were removed after TF3 closed; original source
+save SHA-256 remained `cbbc1a4642734600e9e9c994a6b0be7e014c20c097b418752642e5157f402f7c`.
+The staged loader's three hash-matched files and manifest were removed.
+No second TF3 process, LAN/Internet or four-player acceptance was performed.
+No multiplayer gameplay family is released as synchronized.
+
+This is implementation progress, not the 6/10 authoritative-action gate.
+Suppression, host ordering, replay/postconditions, checkpoints and recovery
+remain implementation work. There is no known external blocker to continuing
+that investigation; suitable separate machines/network access are still needed
+for later cross-machine and Internet acceptance.
+
 ## Authoritative current handoff — 22 September 2026
 
 This section supersedes older status statements below; the remainder is retained
@@ -96,6 +164,23 @@ output pair (`0x3035600`/`0x30355A0`), and owns destruction of source, callback
 and progress inputs. Its output destructor at `0x3035650` tolerates null, but
 the stock vehicle caller's null-result/callback expectations are not qualified.
 No skip or return patch is authorized from this evidence.
+
+The subsequent exact-build caller inventory materially corrected that model.
+All 45 decoded direct Add callers destroy its heap-backed output handle
+immediately, and Add consumes/moves the source entry, callback and progress
+objects with distinct destruction rules. More importantly, the scripting
+`sendCommand` binding has an alternate adapter at `0x120430` which bypasses Add:
+it queues the moved entry through a TLS vector when present or calls apply
+wrapper `0x9E2380` directly. The common semantic lead is now the scripting
+submission virtual call at `0xE26A2F`, not Add alone. The complete reproducible
+static trace is in `docs/vehicle-abi-static-evidence.md`; it qualifies neither
+suppression nor replay.
+
+An authenticated, pointer-free passive-diagnostic IPC schema is implemented
+and owned-fixture tested. It uses lossless decimal uint64 counters and strict
+client validation, but the production runtime deliberately supplies no provider
+and advertises no capability until exact-site ownership and clean teardown are
+qualified. This is an integration seam, not a functioning TF3 action observer.
 
 The TF2 reference remains at `9f99097cb05333db18015da8296b7356c76a1612`.
 Its `native/src/slice/add_hook.inl` supports factory/Add correlation,

@@ -6,11 +6,12 @@ import {fileURLToPath} from 'node:url';
 import path from 'node:path';
 import {NativeRuntimeClient} from '../src/native-runtime-client.mjs';
 import {startGameBridge} from '../src/game-bridge.mjs';
-import {createLiveControlIdBudget,LIVE_CONTROL_POLL_INTERVAL_MS,LIVE_CONTROL_WAIT_WINDOW_MS} from './live-inprocess-control-budget.mjs';
+import {createLiveControlIdBudget,LIVE_CONTROL_POLL_INTERVAL_MS,LIVE_CONTROL_WAIT_WINDOW_MS,
+  LIVE_VEHICLE_ACTION_WAIT_WINDOW_MS} from './live-inprocess-control-budget.mjs';
 
-const usage='usage: node tools/live-inprocess-loader-check.mjs [TF3 exe] [--bridge-dir <absolute tf3mp_status_1 directory>] (--gate-detach|--gate-halt)';
+const usage='usage: node tools/live-inprocess-loader-check.mjs [TF3 exe] [--bridge-dir <absolute tf3mp_status_1 directory>] [--observe-vehicle-action] (--gate-detach|--gate-halt)';
 const input=process.argv.slice(2);
-let requestedExe=null,bridgeDirectory=null,gateMode=null;
+let requestedExe=null,bridgeDirectory=null,gateMode=null,observeVehicleAction=false;
 for(let index=0;index<input.length;index++){
   const argument=input[index];
   if(argument==='--bridge-dir'){
@@ -21,6 +22,8 @@ for(let index=0;index<input.length;index++){
     assert.equal(gateMode,null,usage);gateMode='detach';
   }else if(argument==='--gate-halt'){
     assert.equal(gateMode,null,usage);gateMode='halt';
+  }else if(argument==='--observe-vehicle-action'){
+    assert.equal(observeVehicleAction,false,usage);observeVehicleAction=true;
   }else{
     assert.ok(!argument.startsWith('--')&&requestedExe===null,usage);
     requestedExe=argument;
@@ -49,14 +52,17 @@ const controlIds=createLiveControlIdBudget();
 if(bridgeDirectory)bridge=await startGameBridge({directory:bridgeDirectory,intervalMs:100,staleMs:3000,
   logger:event=>process.stderr.write(`${JSON.stringify(event)}\n`)});
 for(let attempt=0;attempt<180&&!client;attempt++){
-  try{client=await NativeRuntimeClient.connect({pipe,token,timeoutMs:500});}
+  // Save loading can temporarily starve the IPC worker for more than 500 ms.
+  // Keep each control timeout comfortably below the native 15-second lease so
+  // a genuine stall still fail-stops, without misclassifying bounded loading.
+  try{client=await NativeRuntimeClient.connect({pipe,token,timeoutMs:5000});}
   catch(error){lastError=error;await new Promise(resolve=>setTimeout(resolve,500));}
 }
 if(!client)throw new Error(`LIVE_INPROCESS_RUNTIME_UNAVAILABLE:${lastError?.message??'UNKNOWN'}`);
 try{
   if(client.handshake.engineObserver!==true)throw new Error(`INPROCESS_OBSERVER_START_FAILED:${client.handshake.observerStartStatus??'UNKNOWN'}`);
   const passiveCapabilities=['transport.health','session.bind','qualification.inprocess.observer'];
-  const gateCapabilities=[...passiveCapabilities,'qualification.inprocess.gate','simulation.hold','engine.halt','simulation.gate-receipts.v1','engine.detach'];
+  const gateCapabilities=[...passiveCapabilities,'qualification.inprocess.gate','simulation.hold','engine.halt','simulation.gate-receipts.v1','engine.detach','diagnostic.passive-vehicle-action.v1'];
   assert.deepEqual(client.capabilities,gateCapabilities);
   assert.deepEqual(client.handshake,{engineObserver:true,productionQualified:true,guiFreezes:true});
   const sessionId=`loader.check:${launchedAt}`;
@@ -67,16 +73,29 @@ try{
   assert.equal(ping.status,'accepted');
   assert.equal(ping.engineObserver,true);
   assert.equal(ping.observationActive,true);
+  const passiveVehicle=client.passiveVehicleActionObservation(ping);
+  assert.equal(passiveVehicle.active,true);
+  assert.equal(passiveVehicle.saturated,false);
   process.stdout.write(`${JSON.stringify({event:'tf3-inprocess-observer-awaiting-world',launchPid:child.pid,
-    observationHits:ping.observationHits,observationThread:ping.observationThread})}\n`);
+    observationHits:ping.observationHits,observationThread:ping.observationThread,
+    passiveVehicleFactoryHits:passiveVehicle.factoryHits,
+    passiveVehicleAdmissionHits:passiveVehicle.admissionHits,
+    passiveVehicleCorrelatedHits:passiveVehicle.correlatedHits,
+    passiveVehicleThread:passiveVehicle.ownerThread,
+    passiveVehicleCrossThread:passiveVehicle.crossThread})}\n`);
+  // Loading can execute a few world boundaries behind the Start Game splash.
+  // An action-ready window must not begin there: require sustained world
+  // updates so the operator can interact during the full diagnostic allowance.
+  const minimumWorldHits=observeVehicleAction?128:1;
   const observationDeadline=Date.now()+LIVE_CONTROL_WAIT_WINDOW_MS;
-  while(ping.observationHits===0&&Date.now()<observationDeadline){
+  while(ping.observationHits<minimumWorldHits&&Date.now()<observationDeadline){
     await new Promise(resolve=>setTimeout(resolve,LIVE_CONTROL_POLL_INTERVAL_MS));
     ping=await controlIds.issue(()=>client.control('ping'));
   }
   assert.equal(ping.observationCrossThread,false);
   assert.equal(ping.observationSaturated,false);
-  assert.ok(Number.isSafeInteger(ping.observationHits)&&ping.observationHits>0,'INPROCESS_OBSERVER_DID_NOT_REACH_WORLD_BOUNDARY');
+  assert.ok(Number.isSafeInteger(ping.observationHits)&&ping.observationHits>=minimumWorldHits,
+    'INPROCESS_OBSERVER_DID_NOT_REACH_WORLD_BOUNDARY');
   assert.ok(Number.isInteger(ping.observationThread)&&ping.observationThread>0);
   assert.ok(Number.isSafeInteger(ping.observationMinimumStackHeadroom)&&ping.observationMinimumStackHeadroom>0,
     'INPROCESS_OBSERVER_STACK_HEADROOM_UNAVAILABLE');
@@ -115,6 +134,45 @@ try{
     correlation={samples,first:{observationHits:first.observationHits,counter:first.counter,tickCount:first.tickCount,updateCount:first.updateCount,speedup:first.speedup},
       last:{observationHits:last.observationHits,counter:last.counter,tickCount:last.tickCount,updateCount:last.updateCount,speedup:last.speedup},
       deltas};
+  }
+  let vehicleObservation=null;
+  if(observeVehicleAction){
+    const baseline=client.passiveVehicleActionObservation(ping);
+    // The interaction allowance begins only after the world observer (and, when
+    // configured, bridge correlation) has reached its ready boundary above.
+    // Emit that boundary so a live operator knows when the full action window
+    // is available for a start/stop command.
+    process.stdout.write(`${JSON.stringify({event:'tf3-passive-vehicle-action-ready',
+      factoryHits:baseline.factoryHits,admissionHits:baseline.admissionHits,
+      correlatedHits:baseline.correlatedHits,worldObservationHits:ping.observationHits,
+      worldObservationThread:ping.observationThread,
+      ...(correlation?{bridgeCorrelation:correlation.deltas}:{})})}\n`);
+    const vehicleActionWindowStartedAt=Date.now();
+    const deadline=vehicleActionWindowStartedAt+LIVE_VEHICLE_ACTION_WAIT_WINDOW_MS;
+    let current=baseline;
+    while(BigInt(current.correlatedHits)<=BigInt(baseline.correlatedHits)&&Date.now()<deadline){
+      await new Promise(resolve=>setTimeout(resolve,LIVE_CONTROL_POLL_INTERVAL_MS));
+      ping=await controlIds.issue(()=>client.control('ping'));
+      current=client.passiveVehicleActionObservation(ping);
+      assert.equal(current.active,true);
+      assert.equal(current.saturated,false,'PASSIVE_VEHICLE_ACTION_COUNTER_SATURATED');
+    }
+    const actionCounters=JSON.stringify({baseline,current,
+      elapsedMs:Date.now()-vehicleActionWindowStartedAt});
+    assert.ok(BigInt(current.factoryHits)>BigInt(baseline.factoryHits),
+      `PASSIVE_VEHICLE_FACTORY_NOT_OBSERVED:${actionCounters}`);
+    assert.ok(BigInt(current.admissionHits)>BigInt(baseline.admissionHits),
+      `PASSIVE_VEHICLE_SUBMISSION_NOT_OBSERVED:${actionCounters}`);
+    assert.ok(BigInt(current.correlatedHits)>BigInt(baseline.correlatedHits),
+      `PASSIVE_VEHICLE_ACTION_NOT_CORRELATED:${actionCounters}`);
+    assert.equal(current.latestValid,true,'PASSIVE_VEHICLE_ACTION_NOT_CORRELATED');
+    vehicleObservation=current;
+    process.stdout.write(`${JSON.stringify({event:'tf3-passive-vehicle-action-observed',
+      factoryHits:current.factoryHits,admissionHits:current.admissionHits,
+      correlatedHits:current.correlatedHits,
+      droppedCandidates:current.droppedCandidates,ownerThread:current.ownerThread,
+      crossThread:current.crossThread,entity:current.latestEntity,
+      stopped:current.latestStopped})}\n`);
   }
   let gateEvidence=null;
   const epoch=String(launchedAt);
@@ -255,7 +313,8 @@ try{
       observationCfgFlags:ping.observationCfgFlags,observationCetFlags:ping.observationCetFlags,
       observationCfgKnown:ping.observationCfgKnown,observationCetKnown:ping.observationCetKnown,
       observationActive:ping.observationActive,observationCrossThread:ping.observationCrossThread},
-    ...(correlation?{correlation}:{}),...(gateEvidence?{gateEvidence}:{}),elapsedMs:Date.now()-launchedAt})}\n`);
+    ...(correlation?{correlation}:{}),...(vehicleObservation?{vehicleObservation}:{}),
+    ...(gateEvidence?{gateEvidence}:{}),elapsedMs:Date.now()-launchedAt})}\n`);
 }finally{
   if(!shutdownSent){
     try{await controlIds.issue(()=>client.control('shutdown'));}catch{}

@@ -13,6 +13,7 @@
 
 #include "inprocess_runtime_api.h"
 #include "inprocess_post_observer.h"
+#include "inprocess_vehicle_observer.h"
 #include "production_boundary_gate.h"
 #include "probe_api.h"
 #include "runtime_ipc.h"
@@ -188,6 +189,15 @@ tf3runtimeipc::RuntimeObservation ReadBoundaryObservation() noexcept {
             snapshot.cross_thread, false};
 }
 
+tf3runtimeipc::PassiveVehicleActionObservation ReadPassiveVehicleObservation() noexcept {
+    const auto snapshot = tf3vehicleobserver::Read();
+    return {snapshot.factory_hits, snapshot.admission_hits,
+            snapshot.correlated_hits, snapshot.dropped_candidates, snapshot.owner_thread,
+            snapshot.latest_entity, snapshot.latest_stopped,
+            snapshot.latest_valid, snapshot.active,
+            snapshot.cross_thread, snapshot.saturated};
+}
+
 extern "C" __declspec(dllexport) DWORD WINAPI Tf3InProcessRuntimeV1(
     const Tf3InProcessRuntimeRequestV1* request) {
     if (request == nullptr || request->struct_size != sizeof(*request) ||
@@ -244,16 +254,41 @@ extern "C" __declspec(dllexport) DWORD WINAPI Tf3InProcessRuntimeV1(
     // The live-qualified production gate remains exact-build and fail-closed.
     // It must not silently fall through to a second owner if activation changes
     // the instruction or handler state unexpectedly.
+    // Qualify and arm the vehicle sites while the boundary byte is still the
+    // exact audited image byte. The vehicle observer's hash/site qualifier is
+    // intentionally unable to bless an image after another owner patches that
+    // boundary. Its sites are disjoint from the production gate.
+    const auto vehicle_status = tf3vehicleobserver::Start();
     const auto gate_status = tf3boundary::Start();
     if (gate_status == tf3boundary::Status::started) {
+        // The observer is diagnostic-only: it captures the exact vehicle
+        // factory arguments and the common scripting submission boundary. It
+        // neither suppresses nor replays the action and grants no command
+        // authority. Failure to arm leaves the capability absent.
+        const auto vehicle_provider = vehicle_status == tf3vehicleobserver::Status::started
+            ? &ReadPassiveVehicleObservation : nullptr;
         const int server_status = tf3runtimeipc::ServeInProcess(
-            pipe, token, &ReadBoundaryObservation, 0, &production_gate_provider);
+            pipe, token, &ReadBoundaryObservation, 0, &production_gate_provider,
+            TF3_RUNTIME_IPC_INPROCESS_GATE_LEASE_MS, vehicle_provider);
+        const auto vehicle_stop = tf3vehicleobserver::Stop();
         const auto snapshot = tf3boundary::Read().gate;
         if (snapshot.state != inprocess_gate::State::detached)
             (void)tf3boundary::RequestHalt();
         const auto stop_status = tf3boundary::Stop();
-        return server_status == 0 && stop_status == tf3boundary::Status::stopped
+        const bool vehicle_stopped = vehicle_stop == tf3vehicleobserver::Status::stopped ||
+            (vehicle_status != tf3vehicleobserver::Status::started &&
+             vehicle_stop == tf3vehicleobserver::Status::never_started);
+        return server_status == 0 && vehicle_stopped &&
+                stop_status == tf3boundary::Status::stopped
             ? TF3_INPROCESS_RUNTIME_STOPPED : TF3_INPROCESS_RUNTIME_SERVER_FAILED;
+    }
+    const auto vehicle_stop = tf3vehicleobserver::Stop();
+    const bool vehicle_stopped = vehicle_stop == tf3vehicleobserver::Status::stopped ||
+        (vehicle_status != tf3vehicleobserver::Status::started &&
+         vehicle_stop == tf3vehicleobserver::Status::never_started);
+    if (!vehicle_stopped) {
+        if (tf3boundary::Read().active) (void)tf3boundary::RequestHalt();
+        return TF3_INPROCESS_RUNTIME_OBSERVER_STOP_FAILED;
     }
     if (gate_status != tf3boundary::Status::disabled_pending_live_qualification) {
         if (tf3boundary::Read().active) (void)tf3boundary::RequestHalt();

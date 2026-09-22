@@ -15,10 +15,28 @@ export const NATIVE_RUNTIME_CAPABILITIES=Object.freeze({
   engineHalt:'engine.halt',
   engineDetach:'engine.detach',
   gateReceipts:'simulation.gate-receipts.v1',
+  passiveVehicleActionDiagnostics:'diagnostic.passive-vehicle-action.v1',
   vehiclePrepare:'vehicle.prepare.v1',
   vehicleExecute:'vehicle.execute.v1',
 });
 const uint64Text=value=>typeof value==='string'&&/^(?:0|[1-9][0-9]{0,19})$/.test(value)&&BigInt(value)<=0xffffffffffffffffn;
+// Native counters must remain decimal strings: JSON Numbers cannot carry a
+// uint64_t safely. This validates the complete pointer-free snapshot before a
+// coordinator can treat it as diagnostic evidence.
+export const validatePassiveVehicleActionObservation=receipt=>{
+  const keys=['passiveVehicleFactoryHits','passiveVehicleAdmissionHits','passiveVehicleCorrelatedHits','passiveVehicleDroppedCandidates','passiveVehicleThread','passiveVehicleLatestEntity','passiveVehicleLatestStopped','passiveVehicleLatestValid','passiveVehicleActive','passiveVehicleCrossThread','passiveVehicleSaturated'];
+  if(!receipt||typeof receipt!=='object'||Array.isArray(receipt)||keys.some(key=>!Object.hasOwn(receipt,key))
+    ||Object.keys(receipt).some(key=>key.startsWith('passiveVehicle')&&!keys.includes(key))
+    ||!uint64Text(receipt.passiveVehicleFactoryHits)||!uint64Text(receipt.passiveVehicleAdmissionHits)||!uint64Text(receipt.passiveVehicleCorrelatedHits)||!uint64Text(receipt.passiveVehicleDroppedCandidates)
+    ||!Number.isInteger(receipt.passiveVehicleThread)||receipt.passiveVehicleThread<0||receipt.passiveVehicleThread>0xffffffff
+    ||!Number.isInteger(receipt.passiveVehicleLatestEntity)||receipt.passiveVehicleLatestEntity< -2147483648||receipt.passiveVehicleLatestEntity>2147483647
+    ||![0,1].includes(receipt.passiveVehicleLatestStopped)
+    ||['passiveVehicleLatestValid','passiveVehicleActive','passiveVehicleCrossThread','passiveVehicleSaturated'].some(key=>typeof receipt[key]!=='boolean'))throw new TypeError('INVALID_PASSIVE_VEHICLE_ACTION_OBSERVATION');
+  if(!receipt.passiveVehicleActive||(!receipt.passiveVehicleLatestValid&&receipt.passiveVehicleLatestEntity!==0))throw new TypeError('INVALID_PASSIVE_VEHICLE_ACTION_OBSERVATION');
+  return Object.freeze({factoryHits:receipt.passiveVehicleFactoryHits,admissionHits:receipt.passiveVehicleAdmissionHits,correlatedHits:receipt.passiveVehicleCorrelatedHits,droppedCandidates:receipt.passiveVehicleDroppedCandidates,
+    ownerThread:receipt.passiveVehicleThread,latestEntity:receipt.passiveVehicleLatestEntity,latestStopped:receipt.passiveVehicleLatestStopped,
+    latestValid:receipt.passiveVehicleLatestValid,active:receipt.passiveVehicleActive,crossThread:receipt.passiveVehicleCrossThread,saturated:receipt.passiveVehicleSaturated});
+};
 const gateControls=Object.freeze({
   hold:NATIVE_RUNTIME_CAPABILITIES.simulationHold,
   release:NATIVE_RUNTIME_CAPABILITIES.simulationHold,
@@ -81,6 +99,7 @@ export class NativeRuntimeClient extends EventEmitter {
   #onData(chunk){this.#buffer=Buffer.concat([this.#buffer,chunk]);while(this.#buffer.length>=HEADER){const magic=this.#buffer.readUInt32LE(0),version=this.#buffer.readUInt16LE(4),type=this.#buffer.readUInt16LE(6),size=this.#buffer.readUInt32LE(8);if(magic!==MAGIC||version!==VERSION||size>MAX||!Object.values(TYPES).includes(type)){this.#socket.destroy();this.#disconnect('NATIVE_RUNTIME_IPC_MALFORMED_FRAME');return;}if(this.#buffer.length<HEADER+size)return;const frame=this.#buffer.subarray(0,HEADER+size);this.#buffer=this.#buffer.subarray(HEADER+size);let payload;try{payload=JSON.parse(frame.subarray(HEADER).toString('utf8'));}catch{this.#socket.destroy();this.#disconnect('NATIVE_RUNTIME_IPC_MALFORMED_FRAME');return;}const id=frame.readBigUInt64LE(12);const session=frame.subarray(20,36);if(type===TYPES.helloAck){this.#session=Buffer.from(session);} else if(!session.equals(this.#session)){this.#socket.destroy();this.#disconnect('NATIVE_RUNTIME_IPC_SESSION_MISMATCH');return;}const key=id.toString();const pending=this.#pending.get(key);if(pending){this.#pending.delete(key);clearTimeout(pending.timer);pending.resolve({type,payload,id});}else if(type===TYPES.event)this.emit('event',Object.freeze({payload,id}));else this.emit('unknownOutcome',Object.freeze({type,payload,id}));}}
   #request(type,payload,sessionRequired=true){if(this.#closed)return Promise.reject(new Error('NATIVE_RUNTIME_IPC_CLOSED'));const id=this.#next++;if(id===0n||id>0xffffffffffffffffn)return Promise.reject(new Error('NATIVE_RUNTIME_IPC_ID_EXHAUSTED'));return new Promise((resolve,reject)=>{const timer=setTimeout(()=>{this.#pending.delete(id.toString());this.emit('unknownOutcome',Object.freeze({id,reason:'timeout'}));reject(new Error('NATIVE_RUNTIME_IPC_TIMEOUT'));},this.timeoutMs);this.#pending.set(id.toString(),{resolve,reject,timer});try{this.#socket.write(encode(type,id,sessionRequired?this.#session:Buffer.alloc(16),payload));}catch(error){clearTimeout(timer);this.#pending.delete(id.toString());reject(error);}});}
   async control(control){if(!this.#connected)throw new Error('NATIVE_RUNTIME_IPC_NOT_CONNECTED');if(!['ping','hold','release','halt','shutdown'].includes(control))throw new TypeError('INVALID_NATIVE_RUNTIME_CONTROL');const reply=await this.#request(TYPES.control,{control});if(reply.type===TYPES.error)throw new Error(`NATIVE_RUNTIME_IPC_${reply.payload?.code??'ERROR'}`);if(reply.type!==TYPES.receipt||reply.payload?.status!=='accepted')throw new Error('NATIVE_RUNTIME_IPC_INVALID_RECEIPT');return Object.freeze(reply.payload);}
+  passiveVehicleActionObservation(receipt){this.requireCapability(NATIVE_RUNTIME_CAPABILITIES.passiveVehicleActionDiagnostics);return validatePassiveVehicleActionObservation(receipt);}
   // V1 currently has no typed gate-control wire contract. This method is
   // intentionally capability-gated so it cannot accidentally downgrade to the
   // diagnostic {control:"hold"} fixture request above.

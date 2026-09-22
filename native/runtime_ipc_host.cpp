@@ -10,6 +10,10 @@ namespace {
 tf3runtimeipc::RuntimeObservation OwnedObservation() noexcept {
   return {7, 65536, 123, 1, 261, true, true, true, false, false};
 }
+tf3runtimeipc::PassiveVehicleActionObservation OwnedPassiveVehicleObservation() noexcept {
+  // Owned wire fixture: values are copied diagnostics, never object pointers.
+  return {12, 9, 8, 2, 321, 66005, 1, true, true, false, false};
+}
 // Owned wire-contract fixture only. It models state transitions and delayed
 // notifications without claiming a TF3 engine boundary.
 std::atomic<unsigned int> gateState{0}; // 0 running, 1 held, 2 terminal, 3 detached
@@ -66,8 +70,10 @@ int wmain(int argc,wchar_t** argv) {
   const bool leaseFixture = argc == 8 && std::wcscmp(argv[1], L"--owned-qualified-gate-fixture") == 0 &&
     std::wcscmp(argv[2], L"--gate-lease-ms") == 0;
   const bool inProcess = (argc == 6 || leaseFixture) && (std::wcscmp(argv[1], L"--in-process") == 0 ||
-    std::wcscmp(argv[1], L"--in-process-observer") == 0 || std::wcscmp(argv[1], L"--owned-qualified-gate-fixture") == 0);
+    std::wcscmp(argv[1], L"--in-process-observer") == 0 || std::wcscmp(argv[1], L"--in-process-passive-vehicle") == 0 ||
+    std::wcscmp(argv[1], L"--owned-qualified-gate-fixture") == 0);
   const bool withObserver = inProcess && std::wcscmp(argv[1], L"--in-process-observer") == 0;
+  const bool withPassiveVehicle = inProcess && std::wcscmp(argv[1], L"--in-process-passive-vehicle") == 0;
   const bool withGate = inProcess && std::wcscmp(argv[1], L"--owned-qualified-gate-fixture") == 0;
   const int first = leaseFixture ? 4 : (inProcess ? 2 : 1);
   if((!inProcess && argc != 5) || std::wcscmp(argv[first],L"--pipe") || std::wcscmp(argv[first + 2],L"--token")){std::wcerr<<L"usage: TF3RuntimeIpcHost [--in-process] --pipe <safe-name> --token <64-lowercase-hex>\n";return 2;}
@@ -84,5 +90,6 @@ int wmain(int argc,wchar_t** argv) {
   if(!tf3runtimeipc::ValidToken(token))return 3;
   return inProcess ? tf3runtimeipc::ServeInProcess(pipe,token,
     withObserver ? &OwnedObservation : nullptr, 0,
-    withGate ? &OwnedGateProvider : nullptr, leaseMs) : tf3runtimeipc::Serve(pipe,token);
+    withGate ? &OwnedGateProvider : nullptr, leaseMs,
+    withPassiveVehicle ? &OwnedPassiveVehicleObservation : nullptr) : tf3runtimeipc::Serve(pipe,token);
 }

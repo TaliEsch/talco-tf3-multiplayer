@@ -4,7 +4,7 @@ import {spawn} from 'node:child_process';
 import net from 'node:net';
 import test from 'node:test';
 import {fileURLToPath} from 'node:url';
-import {NativeRuntimeClient,createRuntimeIpcCredentials,validateNativeGateCommand,validateNativeGateEvent,validateNativeGateReceipt} from '../src/native-runtime-client.mjs';
+import {NativeRuntimeClient,createRuntimeIpcCredentials,validateNativeGateCommand,validateNativeGateEvent,validateNativeGateReceipt,validatePassiveVehicleActionObservation} from '../src/native-runtime-client.mjs';
 
 const host=fileURLToPath(new URL('../dist/native/TF3RuntimeIpcHost.exe',import.meta.url));
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
@@ -21,6 +21,14 @@ test('typed native gate contracts retain exact uint64 epoch/generation and disti
 function wire(type,id,session,payload){const body=Buffer.from(JSON.stringify(payload));const out=Buffer.alloc(36+body.length);out.writeUInt32LE(0x54463349,0);out.writeUInt16LE(1,4);out.writeUInt16LE(type,6);out.writeUInt32LE(body.length,8);out.writeBigUInt64LE(BigInt(id),12);session.copy(out,20);body.copy(out,36);return out;}
 function rawWire(type,id,session,json){const body=Buffer.from(json);const out=Buffer.alloc(36+body.length);out.writeUInt32LE(0x54463349,0);out.writeUInt16LE(1,4);out.writeUInt16LE(type,6);out.writeUInt32LE(body.length,8);out.writeBigUInt64LE(BigInt(id),12);session.copy(out,20);body.copy(out,36);return out;}
 async function rawSocket(pipe){for(let i=0;i<30;i++){try{return await new Promise((resolve,reject)=>{const s=net.createConnection({path:`\\\\.\\pipe\\${pipe}`});s.once('connect',()=>resolve(s));s.once('error',reject);});}catch{await sleep(25);}}throw new Error('native IPC host did not open pipe');}
+function frameReader(socket){
+  let buffer=Buffer.alloc(0),failure=null;const waiters=[];
+  const pump=()=>{while(waiters.length&&buffer.length>=36){const size=buffer.readUInt32LE(8);if(buffer.length<36+size)return;const frame=buffer.subarray(0,36+size);buffer=buffer.subarray(36+size);waiters.shift().resolve(frame);}};
+  const reject=error=>{failure=error;while(waiters.length)waiters.shift().reject(error);};
+  socket.on('data',chunk=>{buffer=Buffer.concat([buffer,chunk]);pump();});
+  socket.once('error',reject);socket.once('end',()=>reject(new Error('native IPC socket ended before a complete frame')));
+  return ()=>failure?Promise.reject(failure):new Promise((resolve,rejectPromise)=>{waiters.push({resolve,reject:rejectPromise});pump();});
+}
 async function start(){const credentials=createRuntimeIpcCredentials();const child=spawn(host,['--pipe',credentials.pipe,'--token',credentials.token],{windowsHide:true,stdio:'ignore'});for(let attempt=0;attempt<30;attempt++){try{const client=await NativeRuntimeClient.connect({...credentials,timeoutMs:300});return {child,client,credentials};}catch{await sleep(25);}}child.kill();throw new Error('native IPC host did not accept a local client');}
 async function startQualifiedGateFixture({leaseMs}={}){const credentials=createRuntimeIpcCredentials();const args=['--owned-qualified-gate-fixture'];if(leaseMs!==undefined)args.push('--gate-lease-ms',String(leaseMs));args.push('--pipe',credentials.pipe,'--token',credentials.token);const child=spawn(host,args,{windowsHide:true,stdio:'ignore'});for(let attempt=0;attempt<30;attempt++){try{const client=await NativeRuntimeClient.connect({...credentials,timeoutMs:500});return {child,client,credentials};}catch{await sleep(25);}}child.kill();throw new Error('native qualified gate fixture did not accept a local client');}
 
@@ -65,6 +73,24 @@ test('in-process observer receipt exposes bounded stack and mitigation diagnosti
   assert.equal(ping.observationActive,true);
   assert.equal(ping.observationCrossThread,false);
   assert.equal(ping.observationSaturated,false);
+  assert.ok(Buffer.byteLength(JSON.stringify(ping))<4096);
+  await client.control('shutdown');client.close();
+  await new Promise(resolve=>child.once('exit',resolve));
+});
+
+test('authenticated passive vehicle diagnostics expose no native pointers or execution authority',{skip:!existsSync(host)},async()=>{
+  const credentials=createRuntimeIpcCredentials();
+  const child=spawn(host,['--in-process-passive-vehicle','--pipe',credentials.pipe,'--token',credentials.token],{windowsHide:true,stdio:'ignore'});
+  let client;
+  for(let attempt=0;attempt<30&&!client;attempt++){
+    try{client=await NativeRuntimeClient.connect({...credentials,timeoutMs:300});}catch{await sleep(25);}
+  }
+  assert.ok(client,'passive vehicle fixture did not accept a local client');
+  assert.deepEqual(client.capabilities,['transport.health','session.bind','diagnostic.passive-vehicle-action.v1']);
+  assert.deepEqual(client.handshake,{engineObserver:false,productionQualified:false,guiFreezes:false});
+  const ping=await client.control('ping');
+  assert.deepEqual(client.passiveVehicleActionObservation(ping),{factoryHits:'12',admissionHits:'9',correlatedHits:'8',droppedCandidates:'2',ownerThread:321,latestEntity:66005,latestStopped:1,latestValid:true,active:true,crossThread:false,saturated:false});
+  assert.throws(()=>validatePassiveVehicleActionObservation({...ping,passiveVehicleFactoryHits:12}),/INVALID_PASSIVE_VEHICLE_ACTION_OBSERVATION/);
   assert.ok(Buffer.byteLength(JSON.stringify(ping))<4096);
   await client.control('shutdown');client.close();
   await new Promise(resolve=>child.once('exit',resolve));
@@ -118,12 +144,12 @@ test('native IPC host fails closed on duplicate correlation and malformed wire f
 });
 test('native IPC high-water replay barrier permits long monotonic sessions and rejects old correlations',{skip:!existsSync(host),timeout:20000},async()=>{
   const credentials=createRuntimeIpcCredentials();const child=spawn(host,['--pipe',credentials.pipe,'--token',credentials.token],{windowsHide:true,stdio:'ignore'});const socket=await rawSocket(credentials.pipe);
-  socket.write(wire(1,1,Buffer.alloc(16),{token:credentials.token}));const ack=await new Promise(resolve=>socket.once('data',resolve));const session=ack.subarray(20,36);
+  const readFrame=frameReader(socket);socket.write(wire(1,1,Buffer.alloc(16),{token:credentials.token}));const ack=await readFrame();const session=ack.subarray(20,36);
   // This crosses the former 512-entry lifetime cache.  A single monotonic
   // high-water mark must retain neither the history nor a fixed session cap.
-  for(let id=2;id<=600;id++){socket.write(wire(3,id,session,{control:'ping'}));const receipt=await new Promise(resolve=>socket.once('data',resolve));assert.match(receipt.subarray(36).toString(),/"control":"ping"/);}
-  socket.write(wire(3,599,session,{control:'ping'}));const replay=await new Promise(resolve=>socket.once('data',resolve));assert.match(replay.subarray(36).toString(),/OUT_OF_ORDER_ID/);
-  socket.write(wire(3,601,session,{control:'shutdown'}));await new Promise(resolve=>socket.once('data',resolve));socket.destroy();await new Promise(resolve=>child.once('exit',resolve));
+  for(let id=2;id<=600;id++){socket.write(wire(3,id,session,{control:'ping'}));const receipt=await readFrame();assert.match(receipt.subarray(36).toString(),/"control":"ping"/);}
+  socket.write(wire(3,599,session,{control:'ping'}));const replay=await readFrame();assert.match(replay.subarray(36).toString(),/OUT_OF_ORDER_ID/);
+  socket.write(wire(3,601,session,{control:'shutdown'}));await readFrame();socket.destroy();await new Promise(resolve=>child.once('exit',resolve));
 });
 test('qualified in-process gate lease exits on authenticated connected silence while running',{skip:!existsSync(host),timeout:5000},async()=>{
   const {child,client}=await startQualifiedGateFixture({leaseMs:200});

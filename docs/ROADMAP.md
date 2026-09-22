@@ -1,5 +1,31 @@
 # TalCo TF3 multiplayer — current delivery plan
 
+## Live stock-action qualification — 22 September 2026
+
+Readiness is **5.7/10**, below the requested 6/10 gate. A disposable TF3 run
+now observed one stock Train 1 stop action through the exact-build native
+factory and common scripting submission sites: factory 1, submission 1,
+correlated 1, dropped 0, entity 163575, desired stopped value 1. The same run
+held, released exactly one engine boundary, re-held, detached and resumed.
+The factory/submission observer reported cross-thread activity; the world
+boundary was on a third reported thread. This proves a real passive action
+route, **not** suppression, host ordering, or replay. The first trial's action
+window expired before its click and produced no factory hit; the controlled
+second trial succeeded. The exact disposable save and staged loader were removed
+after TF3 closed; the source save hash remained unchanged.
+
+Next critical step: qualify the common scripting send body's ownership and
+callback/progress exit paths across the observed thread transfer, then implement
+capture-before-mutation and suppression with a fail-stop reserve. Feed the
+pointer-free intent through retained Host/Join ordering, apply once under the
+qualified update gate, and compare native/public postconditions. A second real
+TF3 process and no-input checkpoint baseline follow. This work is unfinished
+implementation, not an external blocker. No supported multiplayer gameplay
+family is released yet. The full suite is **909 discovered, 879 passed, 0 failed,
+30 skipped**; the skipped cases are not evidence of live qualification.
+
+Older readiness/test counts below are chronological and superseded here.
+
 ## Active stage-6 path — 22 September 2026
 
 Readiness is approximately **5.3/10**. The stage-5 native-control gate is now
@@ -16,13 +42,17 @@ current.
 
 The shortest path to 6/10 is now:
 
-1. Complete offline caller and ownership analysis for the TF3 stop/start factory
-   `0x9EEE60` and Add `0x9D3120`, especially the reference-counted output,
-   callback, progress and source-destruction obligations.
+1. Use the completed exact-build ABI inventory in
+   `docs/vehicle-abi-static-evidence.md`: 46 decoded calls prove the factory
+   lifetime and Add ownership obligations, while the scripting route proves
+   Add is not universal. The alternate adapter queues through TLS or calls the
+   apply wrapper directly.
 2. Qualify bounded observation of the stock vehicle UI path without suppression:
-   same-thread factory→Add identity, caller RVAs, nesting, output lifetime and
-   detach survival. Do not reuse the quarantined debugger profiles as authority.
-3. Implement suppression only after an owned fixture proves every cleanup and
+   factory → common scripting submission identity, selected adapter, thread,
+   nesting, output lifetime and detach survival. Add is evidence for one branch,
+   not the global admission boundary. Do not reuse the quarantined debugger
+   profiles as authority.
+3. Implement suppression at the common submission interface only after an owned fixture proves every cleanup and
    callback obligation. Reserve capture capacity before suppression; uncertainty
    or overflow must sticky-halt rather than execute locally or promise replay.
 4. Publish a pointer-free semantic intent through native IPC only after confirmed

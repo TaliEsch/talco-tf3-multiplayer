@@ -1,5 +1,32 @@
 # Completion audit against the build prompt
 
+## Live stock vehicle-action audit — 22 September 2026
+
+The full goal remains active. Single-game verification now includes a passive
+stock Train 1 stop action in the disposable TF3 world. The exact-build observer
+reported factory/submission/correlated counts **1/1/1**, no dropped candidates,
+entity **163575**, stopped **1**, `crossThread:true`; the world observer ran on
+thread 28196 and the latest action site on thread 18796. The controlled gate
+then held/released one boundary, re-held, detached and resumed. This is real
+native command observation and real engine control, but no mutation was
+suppressed or host-ordered, no native replay receipt exists, and no second
+TF3 instance was compared. The separate first attempt expired without an
+observed factory hit; it is not counted as a pass.
+
+The in-process observer, IPC snapshot and client validation are implemented;
+the source and owned native fixture/build passed. Full `npm run check`:
+**909 discovered, 879 passed, 0 failed, 30 skipped** (54.244 seconds).
+Single-game action and gate: verified. Two-instance, cross-machine,
+four-player/Internet: unperformed. Original `[R2] SV20.sav` retained SHA-256
+`cbbc1a4642734600e9e9c994a6b0be7e014c20c097b418752642e5157f402f7c`.
+The exact nonce-tagged disposable save/preview/request and three hash-matched
+staged loader files were removed after the game closed. Readiness is **5.7/10**.
+
+Still required before 6/10: safe command suppression/defer, same host ordering
+for host and clients, exactly-once TF3 application, correlated postconditions,
+and two-instance comparison where the environment permits. This is engineering
+work, not an external blocker; no gameplay family is yet synchronized.
+
 ## Production boundary-control audit — 22 September 2026
 
 The full objective remains incomplete and active. This batch crosses the native
@@ -43,6 +70,15 @@ The strongest command leads are factory `0x9EEE60` and Add `0x9D3120` on the
 qualified build. Static inspection proves Add owns source/callback/progress
 cleanup and a reference-counted output handle; it does not prove a safe
 cancellation result. Therefore no guessed suppression hook was activated.
+
+Fresh exact-build analysis decoded the sole factory caller and all 45 direct
+Add callers, then traced scripting userdata through `sendCommand`. It proves
+Add is not universal: adapter `0x120430` can use a TLS queue or call apply
+wrapper `0x9E2380` directly. Stage 6 must therefore observe and eventually
+control the common scripting submission interface rather than treating Add as
+global admission. A diagnostic-only authenticated IPC snapshot contract now
+exists, but production intentionally has no provider and no advertised passive
+action capability; no live action hook is claimed.
 
 Verification:
 

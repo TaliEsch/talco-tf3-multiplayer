@@ -198,7 +198,8 @@ bool ExtractBinding(const std::string& payload, std::string* session, std::strin
 int ServeMode(const std::wstring& name, const std::string& token, bool inProcess,
               RuntimeObservationProvider observer, std::uint32_t observerStartStatus,
               const GateProvider* gateProvider,
-              std::uint32_t authenticatedSessionLeaseMs) {
+              std::uint32_t authenticatedSessionLeaseMs,
+              PassiveVehicleActionObservationProvider passiveVehicle) {
   if (!ValidPipeName(name) || !ValidToken(token)) return 9;
   HANDLE pipe=CreateOwnerPipe(name,inProcess); if(pipe==INVALID_HANDLE_VALUE) return 10;
   bool connected=false;
@@ -214,6 +215,7 @@ int ServeMode(const std::wstring& name, const std::string& token, bool inProcess
   if(!ReadFrame(pipe,&h,&payload,inProcess)||h.type!=static_cast<std::uint16_t>(Tf3RuntimeIpcType::hello)||h.correlation_id==0||!ExtractToken(payload,&supplied)||!ConstantTimeEqual(token,supplied)){CloseHandle(pipe);return 12;}
   std::array<unsigned char,16> session{}; if(!SystemFunction036(session.data(),static_cast<ULONG>(session.size()))){CloseHandle(pipe);return 13;}
   const bool observing = observer != nullptr && observer().active;
+  const bool observingPassiveVehicle = passiveVehicle != nullptr && passiveVehicle().active;
   const bool gateAvailable = inProcess && gateProvider != nullptr && gateProvider->qualification_enabled &&
     gateProvider->submit != nullptr && gateProvider->poll_notification != nullptr;
   // A lease is deliberately meaningful only to the in-process qualified gate.
@@ -228,9 +230,11 @@ int ServeMode(const std::wstring& name, const std::string& token, bool inProcess
     ? (observing
       ? "{\"capabilities\":[\"transport.health\",\"session.bind\",\"qualification.inprocess.observer\"" +
         std::string(gateAvailable ? ",\"qualification.inprocess.gate\",\"simulation.hold\",\"engine.halt\",\"simulation.gate-receipts.v1\",\"engine.detach\"" : "") +
+        std::string(observingPassiveVehicle ? ",\"diagnostic.passive-vehicle-action.v1\"" : "") +
         "],\"engineObserver\":true,\"productionQualified\":" + std::string(gateProvider && gateProvider->production_qualified ? "true" : "false") + ",\"guiFreezes\":" + std::string(gateProvider && gateProvider->production_qualified ? "true" : "false") + "}"
       : "{\"capabilities\":[\"transport.health\",\"session.bind\"" +
         std::string(gateAvailable ? ",\"qualification.inprocess.gate\",\"simulation.hold\",\"engine.halt\",\"simulation.gate-receipts.v1\",\"engine.detach\"" : "") +
+        std::string(observingPassiveVehicle ? ",\"diagnostic.passive-vehicle-action.v1\"" : "") +
         "],\"engineObserver\":false,\"productionQualified\":" + std::string(gateProvider && gateProvider->production_qualified ? "true" : "false") + ",\"guiFreezes\":false"+
         (observerStartStatus==0?std::string():",\"observerStartStatus\":"+std::to_string(observerStartStatus))+"}")
     : "{\"capabilities\":[\"transport.health\"],\"engineObserver\":false}";
@@ -317,6 +321,7 @@ int ServeMode(const std::wstring& name, const std::string& token, bool inProcess
     const std::string state=control=="halt"?"transport_halt_not_engine_halt":(held?"held":"running");
     std::string receipt="{\"status\":\"accepted\",\"control\":\""+control+"\",\"state\":\""+state+"\",\"engineObserver\":"+std::string(observing?"true":"false");
     if(control=="ping"&&observing){const auto observation=observer();receipt+=",\"observationHits\":"+std::to_string(observation.hits)+",\"observationMinimumStackHeadroom\":"+std::to_string(observation.minimum_stack_headroom)+",\"observationThread\":"+std::to_string(observation.owner_thread)+",\"observationCfgFlags\":"+std::to_string(observation.cfg_flags)+",\"observationCetFlags\":"+std::to_string(observation.cet_flags)+",\"observationCfgKnown\":"+std::string(observation.cfg_known?"true":"false")+",\"observationCetKnown\":"+std::string(observation.cet_known?"true":"false")+",\"observationActive\":"+std::string(observation.active?"true":"false")+",\"observationCrossThread\":"+std::string(observation.cross_thread?"true":"false")+",\"observationSaturated\":"+std::string(observation.saturated?"true":"false");}
+    if(control=="ping"&&observingPassiveVehicle){const auto action=passiveVehicle();receipt+=",\"passiveVehicleFactoryHits\":\""+std::to_string(action.factory_hits)+"\",\"passiveVehicleAdmissionHits\":\""+std::to_string(action.admission_hits)+"\",\"passiveVehicleCorrelatedHits\":\""+std::to_string(action.correlated_hits)+"\",\"passiveVehicleDroppedCandidates\":\""+std::to_string(action.dropped_candidates)+"\",\"passiveVehicleThread\":"+std::to_string(action.owner_thread)+",\"passiveVehicleLatestEntity\":"+std::to_string(action.latest_entity)+",\"passiveVehicleLatestStopped\":"+std::to_string(action.latest_stopped)+",\"passiveVehicleLatestValid\":"+std::string(action.latest_valid?"true":"false")+",\"passiveVehicleActive\":"+std::string(action.active?"true":"false")+",\"passiveVehicleCrossThread\":"+std::string(action.cross_thread?"true":"false")+",\"passiveVehicleSaturated\":"+std::string(action.saturated?"true":"false");}
     receipt+="}";
     if(!SendFrame(pipe,Tf3RuntimeIpcType::receipt,h.correlation_id,session,receipt,inProcess))break;
     if(control=="shutdown"){
@@ -329,15 +334,16 @@ int ServeMode(const std::wstring& name, const std::string& token, bool inProcess
   }
   DisconnectNamedPipe(pipe); CloseHandle(pipe); return 0;
 }
-int Serve(const std::wstring& name, const std::string& token) { return ServeMode(name, token, false, nullptr, 0, nullptr, 0); }
+int Serve(const std::wstring& name, const std::string& token) { return ServeMode(name, token, false, nullptr, 0, nullptr, 0, nullptr); }
 int ServeInProcess(const std::wstring& name, const std::string& token,
                    RuntimeObservationProvider observer,
                    std::uint32_t observerStartStatus,
                    const GateProvider* gateProvider,
-                   std::uint32_t authenticatedSessionLeaseMs) {
+                   std::uint32_t authenticatedSessionLeaseMs,
+                   PassiveVehicleActionObservationProvider passiveVehicle) {
   if (gateProvider != nullptr && gateProvider->qualification_enabled &&
       (authenticatedSessionLeaseMs < 100 || authenticatedSessionLeaseMs > 30000)) return 18;
   return ServeMode(name, token, true, observer, observerStartStatus, gateProvider,
-                   authenticatedSessionLeaseMs);
+                   authenticatedSessionLeaseMs, passiveVehicle);
 }
 } // namespace tf3runtimeipc

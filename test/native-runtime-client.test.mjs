@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {NativeRuntimeClient,NATIVE_RUNTIME_CAPABILITIES,createRuntimeIpcCredentials} from '../src/native-runtime-client.mjs';
+import {NativeRuntimeClient,NATIVE_RUNTIME_CAPABILITIES,createRuntimeIpcCredentials,
+  validatePassiveVehicleActionObservation} from '../src/native-runtime-client.mjs';
 
 test('native runtime client rejects unsafe connection and controls',()=>{
   assert.throws(()=>new NativeRuntimeClient({pipe:'../bad',token:'a'.repeat(64)}),/INVALID/);
@@ -16,6 +17,25 @@ test('native runtime capability contract names execution gates without enabling 
   assert.equal(NATIVE_RUNTIME_CAPABILITIES.vehicleExecute,'vehicle.execute.v1');
   const c=new NativeRuntimeClient({pipe:'safe',token:'a'.repeat(64)});
   assert.throws(()=>c.requireCapability(NATIVE_RUNTIME_CAPABILITIES.vehicleExecute),/CAPABILITY_UNAVAILABLE/);c.close();
+});
+test('passive vehicle diagnostics require a complete pointer-free lossless snapshot',()=>{
+  const valid={passiveVehicleFactoryHits:'18446744073709551615',passiveVehicleAdmissionHits:'9',
+    passiveVehicleCorrelatedHits:'8',passiveVehicleDroppedCandidates:'2',passiveVehicleThread:321,passiveVehicleLatestEntity:66005,
+    passiveVehicleLatestStopped:1,passiveVehicleLatestValid:true,passiveVehicleActive:true,
+    passiveVehicleCrossThread:false,passiveVehicleSaturated:true};
+  assert.deepEqual(validatePassiveVehicleActionObservation(valid),{
+    factoryHits:valid.passiveVehicleFactoryHits,admissionHits:'9',correlatedHits:'8',droppedCandidates:'2',ownerThread:321,
+    latestEntity:66005,latestStopped:1,latestValid:true,active:true,crossThread:false,saturated:true});
+  for(const change of [
+    {passiveVehicleFactoryHits:18446744073709551615n},
+    {passiveVehicleFactoryHits:'18446744073709551616'},
+    {passiveVehicleLatestStopped:2},
+    {passiveVehicleLatestEntity:0,passiveVehicleLatestValid:false,passiveVehicleActive:false},
+    {passiveVehicleNativePointer:'7ff600000000'},
+  ]) {
+    const candidate={...valid,...change};
+    assert.throws(()=>validatePassiveVehicleActionObservation(candidate),/INVALID_PASSIVE_VEHICLE_ACTION_OBSERVATION/);
+  }
 });
 test('explicit close emits one disconnect notification even when socket shutdown follows',async()=>{
   const c=new NativeRuntimeClient({pipe:'safe',token:'a'.repeat(64)});const reasons=[];

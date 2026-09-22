@@ -465,6 +465,33 @@ register values, and does not copy the pointed-to entity, stopped boolean, tag,
 entry result, dependencies or callback. A matching action's UI timestamp alone
 must not be reported as native semantic capture.
 
+### Passive in-process observation boundary — 22 September 2026
+
+The production in-process runtime now has a deliberately diagnostic-only wire
+slot for a future passive `VehicleSetStoppedByUser` observer:
+`PassiveVehicleActionObservation` in `native/runtime_ipc.h`. It publishes only
+factory/admission counters, drop count, observer thread, and the five-byte
+payload's decoded `entity`/`stopped` values. All uint64 counters are canonical
+decimal strings on the wire; no object, callback, output-handle, stack, or game
+pointer is exposed. `src/native-runtime-client.mjs` rejects malformed snapshots
+through `validatePassiveVehicleActionObservation` before a consumer can use
+them. The capability is advertised only while the provider reports `active`.
+
+This is not an activated TF3 hook. The authenticated owned IPC fixture proves
+the bounded wire/validation contract only. It has no control, suppression,
+queueing, replay, or authority capability, and the production runtime passes no
+provider today.
+
+The remaining activation evidence is specific and finite: preserve the exact
+32-byte immutable bytes at factory entry `0x9EEE60` and Add entry `0x9D3120`
+from the current executable, then independently qualify that an INT3 VEH at
+each entry can restore its byte without affecting exception/unwind or target
+survival. Factory entry can safely record only its incoming `R8D`/`R9B` payload
+candidate; Add may record an occurrence count only until its moved-source,
+output-pair, callback and progress-object ownership is established. A factory
+candidate plus an Add occurrence is not an admission correlation and must never
+be used for suppression or replay.
+
 ### Controlled live routing and payload evidence; teardown failure
 
 After the review, three stock-UI-loaded disposable-world WinDbg trials were run
