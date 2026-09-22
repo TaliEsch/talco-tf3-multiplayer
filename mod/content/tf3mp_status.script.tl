@@ -1751,23 +1751,47 @@ local ret : GameScriptWithGui<Tf3MpState, Tf3MpGuiState> = {
         local vehicle = api.engine.getComponent(request.entity as integer, api.type.ComponentType.TRANSPORT_VEHICLE) as Engine.Component.TransportVehicle
         if owner == nil or vehicle == nil or owner.player ~= request.companyEntity then return end
         -- Read live ownership immediately before the one authorized action.
-        api.cmd.sendCommand(api.cmd.makeVehicleSetStoppedByUserCmd(request.entity as integer, not (request.running as boolean)))
-        local afterOwner = api.engine.getComponent(request.entity as integer, api.type.ComponentType.PLAYER_OWNED) as Engine.Component.PlayerOwned
-        local afterVehicle = api.engine.getComponent(request.entity as integer, api.type.ComponentType.TRANSPORT_VEHICLE) as Engine.Component.TransportVehicle
-        local afterClock = readClock()
-        local afterSpeed = api.engine.getComponent(api.engine.util.getWorld(), api.type.ComponentType.GAME_SPEED) as Engine.Component.GameSpeed
-        if afterOwner == nil or afterVehicle == nil or afterOwner.player ~= request.companyEntity or afterVehicle.userStopped ~= not (request.running as boolean) then return end
-        if afterClock.updateCount ~= request.scheduledUpdate or afterSpeed.speedup ~= 0 then return end
-        local balance = api.engine.util.finance.getPlayersBalance(request.companyEntity as integer)
-        if balance == nil or balance ~= balance or math.abs(balance) > 9007199254740991 or balance % 1 ~= 0 then return end
-        receipt.snapshotVersion = 1; receipt.hostSequence = request.hostSequence; receipt.entity = request.entity
-        receipt.ownerCompanyEntity = afterOwner.player; receipt.stopFlag = afterVehicle.userStopped and 1 or 0
-        receipt.balance = math.abs(balance); receipt.negative = balance < 0 and 1 or 0
-        receipt.updateCount = afterClock.updateCount; receipt.held = true; receipt.status = "ok"
-        binding.phase = "action_held"
+        local expectedEntity = request.entity as integer
+        local expectedCompany = request.companyEntity as integer
+        local expectedStopped = not (request.running as boolean)
+        local expectedUpdate = request.scheduledUpdate as integer
+        local expectedSequence = request.hostSequence as integer
+        local expectedOperation = request.operationId as string
+        api.cmd.sendCommand(api.cmd.makeVehicleSetStoppedByUserCmd(expectedEntity, expectedStopped),
+          function(vehicleData : VehicleSetStoppedByUserCommandData, success : boolean, _entities : {{Engine.Entity, Engine.Revision}})
+            -- The callback is the native command completion boundary. Keep the
+            -- pre-persisted unknown result unless callback success and every
+            -- held-world postcondition still match the authorized operation.
+            pcall(function()
+              local saved = state:get()
+              if saved == nil then return end
+              local savedReceipt = saved.executionReceipt or {}
+              local savedBinding = saved.coordinationBinding or {}
+              local savedBarrier = saved.executionBarrier or {}
+              if savedReceipt.operationId ~= expectedOperation or savedReceipt.status ~= "unknown"
+                or savedBinding.phase ~= "execution_unknown" or savedBarrier.phase ~= "consumed"
+                or savedBarrier.operationId ~= expectedOperation or success ~= true
+                or vehicleData.vehicleEntity ~= expectedEntity or vehicleData.userStopped ~= expectedStopped then return end
+              local afterOwner = api.engine.getComponent(expectedEntity, api.type.ComponentType.PLAYER_OWNED) as Engine.Component.PlayerOwned
+              local afterVehicle = api.engine.getComponent(expectedEntity, api.type.ComponentType.TRANSPORT_VEHICLE) as Engine.Component.TransportVehicle
+              local afterClock = readClock()
+              local afterSpeed = api.engine.getComponent(api.engine.util.getWorld(), api.type.ComponentType.GAME_SPEED) as Engine.Component.GameSpeed
+              if afterOwner == nil or afterVehicle == nil or afterOwner.player ~= expectedCompany or afterVehicle.userStopped ~= expectedStopped then return end
+              if afterClock.updateCount ~= expectedUpdate or afterSpeed.speedup ~= 0 then return end
+              local balance = api.engine.util.finance.getPlayersBalance(expectedCompany)
+              if balance == nil or balance ~= balance or math.abs(balance) > 9007199254740991 or balance % 1 ~= 0 then return end
+              savedReceipt.snapshotVersion = 1; savedReceipt.hostSequence = expectedSequence; savedReceipt.entity = expectedEntity
+              savedReceipt.ownerCompanyEntity = afterOwner.player; savedReceipt.stopFlag = afterVehicle.userStopped and 1 or 0
+              savedReceipt.balance = math.abs(balance); savedReceipt.negative = balance < 0 and 1 or 0
+              savedReceipt.updateCount = afterClock.updateCount; savedReceipt.held = true; savedReceipt.status = "ok"
+              savedBinding.phase = "action_held"
+              state:set(saved)
+            end)
+          end)
       end)
-      if not ok then receipt.status = "unknown"; binding.phase = "execution_unknown" end
-      state:set(current)
+      -- Authorization and the unknown result were persisted before submission.
+      -- Never overwrite a callback result with this stale local state.
+      if not ok then return nil end
       return nil
     end
     -- First real coordinator operation: terminal halt only. Other operations

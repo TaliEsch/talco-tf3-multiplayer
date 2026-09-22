@@ -481,16 +481,17 @@ During a known reversible vehicle stop/start pair, the bridge reported entity
 original running state. The trace recorded exactly two handler entry/return
 pairs on the same thread. Each handler was nested inside two apply calls:
 hits `153/154 -> 155/156 -> 157/158` and
-`193/194 -> 195/196 -> 197/198`. Handler RSP was `0x85af6fd068` and caller
-return value was reported as RVA `0x9b8e3d`. Exact-build static review found
-that value lies inside the instruction at `0x9b8e3c`, not after a call. The two
-reported nested apply returns have the same problem: `0x7febbb` and `0x8004e4`
-are interior instruction bytes, while the verified apply call returns are
-`0x11ebbb` and `0x1204e4`. The vehicle dispatcher call at `0x9d8e38` returns at
-`0x9d8e3d`. No single base correction reconciles these values. The paired live
-events and timing remain useful observations, but their call-chain provenance
-is unqualified until a future trace preserves each raw absolute return address
-and the exact module base from that recording.
+`193/194 -> 195/196 -> 197/198`. Handler RSP was `0x85af6fd068`. A later review
+returned to the raw absolute addresses instead of the incorrectly derived RVAs.
+All three reconcile to the same inferred image base `0x7ff6386e0000`:
+`0x7ff6387febbb - 0x11ebbb`, `0x7ff6388004e4 - 0x1204e4`, and
+`0x7ff6390b8e3d - 0x9d8e3d`. Exact-build disassembly independently places calls
+at `0x11ebb6`, `0x1204df` and vehicle-dispatcher `0x9d8e38`, immediately before
+those returns. The idle raw return `0x7ff63918fdb6` similarly becomes
+`0xaafdb6`, after indirect call `0xaafdb3`. This is a coherent call-chain
+reconstruction, but the inferred base was not preserved by an independent
+module-map record, so it is strong routing evidence rather than live hook
+qualification.
 
 A final bounded repeat captured only the first 512 readable bytes at handler
 RDX for each already-known reversible action. The first qword was

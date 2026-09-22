@@ -55,6 +55,14 @@ export async function loadHostLocalEngineFactory({ modulePath, bridge, nativeGat
     verifiedSave: Object.freeze({ ...verifiedSave }),
     engineSessionDirectory,
   }));
+  // A provider may await while the bridge or authenticated session fence is
+  // revoked. Returning that stale factory would admit peers without a live
+  // host-side engine path.
+  if (!bridge.connected || bridge.engineObservation?.available !== true
+    || !nativeGate.ready || nativeGate.binding?.sessionId !== sessionId
+    || nativeGate.binding?.role !== 'host') {
+    throw new Error('HOST_LOCAL_ENGINE_RUNTIME_LOST_DURING_LOAD');
+  }
   if (!exactKeys(provided, ['engineBinding', 'createAdapter', 'productionQualified', 'verifiedSave'])
     || provided.productionQualified !== true || !provided.engineBinding
     || (typeof provided.engineBinding !== 'object' && typeof provided.engineBinding !== 'function')

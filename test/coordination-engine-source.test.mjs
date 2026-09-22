@@ -90,8 +90,13 @@ test('execution consumes authorization and requires an existing hold before muta
   assert.ok(region.indexOf('owner.player ~= request.companyEntity')<mutation);
   assert.ok(region.indexOf('heldClock.updateCount ~= request.scheduledUpdate')<mutation);
   assert.match(region,/request\[key\] ~= prepared\[key\]/);
-  assert.match(region,/afterClock.updateCount ~= request.scheduledUpdate or afterSpeed.speedup ~= 0/);
-  assert.match(region,/receipt.balance = math.abs\(balance\)/);
+  assert.match(region,/function\(vehicleData : VehicleSetStoppedByUserCommandData, success : boolean/);
+  assert.match(region,/savedBarrier.operationId ~= expectedOperation or success ~= true/);
+  assert.match(region,/vehicleData.vehicleEntity ~= expectedEntity or vehicleData.userStopped ~= expectedStopped/);
+  assert.match(region,/afterClock.updateCount ~= expectedUpdate or afterSpeed.speedup ~= 0/);
+  assert.match(region,/savedReceipt.balance = math.abs\(balance\)/);
+  assert.ok(region.indexOf('current.executionReceipt = receipt')<mutation);
+  assert.ok(region.indexOf('savedReceipt.status = "ok"')>mutation);
   assert.doesNotMatch(region,/receipt.stateHash\s*=/);
   for(const name of ['tf3mp_execute_command','tf3mp_get_execution_receipt']) {
     assert.ok(engine.includes(`state:subscribeToEvent("${name}")`));assert.ok(panel.includes(`"${name}"`));
@@ -114,7 +119,9 @@ test('review rejects weakened committed execution guards',async()=>{
     for(const marker of ['binding.phase ~= "prepared"','clock.tickCount >= lease.expiresTick',
       'request[key] ~= prepared[key]','(current.executionReceipt or {}).operationId ~= nil',
       'owner == nil or vehicle == nil or owner.player ~= request.companyEntity',
-      'afterClock.updateCount ~= request.scheduledUpdate or afterSpeed.speedup ~= 0']) {
+      'afterClock.updateCount ~= expectedUpdate or afterSpeed.speedup ~= 0',
+      'savedBarrier.operationId ~= expectedOperation or success ~= true',
+      'vehicleData.vehicleEntity ~= expectedEntity or vehicleData.userStopped ~= expectedStopped']) {
       await writeFile(file,original.slice(0,start)+original.slice(start).replace(marker,'false'));
       await assert.rejects(validateReviewPackage(dir),/coordinator execution/);
     }

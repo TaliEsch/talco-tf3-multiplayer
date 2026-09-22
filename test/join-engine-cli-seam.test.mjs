@@ -60,6 +60,20 @@ test('join engine seam accepts a qualified provider with exact save verification
   }
 });
 
+test('join engine seam rejects a bridge or native fence lost while its provider loads', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'tf3mp-join-race-'));
+  const provider = path.join(root, 'binding-provider.mjs');
+  try {
+    await writeFile(provider, `export function createJoinEngineBinding(context) {
+      context.bridge.connected = false;
+      return { createAdapter() {}, productionQualified: true, verifiedSave: { bytes: 1, sha256: '${requiredSave.sha256}' } };
+    }`);
+    await assert.rejects(loadJoinEngineFactory({ ...options(provider), bridge: { ...bridge } }), /RUNTIME_LOST_DURING_LOAD/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test('join engine seam rejects symbolic-link provider modules', async t => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'tf3mp-join-cli-link-'));
   const target = path.join(root, 'target.mjs'), link = path.join(root, 'link.mjs');

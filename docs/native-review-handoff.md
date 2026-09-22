@@ -67,6 +67,19 @@ commit provides functioning multi-instance multiplayer.
   The current controller advertises `productionQualified:false`, so ordinary
   Host/Join correctly remains closed rather than mistaking debugger receipts for
   world evidence.
+- Host/Join composition now rechecks live bridge and native-fence state after
+  asynchronous provider loading. Native session admission rejects mismatched or
+  non-accepted bind/ping receipts, and duplicate Join admission fails closed.
+  The committed vehicle path now keeps its pre-persisted result unknown until
+  the supported `sendCommand` callback confirms success, matching command data,
+  ownership, stopped state, held update and balance. Missing, failed or stale
+  callbacks do not retry or certify execution.
+- `src/two-instance-acceptance-harness.mjs` and
+  `tools/two-instance-acceptance-plan.mjs` now generate a non-launching but
+  directly executable Host/Join plan with distinct bridge directories, ports,
+  native identities, exact mod hash and exact host-save identity. Its collector
+  validates equal save and held checkpoint evidence but deliberately cannot mark
+  acceptance passed without two real TF3 processes and correlated action receipts.
 
 ### Real execution paths
 
@@ -171,17 +184,25 @@ The disabled action-trace implementation can pair nested handler/apply entry and
 return observations by thread, entry RSP and return address in owned fixtures.
 Controlled WinDbg observation established two real handler pairs for the known
 vehicle stop/start and decoded payload bytes `+0..+3` as entity 66005 and byte
-`+4` as the stopped value. Static review also found the reported live caller
-RVAs fall inside instructions rather than after calls; they cannot be reconciled
-with verified dispatcher/apply returns by one base correction. Call-chain
-provenance is therefore unresolved, and bytes `+5..+7` are unqualified padding,
-not flags. The trace also proved the outer apply wrapper runs continuously for
+`+4` as the stopped value. A second static review corrected the earlier derived
+RVA error: the three raw returns all imply base `0x7ff6386e0000` and align with
+verified call returns `0x11ebbb`, `0x1204e4` and `0x9d8e3d`. This coherently
+reconstructs the observed call chain, but lacks an independently preserved
+module-map record. Bytes `+5..+7` are unqualified padding, not flags. The trace
+also proved the outer apply wrapper runs continuously for
 background work. However the final detach ended
 in TF3 `0xC0000005` execute-at-zero, and an earlier detach crashed WinDbg's
 engine. The custom observer rebuild was quarantined by Windows Security as
 `Behavior:Win32/DefenseEvasion.A!ml` before its second smoke invocation and was
 not restored or allowlisted. Exact-build sites therefore remain non-activating;
 the evidence narrows the ABI but does not make command capture safe.
+
+The disabled observer schema now preserves `imageBase`, `rawReturn` and an
+overflow-safe, in-image `returnAddressRva` round trip so future evidence cannot
+repeat the base-normalization error. Handler entry copies exactly five bytes:
+the entity DWORD and stopped byte; it never reads or reports padding `+5..+7`.
+Both live qualification constants remain false. Source assertions pass and the
+observer passes MSVC x64 `/W4 /WX /Zs`; no quarantined executable was rebuilt.
 
 ### TF2 baseline and licence
 
@@ -221,18 +242,16 @@ prove determinism. No two-instance no-input baseline exists.
 
 ### Verification record
 
-- Last fully passing exact `npm run check` milestone: **833 discovered, 804
-  passed, 0 failed, 29 skipped** (39.08 seconds). The skipped tests are precisely the native observer/
+- Current exact unrestricted `npm run check`: **850 discovered, 820 passed,
+  0 failed, 30 skipped** (39.05 seconds). The skipped tests are the unavailable native observer/
   controller executable tests because Windows Security quarantined the rebuilt
   observer and the stale controller was removed. All 804 non-native tests also
   passed in a separate explicit run. The last pre-quarantine integration tree
   passed 830/830 in 98.53 seconds. The independent reviewer did obtain 756/756
   on its earlier tree; the reported 478/478 was an incomplete TAP count.
-- The added Join/bootstrap/provider group passed 12 tests with one Windows
-  symlink case skipped. The final full-suite attempt exposed six named-pipe/
-  native IPC failures and one bridge lease failure in the restricted run and
-  was stopped on the user's pause request before an aggregate summary. These
-  remain open verification failures for the next session.
+- The six named-pipe/native IPC failures and one bridge lease failure from the
+  restricted wrap-up run were environmental: the focused unrestricted rerun
+  passed 15/15 before the complete passing suite above.
 - Current native source passed MSVC x64 `/W4 /WX /Zs` syntax/type checking for
   both observer and controller. A current executable/smoke run was not performed
   after the security quarantine; protection was not bypassed.
@@ -245,7 +264,7 @@ prove determinism. No two-instance no-input baseline exists.
   fanout, observer fault isolation and lifecycle separation.
 - `Build-NativeIpc.ps1`: passed MSVC x64 `/W4 /WX` build.
 - Mod review: 29 content files, zero executables, manifest
-  `2bc5aed290858033ebd13ce7038bb790cdb00ae1fc0293f29966ccc81e6fa429`.
+  `6f2334edb74e36e6b5e9e46190fccb18571ac93645cca056f25be200c70fce24`.
 - `git diff --check`: passed before the implementation commit.
 - Single-game verified: startup direct-path load with the UI lifecycle faults
   above, simulation observation,

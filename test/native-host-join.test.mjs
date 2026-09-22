@@ -4,10 +4,10 @@ import test from 'node:test';
 import {COORDINATED_NATIVE_CAPABILITIES,openNativeHostJoinGate,resolveNativeHostJoinMode} from '../src/native-host-join.mjs';
 
 class FakeClient extends EventEmitter {
-  constructor(capabilities,{bindFails=false,productionQualified=true}={}){super();this.capabilities=capabilities;this.closed=false;this.bindFails=bindFails;this.bound=null;this.handshake={engineObserver:true,productionQualified};}
+  constructor(capabilities,{bindFails=false,bindReceipt, pingReceipt,productionQualified=true}={}){super();this.capabilities=capabilities;this.closed=false;this.bindFails=bindFails;this.bindReceipt=bindReceipt;this.pingReceipt=pingReceipt;this.bound=null;this.handshake={engineObserver:true,productionQualified};}
   requireCapability(capability){if(!this.capabilities.includes(capability))throw new Error(`NATIVE_RUNTIME_CAPABILITY_UNAVAILABLE:${capability}`);}
-  async bindSession(binding){if(this.bindFails)throw new Error('NATIVE_RUNTIME_IPC_BIND_REJECTED');this.bound=binding;return {status:'accepted',...binding};}
-  async control(control){if(control!=='ping')throw new Error('UNEXPECTED_CONTROL');return {status:'accepted'};}
+  async bindSession(binding){if(this.bindFails)throw new Error('NATIVE_RUNTIME_IPC_BIND_REJECTED');this.bound=binding;return this.bindReceipt??{status:'accepted',...binding};}
+  async control(control){if(control!=='ping')throw new Error('UNEXPECTED_CONTROL');return this.pingReceipt??{status:'accepted'};}
   close(){this.closed=true;}
 }
 const options={nativePipe:'tf3mp_test',nativeToken:'a'.repeat(64)};
@@ -53,6 +53,17 @@ test('native Host/Join gate closes the endpoint when authenticated session bindi
   await assert.rejects(openNativeHostJoinGate({options,role:'host',sessionId:SESSION,clientFactory:async()=>client}),/BIND_REJECTED/);
   assert.equal(client.closed,true);
   assert.equal(client.bound,null);
+});
+
+test('native Host/Join gate rejects non-accepted or mismatched binding and ping receipts',async()=>{
+  for(const client of [
+    new FakeClient(COORDINATED_NATIVE_CAPABILITIES,{bindReceipt:{status:'rejected'}}),
+    new FakeClient(COORDINATED_NATIVE_CAPABILITIES,{bindReceipt:{status:'accepted',sessionId:SESSION,role:'participant'}}),
+    new FakeClient(COORDINATED_NATIVE_CAPABILITIES,{pingReceipt:{status:'rejected'}}),
+  ]) {
+    await assert.rejects(openNativeHostJoinGate({options,role:'host',sessionId:SESSION,clientFactory:async()=>client}),/INVALID_BIND_RECEIPT|PING_REJECTED/);
+    assert.equal(client.closed,true);
+  }
 });
 
 test('native Host/Join gate logs uncertain outcomes and revokes readiness on disconnect',async()=>{

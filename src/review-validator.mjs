@@ -411,7 +411,7 @@ export async function validateReviewPackage(root) {
   }
   if(!barrier.includes('afterClock.updateCount == barrier.scheduledUpdate and speed.speedup == 0')
     ||/makeVehicle/.test(barrier)||!gameScript.includes('pcall(function() executionBarrierUpdate(state, current) end)'))throw new Error('invalid engine-owned barrier effect');
-  const executionVehicle = 'api.cmd.sendCommand(api.cmd.makeVehicleSetStoppedByUserCmd(request.entity as integer, not (request.running as boolean)))';
+  const executionVehicle = 'api.cmd.sendCommand(api.cmd.makeVehicleSetStoppedByUserCmd(expectedEntity, expectedStopped),';
   const execution = gameScript.slice(gameScript.indexOf('-- Committed coordinator execution:'),gameScript.indexOf('-- First real coordinator operation:'));
   for(const marker of ['count ~= 15','request.operation ~= "executeHeld"','binding.phase ~= "prepared"',
     'lease.phase ~= "active"','clock.tickCount >= lease.expiresTick','(current.executionReceipt or {}).operationId ~= nil',
@@ -425,8 +425,15 @@ export async function validateReviewPackage(root) {
     'owner == nil or vehicle == nil or owner.player ~= request.companyEntity']) {
     if(!execution.includes(marker)||execution.indexOf(marker)>execution.indexOf(executionVehicle)) throw new Error('missing coordinator execution ownership/hold');
   }
-  if(!execution.includes('afterVehicle.userStopped ~= not (request.running as boolean)')
-    ||!execution.includes('afterClock.updateCount ~= request.scheduledUpdate or afterSpeed.speedup ~= 0')) throw new Error('missing coordinator execution postcondition');
+  for(const marker of ['function(vehicleData : VehicleSetStoppedByUserCommandData, success : boolean',
+    'savedReceipt.operationId ~= expectedOperation or savedReceipt.status ~= "unknown"',
+    'savedBinding.phase ~= "execution_unknown" or savedBarrier.phase ~= "consumed"',
+    'savedBarrier.operationId ~= expectedOperation or success ~= true',
+    'vehicleData.vehicleEntity ~= expectedEntity or vehicleData.userStopped ~= expectedStopped',
+    'afterVehicle.userStopped ~= expectedStopped','afterClock.updateCount ~= expectedUpdate or afterSpeed.speedup ~= 0',
+    'savedReceipt.status = "ok"','savedBinding.phase = "action_held"','state:set(saved)']) {
+    if(!execution.includes(marker)||execution.indexOf(marker)<execution.indexOf(executionVehicle)) throw new Error('missing coordinator execution callback/postcondition');
+  }
   const release = gameScript.slice(gameScript.indexOf('name == "tf3mp_release_checkpoint"'),gameScript.indexOf('name == "tf3mp_prepare_command"'));
   for(const marker of ['count ~= expectedCount','request.speedup ~= 1 and request.speedup ~= 2 and request.speedup ~= 4','request.operation ~= "release"','binding.phase ~= "checkpoint_held"',
     'lease.phase ~= "active"','clock.tickCount >= lease.expiresTick',

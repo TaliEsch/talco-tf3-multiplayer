@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
@@ -10,6 +10,32 @@ const executable = path.join(root, 'dist/native-runtime/TF3RuntimeObserver.exe')
 const source = path.join(root, 'native/runtime_observer.cpp');
 const available = process.platform === 'win32' && existsSync(executable);
 const skip = available ? false : 'Run Build-NativeRuntime.ps1 on Windows to execute the real native observer tests.';
+const observerSource = readFileSync(source, 'utf8');
+
+function assertReturnCoordinates(event) {
+  assert.match(event.imageBase, /^[0-9a-f]+$/);
+  assert.match(event.rawReturn, /^[0-9a-f]+$/);
+  assert.equal(event.returnAddress, event.rawReturn);
+  assert.equal(event.returnAddressClass, 'main-image');
+  assert.ok(event.returnAddressRva > 0);
+  const imageBase = BigInt(`0x${event.imageBase}`);
+  const rawReturn = BigInt(`0x${event.rawReturn}`);
+  const returnRva = BigInt(event.returnAddressRva);
+  assert.equal(rawReturn, imageBase + returnRva);
+}
+
+test('native observer source keeps return coordinates and handler payload decoding bounded', () => {
+  assert.match(observerSource, /constexpr bool kLiveCommandProfileQualified = false;/);
+  assert.match(observerSource, /constexpr bool kLiveActionTraceQualified = false;/);
+  assert.match(observerSource, /bool MainImageReturnRva\(ULONG64 rawReturn, ULONG64 base, DWORD imageSize, ULONG64& returnRva\)/);
+  assert.match(observerSource, /rawReturn < base/);
+  assert.match(observerSource, /candidate >= imageSize \|\| base > UINT64_MAX - candidate \|\| base \+ candidate != rawReturn/);
+  assert.match(observerSource, /imageBase.*rawReturn/);
+  assert.match(observerSource, /constexpr size_t kVehicleActionPayloadBytes = 5;/);
+  assert.match(observerSource, /std::array<BYTE, kVehicleActionPayloadBytes> handlerPayload/);
+  assert.match(observerSource, /siteIndex == 0 &&\s*reader\.Read\(context\.Rdx, handlerPayload\.data\(\), handlerPayload\.size\(\)\)/);
+  assert.doesNotMatch(observerSource, /handlerPayload\.data\(\)\s*\+\s*[5-7]/);
+});
 function run(args) {
   assert.ok(statSync(executable).mtimeMs >= statSync(source).mtimeMs,
     'Native observer binary is stale; run Build-NativeRuntime.ps1 first.');
@@ -117,8 +143,7 @@ test('command profile captures bounded factory/admission/apply/handler evidence 
     assert.match(event.processCreationTime, /^[1-9][0-9]+$/);
     assert.equal(event.mappedSiteVerified, true);
     assert.equal(event.returnAddressReadable, true);
-    assert.equal(event.returnAddressClass, 'main-image');
-    assert.ok(event.returnAddressRva > 0);
+    assertReturnCoordinates(event);
     assert.ok(event.remoteBytesAttempted <= 128);
     assert.equal(event.completeCommandPayload, false);
     assert.equal(event.commandControlQualified, false);
@@ -194,9 +219,11 @@ test('action trace pairs nested mixed calls on four actual threads using matchin
       assert.match(event.sha256, /^[a-f0-9]{64}$/);
       assert.match(event.processCreationTime, /^[1-9][0-9]+$/);
       assert.equal(event.returnAddressReadable, true);
-      assert.equal(event.returnAddressClass, 'main-image');
-      assert.ok(event.returnAddressRva > 0);
-      assert.equal(event.remoteBytesAttempted, 8);
+      assertReturnCoordinates(event);
+      const handlerEntry = event.kind === 'handler' && event.phase === 'entry';
+      assert.equal(event.handlerPayload.present, handlerEntry);
+      assert.equal(event.handlerPayload.byteCount, handlerEntry ? 5 : 0);
+      assert.equal(event.remoteBytesAttempted, handlerEntry ? 13 : 8);
       assert.equal(event.commandControlQualified, false);
       assert.equal(event.captureComplete, false);
       assert.equal(event.raxIsCompletion, false);

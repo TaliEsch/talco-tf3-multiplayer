@@ -52,3 +52,17 @@ test('host-local CLI seam accepts only an explicit, qualified factory with exact
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test('host-local seam rejects a bridge or native fence lost while its provider loads', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'tf3mp-host-race-'));
+  const provider = path.join(root, 'binding-provider.mjs');
+  try {
+    await writeFile(provider, `export function createHostLocalEngineBinding(context) {
+      context.bridge.engineObservation.available = false;
+      return { engineBinding: {}, createAdapter() {}, productionQualified: true, verifiedSave: { bytes: 1, sha256: '${requiredSave.sha256}' } };
+    }`);
+    await assert.rejects(loadHostLocalEngineFactory({ ...options(provider), bridge: { ...bridge, engineObservation: { ...bridge.engineObservation } } }), /RUNTIME_LOST_DURING_LOAD/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

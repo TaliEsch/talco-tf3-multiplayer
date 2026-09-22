@@ -54,6 +54,13 @@ export async function loadJoinEngineFactory({ modulePath, bridge, nativeGate,
     verifiedSave: Object.freeze({ ...verifiedSave }),
     engineSessionDirectory,
   }));
+  // Importing and provider construction are asynchronous. Do not allow a
+  // disconnect or lost observation during either step to become save-ready.
+  if (!bridge.connected || bridge.engineObservation?.available !== true
+    || !nativeGate.ready || nativeGate.binding?.sessionId !== sessionId
+    || nativeGate.binding?.role !== 'participant') {
+    throw new Error('JOIN_ENGINE_RUNTIME_LOST_DURING_LOAD');
+  }
   if (!exactKeys(provided, ['createAdapter', 'productionQualified', 'verifiedSave'])
     || provided.productionQualified !== true || typeof provided.createAdapter !== 'function') {
     throw new Error('JOIN_ENGINE_BINDING_FACTORY_INVALID');

@@ -28,18 +28,20 @@ work, not completed functionality. A fresh ordinary-UI disposable run passed the
 production public-domain checkpoint gate at exact held/released update 3052;
 this is single-game evidence only. A separate lease-loss run proved the actual
 TF3 engine halted at update 3335 after helper renewal stopped. The last fully
-passing exact suite discovered 833 tests: 804 passed, 0 failed and 29 native
-executable tests were skipped because Windows Security quarantined the rebuilt observer. The prior
+passing exact unrestricted suite discovered 850 tests: 820 passed, 0 failed and
+30 native executable tests were skipped because Windows Security quarantined the rebuilt observer. The prior
 pre-quarantine integration tree passed 830/830; current native source passes
 MSVC `/W4 /WX /Zs` syntax/type checking.
 
 The reviewed handler/apply sites were exercised through bounded WinDbg trials.
 They show continuous autonomous apply traffic, exactly one nested vehicle
 handler pair for each reversible stop/start action, and payload bytes encoding
-entity 66005 at `+0..+3` plus stopped state at `+4`. Exact-build static review
-found the reported caller RVAs are interior instruction bytes and cannot be
-reconciled with the verified call returns by one base correction; bytes
-`+5..+7` are unqualified padding rather than a flags word. This narrowed the next ABI work,
+entity 66005 at `+0..+3` plus stopped state at `+4`. Rechecking the raw returns
+corrected the earlier derived-RVA error: all three imply base
+`0x7ff6386e0000` and align with the exact-build dispatcher/apply call returns.
+That is coherent routing evidence, not independent module-map or safe-hook
+qualification; bytes `+5..+7` are unqualified padding rather than a flags word.
+This narrowed the next ABI work,
 but did not pass safety: the final detach produced a TF3 execute-at-zero access
 violation, and Windows Security quarantined the rebuilt custom observer as a
 behavioral defense-evasion detection. Do not bypass protection or enable either
@@ -56,6 +58,9 @@ Work in this order:
    host and participant actions, per-instance entity resolution, exactly-once
    replay and correlated native postconditions. Cover both stock vehicle-window
    and bulk-manager paths; do not leave unsynchronized bypasses enabled.
+   The mod-owned vehicle action now uses the documented after-execution callback
+   and verifies its callback payload plus public postconditions. Stock UI
+   capture/suppression remains the missing boundary.
 3. Construct the real production `EngineSessionAdapter` in Host and Join. Reuse
    the gate's persistent binding and authenticated client subscription, keep
    transport receipts outside world evidence,
@@ -84,6 +89,8 @@ Work in this order:
    costs and income, including cross-company rejection.
 7. Only then run two-instance no-input/action/recovery tests, followed by LAN,
    port-forwarded Internet and four-player acceptance.
+   The two-instance planner now emits isolated Host/Join commands and an honest
+   evidence collector; it has not launched or verified two TF3 processes.
 
 Current safety gates are engineering work, not an external blocker. The lack of
 a second controlled machine leaves cross-machine acceptance open, but does not

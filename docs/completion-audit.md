@@ -36,6 +36,17 @@ only then sends `save_ready`. Host uses the same first-party provider. This path
 is integrated and model-tested but cannot yet run against TF3 because the native
 runtime correctly remains `productionQualified:false`.
 
+The integrated seams now revalidate bridge observation and persistent native
+binding after asynchronous provider construction; bad bind/ping receipts and a
+duplicate admitted frame fail closed. The game-side coordinated vehicle action
+now completes only inside TF3's documented post-execution callback, after
+matching callback payload, ownership, stopped flag, held update and balance are
+observed. The authorization and unknown receipt are persisted before submission,
+and no uncertain callback is retried. A separate two-instance plan/collector
+materializes the exact ports, directories, identities, mod hash and save evidence
+needed for the first real dual-process run, while always reporting acceptance
+false until real-engine receipts exist.
+
 A fresh ordinary-UI load of disposable save
 `tf3mp_disposable_43b49d368fbbd409ae2614ada7b0c757` then passed the real
 production checkpoint path at exact held/released update 3052. Town/growth,
@@ -81,26 +92,31 @@ The narrower handler/apply investigation then produced genuine routing evidence:
 an idle WinDbg trace saw only continuous background apply pairs; each known
 reversible vehicle action produced one nested handler pair; and the first handler
 payload encoded entity 66005 in bytes `+0..+3` and stop/start in byte `+4`.
-Exact-build review found the recorded caller RVAs land inside instructions and
-cannot be reconciled by one base correction, so the apparent live nesting is
-not yet qualified call-chain provenance. Bytes `+5..+7` are uninitialized
-padding, not a flags word. This still failed qualification. The final detach ended in TF3
+Review of the raw absolute returns corrected the previously miscomputed RVAs:
+all three action addresses reconcile to inferred base `0x7ff6386e0000` and the
+verified returns at `0x11ebbb`, `0x1204e4` and `0x9d8e3d`. This establishes a
+coherent handler/dispatcher/apply call-chain reconstruction, although no
+independent module-map record preserved the base. Bytes `+5..+7` are
+uninitialized padding, not a flags word. This still failed live-hook
+qualification. The final detach ended in TF3
 `0xC0000005` execute-at-zero, while Windows Security separately quarantined the
 rebuilt custom observer as `Behavior:Win32/DefenseEvasion.A!ml` before its second
 smoke run. Protection was not bypassed. Both live command/action profiles remain
 disabled, and the original save hash remained unchanged.
 
-The last fully passing current-tree milestone discovered 833 tests: 804 passed,
-0 failed and 29 native executable tests were skipped because Windows Security
+The disabled observer now emits explicit image-base/raw-return coordinates and
+accepts an RVA only when the overflow-safe base-plus-RVA round trip lands inside
+the mapped main image. Its handler entry copies only the five statically proven
+payload bytes. Both live gates remain false; MSVC `/W4 /WX /Zs` passes, but no
+native executable was rebuilt or live-attached.
+
+The current exact unrestricted `npm run check` discovers 850 tests: 820 passed,
+0 failed and 30 native executable tests are skipped because Windows Security
 quarantined the rebuilt observer and the stale controller artifact was removed.
-A separate explicit non-native run also passed 804/804. This final integration
-batch's 13 focused provider/bootstrap tests passed 12 with the Windows symlink
-case skipped. MSVC `/W4 /WX /Zs` passed for the hardened observer source. A
-full-suite attempt during wrap-up was not clean: six Windows named-pipe/native
-IPC tests and one real bridge lease test failed in this restricted run, and the
-run was stopped at the user's pause request before an aggregate count was
-captured. These failures remain open and are not represented as passing. The
-last pre-quarantine integration tree
+The six named-pipe/native IPC failures and one bridge-lease failure seen during
+the prior restricted run were sandbox artifacts; the focused rerun passed 15/15
+and the complete suite then passed outside that restriction. MSVC `/W4 /WX /Zs`
+passed for the hardened observer source. The last pre-quarantine integration tree
 passed 830/830 in 98.53 seconds. The independent review correctly recorded
 756/756 on its earlier tree; 478/478 was an incomplete TAP count. Current native
 source passes MSVC `/W4 /WX /Zs` syntax/type checking; the last pre-quarantine
@@ -108,7 +124,7 @@ focused observer/controller suite passed 29/29, but was not rerun after the
 quarantine. The focused authenticated-network suite is 11/11. Mod review passes
 with 29 files,
 zero executables and manifest
-`2bc5aed290858033ebd13ce7038bb790cdb00ae1fc0293f29966ccc81e6fa429`.
+`6f2334edb74e36e6b5e9e46190fccb18571ac93645cca056f25be200c70fce24`.
 
 Unfinished implementation: clean automatic entry into the stock save-load
 lifecycle, safe capture/suppression/replay, per-instance identity,

@@ -33,9 +33,9 @@ export function createJoinEngineBootstrap({ connection, modulePath, bridge, nati
   };
 
   const admitted = async message => {
-    if (started) throw new Error('JOIN_ENGINE_BOOTSTRAP_ALREADY_STARTED');
-    started = true;
     try {
+      if (started) throw new Error('JOIN_ENGINE_BOOTSTRAP_ALREADY_STARTED');
+      started = true;
       if (message?.kind !== 'admitted' || !exactSave(message.payload?.save)) {
         throw new Error('JOIN_ENGINE_BOOTSTRAP_SAVE_GATE_REQUIRED');
       }

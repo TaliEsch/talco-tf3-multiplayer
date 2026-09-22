@@ -219,6 +219,17 @@ struct ActionPairing {
     size_t depth = 0;
     bool paired = false;
 };
+// A return RVA is meaningful only when it round-trips to the raw address in
+// the mapped main image.  Do not infer one from a wrapping subtraction or an
+// address merely above the image base.
+bool MainImageReturnRva(ULONG64 rawReturn, ULONG64 base, DWORD imageSize, ULONG64& returnRva) {
+    returnRva = 0;
+    if (!imageSize || rawReturn < base) return false;
+    const ULONG64 candidate = rawReturn - base;
+    if (candidate >= imageSize || base > UINT64_MAX - candidate || base + candidate != rawReturn) return false;
+    returnRva = candidate;
+    return true;
+}
 struct ActionTrace {
     static constexpr size_t kMaxDepth = 32, kMaxFrames = 256;
     std::map<DWORD, std::vector<ActionFrame>> frames;
@@ -270,10 +281,19 @@ void EmitActionTraceHit(HANDLE process, ULONG64 base, DWORD imageSize, const Sit
                         DWORD thread, const CONTEXT& context, unsigned ordinal, ULONGLONG start,
                         ULONG64 creation, const std::string& hash, ActionTrace& trace) {
     DiagnosticReader reader{process};
-    ULONG64 returnAddress = 0;
-    const bool readable = reader.Read(context.Rsp, &returnAddress, sizeof(returnAddress));
-    const bool inImage = readable && returnAddress >= base && returnAddress - base < imageSize;
-    const auto pairing = trace.Record(thread, siteIndex, context.Rsp, returnAddress, readable, ordinal);
+    ULONG64 rawReturn = 0, returnRva = 0;
+    const bool readable = reader.Read(context.Rsp, &rawReturn, sizeof(rawReturn));
+    const bool inImage = readable && MainImageReturnRva(rawReturn, base, imageSize, returnRva);
+    // The quarantined handler profile has evidence only for entity bytes +0..3
+    // and stopped byte +4.  Keep that boundary explicit: +5..+7 are padding,
+    // not flags, and are never copied or reported.
+    constexpr size_t kVehicleActionPayloadBytes = 5;
+    std::array<BYTE, kVehicleActionPayloadBytes> handlerPayload{};
+    const bool handlerPayloadRead = siteIndex == 0 &&
+        reader.Read(context.Rdx, handlerPayload.data(), handlerPayload.size());
+    std::int32_t handlerEntity = 0;
+    if (handlerPayloadRead) memcpy(&handlerEntity, handlerPayload.data(), sizeof(handlerEntity));
+    const auto pairing = trace.Record(thread, siteIndex, context.Rsp, rawReturn, readable, ordinal);
     printf("{\"event\":\"action-trace-observation\",\"schemaVersion\":1,\"profile\":\"action-trace\","
            "\"sha256\":\"%s\",\"processCreationTime\":\"%llu\",\"runId\":\"%lu-%llu\","
            "\"ordinal\":%u,\"elapsedMs\":%llu,\"threadId\":%lu,\"site\":\"%s\",\"rva\":%lu,"
@@ -281,15 +301,18 @@ void EmitActionTraceHit(HANDLE process, ULONG64 base, DWORD imageSize, const Sit
            "\"rdx\":\"%llx\",\"r8\":\"%llx\",\"r9\":\"%llx\",\"rax\":\"%llx\",\"rsp\":\"%llx\","
            "\"firstChance\":true,\"rip\":\"%llx\",\"dr0\":\"%llx\",\"dr1\":\"%llx\",\"dr2\":\"%llx\","
            "\"dr3\":\"%llx\",\"dr6\":\"%llx\",\"dr7\":\"%llx\",\"eflags\":%lu,"
-           "\"returnAddressReadable\":%s,\"returnAddress\":\"%llx\",\"returnAddressClass\":\"%s\",\"returnAddressRva\":%llu,"
+           "\"imageBase\":\"%llx\",\"returnAddressReadable\":%s,\"rawReturn\":\"%llx\",\"returnAddress\":\"%llx\",\"returnAddressClass\":\"%s\",\"returnAddressRva\":%llu,"
+           "\"handlerPayload\":{\"present\":%s,\"byteCount\":%u,\"readable\":%s,\"entity\":%d,\"stoppedByte\":%u},"
            "\"pairStatus\":\"%s\",\"entryOrdinal\":%u,\"nestingDepth\":%zu,\"paired\":%s,"
            "\"remoteBytesAttempted\":%zu,\"raxIsCompletion\":false,\"captureComplete\":false,\"commandControlQualified\":false}\n",
            hash.c_str(), creation, GetCurrentProcessId(), start, ordinal, GetTickCount64() - start, thread, site.name, site.rva,
            siteIndex < 2 ? "handler" : "apply", siteIndex % 2 ? "return" : "entry", context.Rcx,
            context.Rdx, context.R8, context.R9, context.Rax, context.Rsp,
            context.Rip, context.Dr0, context.Dr1, context.Dr2, context.Dr3, context.Dr6, context.Dr7, context.EFlags,
-           readable ? "true" : "false", returnAddress,
-           !readable ? "unreadable" : inImage ? "main-image" : "outside-main-image", inImage ? returnAddress - base : 0,
+           base, readable ? "true" : "false", rawReturn, rawReturn,
+           !readable ? "unreadable" : inImage ? "main-image" : "outside-main-image", returnRva,
+           siteIndex == 0 ? "true" : "false", siteIndex == 0 ? static_cast<unsigned>(handlerPayload.size()) : 0,
+           handlerPayloadRead ? "true" : "false", handlerEntity, static_cast<unsigned>(handlerPayload[4]),
            pairing.status, pairing.entryOrdinal, pairing.depth, pairing.paired ? "true" : "false", reader.attempted);
     fflush(stdout);
 }
@@ -315,17 +338,17 @@ void EmitCommandHit(HANDLE process, ULONG64 base, DWORD imageSize, const Site& s
                     DWORD thread, const CONTEXT& context, unsigned ordinal, ULONGLONG start,
                     ULONG64 creation, const std::string& hash) {
     DiagnosticReader reader{process};
-    ULONG64 returnAddress = 0;
-    const bool stackRead = reader.Read(context.Rsp, &returnAddress, sizeof(returnAddress));
-    const bool inImage = stackRead && returnAddress >= base && returnAddress - base < imageSize;
+    ULONG64 rawReturn = 0, returnRva = 0;
+    const bool stackRead = reader.Read(context.Rsp, &rawReturn, sizeof(rawReturn));
+    const bool inImage = stackRead && MainImageReturnRva(rawReturn, base, imageSize, returnRva);
     printf("{\"event\":\"command-observation\",\"schemaVersion\":2,\"profile\":\"command\","
            "\"sha256\":\"%s\",\"processCreationTime\":\"%llu\",\"runId\":\"%lu-%llu\","
            "\"ordinal\":%u,\"elapsedMs\":%llu,\"threadId\":%lu,\"site\":\"%s\",\"rva\":%lu,"
            "\"mappedSiteVerified\":true,\"rcx\":\"%llx\",\"rdx\":\"%llx\",\"r8\":\"%llx\",\"r9\":\"%llx\",\"rsp\":\"%llx\","
-           "\"returnAddressReadable\":%s,\"returnAddress\":\"%llx\",\"returnAddressClass\":\"%s\",\"returnAddressRva\":%llu,",
+           "\"imageBase\":\"%llx\",\"returnAddressReadable\":%s,\"rawReturn\":\"%llx\",\"returnAddress\":\"%llx\",\"returnAddressClass\":\"%s\",\"returnAddressRva\":%llu,",
            hash.c_str(), creation, GetCurrentProcessId(), start, ordinal, GetTickCount64() - start, thread, site.name, site.rva,
-           context.Rcx, context.Rdx, context.R8, context.R9, context.Rsp, stackRead ? "true" : "false", returnAddress,
-           !stackRead ? "unreadable" : inImage ? "main-image" : "outside-main-image", inImage ? returnAddress - base : 0);
+           context.Rcx, context.Rdx, context.R8, context.R9, context.Rsp, base, stackRead ? "true" : "false", rawReturn, rawReturn,
+           !stackRead ? "unreadable" : inImage ? "main-image" : "outside-main-image", returnRva);
     if (siteIndex == 0) {
         printf("\"factory\":{\"entity\":%d,\"stoppedByte\":%u,\"booleanValid\":%s,\"outputConstructed\":false},",
                static_cast<std::int32_t>(context.R8), static_cast<unsigned>(context.R9 & 0xff), (context.R9 & 0xff) <= 1 ? "true" : "false");

@@ -43,9 +43,15 @@ export async function openNativeHostJoinGate({options,sessionId,role,logger=()=>
     // The controller deliberately has no "join" role: every non-host game
     // process is an authenticated participant on the native IPC wire.
     const bindingReceipt=await client.bindSession({sessionId,role:nativeRole});
+    if(bindingReceipt?.status!=='accepted'
+      ||(bindingReceipt.boundSessionId??bindingReceipt.sessionId)!==sessionId
+      ||(bindingReceipt.boundRole??bindingReceipt.role)!==nativeRole) {
+      throw new Error('NATIVE_RUNTIME_INVALID_BIND_RECEIPT');
+    }
     // This only verifies that the authenticated IPC transport can round-trip a
     // bounded health request.  It does not claim a TF3 simulation boundary.
-    await client.control('ping');
+    const pingReceipt=await client.control('ping');
+    if(pingReceipt?.status!=='accepted')throw new Error('NATIVE_RUNTIME_PING_REJECTED');
     // The current debugger controller explicitly says it is not production
     // qualified.  Never turn its fixture/debugger controls into a multiplayer
     // admission fallback.

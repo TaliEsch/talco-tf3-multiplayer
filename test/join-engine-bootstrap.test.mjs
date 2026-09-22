@@ -64,3 +64,13 @@ test('provider failure and repeat admission fail closed without producing a seco
   assert.deepEqual(c.sent, []);
   assert.equal(c.socket.destroyed, true);
 });
+
+test('a duplicate admitted frame fails closed even after the first readiness message', async () => {
+  const c = connection(), bootstrap = createJoinEngineBootstrap({ connection: c, modulePath: 'C:/qualified.mjs',
+    downloadSave: async () => ({ ...save }), loadFactory: loader(() => ({ receive() { return true; } })),
+  });
+  await bootstrap.admitted(admitted);
+  await assert.rejects(bootstrap.admitted(admitted), /ALREADY_STARTED/);
+  assert.equal(c.socket.destroyed, true);
+  assert.deepEqual(c.sent, [{ kind: 'save_ready', payload: save }]);
+});
