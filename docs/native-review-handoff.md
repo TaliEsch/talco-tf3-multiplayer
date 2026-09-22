@@ -250,8 +250,12 @@ second installed TF3 machine/network would remove that acceptance limitation.
 
 1. Build with `Build-InProcessPostObserver.ps1 -RunSmokeTest`,
    `Build-InProcessRuntime.ps1 -RunSmokeTest`, `Build-WinHttpProxy.ps1
-   -RunSmokeTest` and `Build-NativeIpc.ps1`; then run the unrestricted full
-   Node suite.
+   -RunSmokeTest`, `Build-NativeIpc.ps1`, `Build-InProcessControl.ps1
+   -RunSmokeTest`, `Build-InProcessControlIpc.ps1`,
+   `Build-InProcessContinuationGate.ps1 -RunSmokeTest`,
+   `Build-OwnedColdContinuation.ps1 -RunSmokeTest` and
+   `Build-OwnedCrossContinuation.ps1 -RunSmokeTest`; then run the unrestricted
+   full Node suite.
 2. Close TF3 and run `Stage-NativeLoader.ps1`. It must refuse unexpected files
    or a nonmatching executable. Run `node tools/live-inprocess-loader-check.mjs`
    and manually approve Steam's custom-parameter launch confirmation.
@@ -262,11 +266,13 @@ second installed TF3 machine/network would remove that acceptance limitation.
    the five TalCo staging/session files are absent and the two stock hashes above
    are unchanged. Do not use a user save.
 
-Branch is `main`; functional code is commit `95d79c8`, based on prior pushed
-`221052f`. The private `origin` remains the only configured publication target;
-no release was created. Independent review should focus on exact-site semantic
-meaning, VEH/teardown races, the ASLR PE comparison, pipe shutdown/deadline
-behavior and the proposed control primitive before any live hold is activated.
+Branch is `main`; the current owned continuation/control and live-correlation
+batch is commit `7139c53`, following pushed observer commits `95d79c8` and
+`eb9b3ae`. The private `origin` remains the only configured publication target;
+no release was created. Independent review should focus on terminal halt versus
+explicit detach, immutable owner/generation publication, stack headroom, live
+mitigation policy, every gate unwind PC, late trap/teardown lifetime and
+release-outcome classification before any live hold is activated.
 
 ### TF2 baseline and licence
 
