@@ -1,4 +1,26 @@
-# Native-integration review handoff — 21 September 2026
+# Native-integration review handoff — 22 September 2026
+
+## Owned cancellation-mechanism addendum — 22 September 2026
+
+`Build-OwnedVehicleCancelFixture.ps1` builds an isolated x64 MOV/indirect-CALL
+fixture (`native/owned_vehicle_cancel_fixture.asm` and `.cpp`). Its breakpoint
+handler emulates the displaced `RDX=RBX`, then substitutes the owned callback
+target only for a prequalified callback value. The original indirect CALL is
+unmodified. Sequential tests cover one rejected action without submission or
+value change, nested callbacks, ordinary C++ exception unwind, and normal
+behavior after byte/handler restoration. The handler's inactive patch-window
+path is implemented but not exercised under concurrent entry. This is an
+owned-process mechanism test, **not** a qualified TF3 hook or an integrated
+Host/Join action. Start/Stop concurrency, real callback cleanup and UI pending
+completion remain unverified. The independent ABI review confirmed the exact
+TF3 MOV/CALL shape and flagged those remaining limitations.
+
+Independent verification for this addendum: native build/smoke passed, the
+focused Node fixture passed 1/1, `git diff --check` passed, and the full suite
+reported **910 discovered, 880 passed, 0 failed, 30 skipped** (53.934 seconds).
+
+The subsequent paragraph below saying the fixture is missing is historical;
+this addendum supersedes that single statement, not the live readiness verdict.
 
 ## Live passive stock-action addendum — 22 September 2026
 
@@ -47,8 +69,9 @@ callback and scripting references. A selected native failure-completion
 callback target could let the stock UI decrement its pending-command counter
 without executing the original action. The installed vehicle UI requires that
 callback; skipping the call alone would leave its state refresh pending.
-The proposed target substitution still lacks an owned exact-callsite fixture,
-exception/unwind and callback-once tests, and a bounded live no-mutation check.
+The proposed target substitution has an owned exact-callsite mechanism and
+ordinary C++ exception-unwind test, but still lacks TF3 callback/cleanup
+qualification and a bounded live no-mutation check.
 It is therefore not production-qualified suppression, and it is a rejection
 of the original action rather than accepted deferral or replay. See
 `docs/vehicle-abi-static-evidence.md` for the exact register/cleanup evidence.

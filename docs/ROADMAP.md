@@ -1,5 +1,16 @@
 # TalCo TF3 multiplayer — current delivery plan
 
+## Owned cancellation fixture — 22 September 2026
+
+The MOV-site target-substitution mechanism now has an isolated x64 fixture:
+`Build-OwnedVehicleCancelFixture.ps1` and `test/native-owned-vehicle-cancel.test.mjs`.
+It verifies register emulation, callback invocation without original submission,
+nested calls, exception unwind and sequential teardown. It does **not** raise
+readiness from 5.7/10: no TF3 cancellation, authoritative ordering, or replay
+has been observed. Next, qualify the real callback/value shape and its UI
+completion semantics under a bounded disposable-game test before enabling any
+production cancellation.
+
 ## Live stock-action qualification — 22 September 2026
 
 Readiness is **5.7/10**, below the requested 6/10 gate. A disposable TF3 run

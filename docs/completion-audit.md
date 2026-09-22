@@ -1,5 +1,17 @@
 # Completion audit against the build prompt
 
+## Owned cancellation fixture — 22 September 2026
+
+Implemented and isolated/model-tested: the x64 MOV-site cancellation mechanism
+in `native/owned_vehicle_cancel_fixture.*`, built by
+`Build-OwnedVehicleCancelFixture.ps1`. It is deliberately not linked into the
+production observer or advertised to Host/Join. The fixture proves a callback
+can replace an owned indirect submission target while preserving RDX, using
+the original CALL and restoring normal behavior on sequential teardown. It
+does not prove TF3 callback ownership, UI completion, native exception safety,
+production teardown, or any network-ordered vehicle action. Readiness remains
+5.7/10 until the real path is integrated and observed.
+
 ## Live stock vehicle-action audit — 22 September 2026
 
 The full goal remains active. Single-game verification now includes a passive
