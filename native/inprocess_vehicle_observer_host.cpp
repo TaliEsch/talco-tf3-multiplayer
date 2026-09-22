@@ -80,7 +80,8 @@ int wmain(int argc, wchar_t** argv) {
     auto observed = snapshot();
     Require(observed.factory_hits == 1 && observed.admission_hits == 1 &&
             observed.dropped_candidates == 0 && observed.latest_valid &&
-            observed.latest_entity == entity && observed.latest_stopped == 1 && observed.active,
+            observed.latest_entity == entity && observed.latest_stopped == 1 &&
+            observed.latest_entry_result_zero && observed.active,
             "correlated pointer-free observation");
 
     command[0x9b8] = 0x31;

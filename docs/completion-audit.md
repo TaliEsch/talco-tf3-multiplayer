@@ -1,5 +1,31 @@
 # Completion audit against the build prompt
 
+## Second live passive admission trial — 22 September 2026
+
+Implemented: read-only result-byte and callback-shape diagnostics in the
+exact-build native observer, authenticated IPC and strict JavaScript consumer.
+Isolated/model-tested: observer/runtime native builds and smoke tests passed;
+29 focused elevated tests passed. Single-game verified: one stock Train 1
+stop gave factory/admission/correlated counts 1/1/1, dropped 0, entity
+163575, stopped 1, result byte zero and expected callback vtable/invoke
+shape. The stock vehicle panel displayed Stopped. The native world gate
+held/released one boundary/re-held/detached. Two-instance, cross-machine,
+four-player and Internet verification: **not performed**. No interception,
+authoritative ordering or replay was implemented or verified.
+
+Verification qualification: the initial restricted full suite encountered
+`spawn EPERM` in child-process tests. With process permissions, two affected
+CLI test files passed 14/14. The full permitted suite failed five existing
+native debugger-fixture cases; focused repetition passed 25/30 and reproduced
+those same five failures. Three reject emitted teardown diagnostics on stderr;
+two report target-survival/restore failure (1067/121). The suite is **not**
+green. The optional mod bridge was stale in the first live trial; its checker
+correctly returned `GAME_BRIDGE_OBSERVATION_UNAVAILABLE`. The second
+native-only trial passed; do not infer game-bridge clock correlation from it.
+TF3 closed normally. The staged loader and exact disposable copy/preview
+were removed after hash checks; original save and preview hashes matched.
+Readiness is approximately **5.8/10**, below the stage-6 authority gate.
+
 ## Owned cancellation fixture — 22 September 2026
 
 Implemented and isolated/model-tested: the x64 MOV-site cancellation mechanism

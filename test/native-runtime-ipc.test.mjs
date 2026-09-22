@@ -89,7 +89,7 @@ test('authenticated passive vehicle diagnostics expose no native pointers or exe
   assert.deepEqual(client.capabilities,['transport.health','session.bind','diagnostic.passive-vehicle-action.v1']);
   assert.deepEqual(client.handshake,{engineObserver:false,productionQualified:false,guiFreezes:false});
   const ping=await client.control('ping');
-  assert.deepEqual(client.passiveVehicleActionObservation(ping),{factoryHits:'12',admissionHits:'9',correlatedHits:'8',droppedCandidates:'2',ownerThread:321,latestEntity:66005,latestStopped:1,latestValid:true,active:true,crossThread:false,saturated:false});
+  assert.deepEqual(client.passiveVehicleActionObservation(ping),{factoryHits:'12',admissionHits:'9',correlatedHits:'8',droppedCandidates:'2',ownerThread:321,latestEntity:66005,latestStopped:1,latestValid:true,latestEntryResultZero:true,latestCallbackShapeMatches:true,active:true,crossThread:false,saturated:false});
   assert.throws(()=>validatePassiveVehicleActionObservation({...ping,passiveVehicleFactoryHits:12}),/INVALID_PASSIVE_VEHICLE_ACTION_OBSERVATION/);
   assert.ok(Buffer.byteLength(JSON.stringify(ping))<4096);
   await client.control('shutdown');client.close();

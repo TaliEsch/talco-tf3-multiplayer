@@ -1,5 +1,19 @@
 # TalCo TF3 multiplayer — current delivery plan
 
+## Read-only admission qualification — 22 September 2026
+
+Readiness is about **5.8/10**, still below stage 6. A second disposable TF3
+run confirmed the stock Train 1 stop command's result byte was zero at the
+admission boundary and its live callback value resolved to the exact-build
+callback vtable/invoke shape. The vehicle then displayed Stopped. This
+qualifies two more inputs to a bounded rejection experiment, but no real
+action was suppressed, host-ordered or replayed. The next implementation
+step is a one-use, exact-action, recoverable no-mutation cancellation trial;
+after its callback/cleanup behavior is verified, connect intent acceptance
+and exactly-once execution to Host/Join. Do not count the current diagnostic
+as stage 6. The full regression suite has five reproducible older native
+debugger-fixture failures, separately recorded in `completion-audit.md`.
+
 ## Owned cancellation fixture — 22 September 2026
 
 The MOV-site target-substitution mechanism now has an isolated x64 fixture:

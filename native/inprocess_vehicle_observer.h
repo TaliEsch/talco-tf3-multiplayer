@@ -23,6 +23,8 @@ struct Snapshot {
     std::int32_t latest_entity;
     std::uint8_t latest_stopped;
     bool latest_valid;
+    bool latest_entry_result_zero;
+    bool latest_callback_shape_matches;
     bool active;
     bool cross_thread;
     bool saturated;

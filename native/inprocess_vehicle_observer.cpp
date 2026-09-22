@@ -14,6 +14,8 @@ namespace {
 constexpr DWORD kFactoryRva = 0x9eee72;
 constexpr DWORD kFactoryPostRva = 0x9eeee8;
 constexpr DWORD kAdmissionRva = 0xe26a2c;
+constexpr DWORD kCallbackVtableRva = 0x373a730;
+constexpr DWORD kCallbackInvokeRva = 0xe3a500;
 constexpr std::array<unsigned char, 3> kFactoryBytes{0x41, 0x8b, 0xd8}; // mov ebx,r8d
 constexpr std::array<unsigned char, 1> kFactoryPostBytes{0x90}; // nop after constructed output
 constexpr std::array<unsigned char, 3> kAdmissionBytes{0x48, 0x8b, 0xd3}; // mov rdx,rbx
@@ -38,6 +40,7 @@ bool attempted = false;
 std::atomic<bool> active{false};
 std::atomic<bool> cross_thread{false};
 std::atomic<bool> saturated{false};
+std::atomic<std::uintptr_t> image_base{0};
 std::atomic<std::uint32_t> observed_thread{0};
 std::atomic<std::uint64_t> factory_hits{0};
 std::atomic<std::uint64_t> admission_hits{0};
@@ -70,7 +73,8 @@ struct CandidateSlot {
 std::array<PendingSlot, kPendingSlotCount> pending_slots{};
 std::array<CandidateSlot, kCandidateSlotCount> candidate_slots{};
 std::atomic<std::uint64_t> next_candidate_sequence{0};
-// Bits 0..31 entity, bit 32 stopped, bit 33 valid. One atomic load gives IPC a
+// Bits 0..31 entity, bit 32 stopped, bit 33 valid, bit 34 entry result zero,
+// bit 35 expected callback shape. One atomic load gives IPC a
 // coherent semantic payload even while a later action is being observed.
 std::atomic<std::uint64_t> latest_action{0};
 
@@ -113,9 +117,9 @@ void InvalidateStorage(std::uintptr_t storage) noexcept {
 }
 
 bool SafeReadAction(std::uintptr_t entry, std::int32_t* entity,
-                    std::uint8_t* stopped, std::uintptr_t* storage) noexcept {
-    if (entry < 0x10000 || entry > kMaximumUserPointer ||
-        entry > kMaximumUserPointer - sizeof(std::uintptr_t)) return false;
+                    std::uint8_t* stopped, std::uintptr_t* storage,
+                    bool* result_zero) noexcept {
+    if (entry < 0x10000 || entry > kMaximumUserPointer - 0x31) return false;
     __try {
         const auto command = *reinterpret_cast<const std::uintptr_t*>(entry);
         if (command < 0x10000 || command > kMaximumUserPointer - 0x9b9) return false;
@@ -126,7 +130,23 @@ bool SafeReadAction(std::uintptr_t entry, std::int32_t* entity,
         std::memcpy(entity, payload.data(), sizeof(*entity));
         *stopped = payload[4];
         *storage = command;
+        *result_zero = *reinterpret_cast<const std::uint8_t*>(entry + 0x30) == 0;
         return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+bool SafeReadCallbackShape(const CONTEXT* context) noexcept {
+    const auto base = image_base.load(std::memory_order_relaxed);
+    const auto value = static_cast<std::uintptr_t>(context->R8);
+    if (base == 0 || value < 0x10000 || value > kMaximumUserPointer - 0x40) return false;
+    __try {
+        const auto implementation = *reinterpret_cast<const std::uintptr_t*>(value + 0x38);
+        if (implementation < 0x10000 || implementation > kMaximumUserPointer - sizeof(std::uintptr_t)) return false;
+        const auto vtable = *reinterpret_cast<const std::uintptr_t*>(implementation);
+        return vtable == base + kCallbackVtableRva &&
+            *reinterpret_cast<const std::uintptr_t*>(vtable + 0x10) == base + kCallbackInvokeRva;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return false;
     }
@@ -264,7 +284,10 @@ void RecordAdmission(const CONTEXT* context) noexcept {
     std::int32_t entity = 0;
     std::uint8_t stopped = 0;
     std::uintptr_t storage = 0;
-    if (!SafeReadAction(static_cast<std::uintptr_t>(context->Rbx), &entity, &stopped, &storage)) return;
+    bool result_zero = false;
+    if (!SafeReadAction(static_cast<std::uintptr_t>(context->Rbx), &entity, &stopped, &storage,
+                        &result_zero)) return;
+    const bool callback_shape_matches = SafeReadCallbackShape(context);
     IncrementSaturating(admission_hits);
     if (saturated.load(std::memory_order_acquire)) {
         IncrementSaturating(dropped_candidates);
@@ -311,7 +334,9 @@ void RecordAdmission(const CONTEXT* context) noexcept {
         return;
     }
     const auto packed = static_cast<std::uint64_t>(static_cast<std::uint32_t>(entity)) |
-        (static_cast<std::uint64_t>(stopped) << 32) | (1ULL << 33);
+        (static_cast<std::uint64_t>(stopped) << 32) | (1ULL << 33) |
+        (static_cast<std::uint64_t>(result_zero) << 34) |
+        (static_cast<std::uint64_t>(callback_shape_matches) << 35);
     latest_action.store(packed, std::memory_order_release);
     IncrementSaturating(correlated_hits);
 }
@@ -423,6 +448,7 @@ Status StartSites(void* factory, void* factory_post, void* admission,
     if (!ValidSite(factory, kFactoryBytes, allocation_base) ||
         !ValidSite(factory_post, kFactoryPostBytes, allocation_base) ||
         !ValidSite(admission, kAdmissionBytes, allocation_base)) return Status::invalid_site;
+    image_base.store(reinterpret_cast<std::uintptr_t>(allocation_base), std::memory_order_release);
     HMODULE pinned = nullptr;
     if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_PIN,
             reinterpret_cast<LPCWSTR>(&OnException), &pinned)) return Status::pin_failed;
@@ -491,6 +517,7 @@ Snapshot Read() noexcept {
             dropped_candidates.load(std::memory_order_acquire),
             observed_thread.load(), static_cast<std::int32_t>(packed & 0xffffffffULL),
             static_cast<std::uint8_t>((packed >> 32) & 1), ((packed >> 33) & 1) != 0,
+            ((packed >> 34) & 1) != 0, ((packed >> 35) & 1) != 0,
             active.load(), cross_thread.load(), saturated.load()};
 }
 

@@ -1,5 +1,47 @@
 # Native-integration review handoff — 22 September 2026
 
+## Read-only admission qualification addendum — 22 September 2026
+
+Readiness remains below the **6/10** authoritative-action gate (approximately
+**5.8/10**). `native/inprocess_vehicle_observer.cpp` now reads, without
+mutation, the local entry's result byte and the scripting callback's bounded
+implementation/vtable/invoke shape at the real admission trap. The pointer-free
+facts cross authenticated `native/runtime_ipc.cpp` and are validated in
+`src/native-runtime-client.mjs`. `tools/live-inprocess-loader-check.mjs` now
+requires both expected conditions for its passive-action qualification. This
+does **not** substitute a callback target, suppress a command, or connect
+stock UI actions to Host/Join ordering.
+
+In a second disposable TF3 run, the stock Train 1 stop action gave exactly
+one factory, one admission and one correlated observation, zero dropped
+candidates, entity 163575, stopped=1, `entryResultZero:true` and
+`callbackShapeMatches:true`. The submission trap ran on thread 12704,
+distinct from the observed world-update thread 33608. The stock vehicle
+panel subsequently displayed **Stopped**. The authenticated engine gate
+held at update-boundary hit 2497, released one boundary, re-held at 2498 and
+detached/resumed. That stop was normal pass-through execution, not cancelled
+or host ordered. An earlier run with optional mod-bridge correlation failed
+`GAME_BRIDGE_OBSERVATION_UNAVAILABLE` because its bridge data was stale; no
+correlation or multiplayer claim comes from that run.
+
+The native observer/runtime builds and smoke tests passed; 29 focused elevated
+tests passed. The first full suite run in the restricted sandbox failed child
+process creation (`spawn EPERM`). A permitted full rerun failed five older
+native debugger-fixture tests; the two relevant CLI test files passed 14/14
+when rerun with child-process permissions. A focused rerun reproduced the
+five debugger-fixture failures (25/30 passed). Three assert that stderr must
+be empty despite emitted teardown diagnostics; two report debugger target
+survival/restore failures (Win32 1067/121). These are open verification
+failures, not a green-suite claim. The installed executable was not modified.
+TF3 exited normally; three hash-matched staged loader files and manifest,
+then the exact hash-matched disposable save/preview, were removed. The
+original save/preview remain unchanged. No second instance was run.
+
+Next critical work remains bounded live cancellation with qualified callback
+cleanup, then accepting/ordering/replaying one vehicle intent exactly once
+through Host/Join and checking real postconditions. No external blocker has
+been established for that implementation work.
+
 ## Owned cancellation-mechanism addendum — 22 September 2026
 
 `Build-OwnedVehicleCancelFixture.ps1` builds an isolated x64 MOV/indirect-CALL

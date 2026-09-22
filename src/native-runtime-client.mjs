@@ -24,18 +24,20 @@ const uint64Text=value=>typeof value==='string'&&/^(?:0|[1-9][0-9]{0,19})$/.test
 // uint64_t safely. This validates the complete pointer-free snapshot before a
 // coordinator can treat it as diagnostic evidence.
 export const validatePassiveVehicleActionObservation=receipt=>{
-  const keys=['passiveVehicleFactoryHits','passiveVehicleAdmissionHits','passiveVehicleCorrelatedHits','passiveVehicleDroppedCandidates','passiveVehicleThread','passiveVehicleLatestEntity','passiveVehicleLatestStopped','passiveVehicleLatestValid','passiveVehicleActive','passiveVehicleCrossThread','passiveVehicleSaturated'];
+  const keys=['passiveVehicleFactoryHits','passiveVehicleAdmissionHits','passiveVehicleCorrelatedHits','passiveVehicleDroppedCandidates','passiveVehicleThread','passiveVehicleLatestEntity','passiveVehicleLatestStopped','passiveVehicleLatestValid','passiveVehicleLatestEntryResultZero','passiveVehicleLatestCallbackShapeMatches','passiveVehicleActive','passiveVehicleCrossThread','passiveVehicleSaturated'];
   if(!receipt||typeof receipt!=='object'||Array.isArray(receipt)||keys.some(key=>!Object.hasOwn(receipt,key))
     ||Object.keys(receipt).some(key=>key.startsWith('passiveVehicle')&&!keys.includes(key))
     ||!uint64Text(receipt.passiveVehicleFactoryHits)||!uint64Text(receipt.passiveVehicleAdmissionHits)||!uint64Text(receipt.passiveVehicleCorrelatedHits)||!uint64Text(receipt.passiveVehicleDroppedCandidates)
     ||!Number.isInteger(receipt.passiveVehicleThread)||receipt.passiveVehicleThread<0||receipt.passiveVehicleThread>0xffffffff
     ||!Number.isInteger(receipt.passiveVehicleLatestEntity)||receipt.passiveVehicleLatestEntity< -2147483648||receipt.passiveVehicleLatestEntity>2147483647
     ||![0,1].includes(receipt.passiveVehicleLatestStopped)
-    ||['passiveVehicleLatestValid','passiveVehicleActive','passiveVehicleCrossThread','passiveVehicleSaturated'].some(key=>typeof receipt[key]!=='boolean'))throw new TypeError('INVALID_PASSIVE_VEHICLE_ACTION_OBSERVATION');
+    ||['passiveVehicleLatestValid','passiveVehicleLatestEntryResultZero','passiveVehicleLatestCallbackShapeMatches','passiveVehicleActive','passiveVehicleCrossThread','passiveVehicleSaturated'].some(key=>typeof receipt[key]!=='boolean'))throw new TypeError('INVALID_PASSIVE_VEHICLE_ACTION_OBSERVATION');
   if(!receipt.passiveVehicleActive||(!receipt.passiveVehicleLatestValid&&receipt.passiveVehicleLatestEntity!==0))throw new TypeError('INVALID_PASSIVE_VEHICLE_ACTION_OBSERVATION');
   return Object.freeze({factoryHits:receipt.passiveVehicleFactoryHits,admissionHits:receipt.passiveVehicleAdmissionHits,correlatedHits:receipt.passiveVehicleCorrelatedHits,droppedCandidates:receipt.passiveVehicleDroppedCandidates,
     ownerThread:receipt.passiveVehicleThread,latestEntity:receipt.passiveVehicleLatestEntity,latestStopped:receipt.passiveVehicleLatestStopped,
-    latestValid:receipt.passiveVehicleLatestValid,active:receipt.passiveVehicleActive,crossThread:receipt.passiveVehicleCrossThread,saturated:receipt.passiveVehicleSaturated});
+    latestValid:receipt.passiveVehicleLatestValid,latestEntryResultZero:receipt.passiveVehicleLatestEntryResultZero,
+    latestCallbackShapeMatches:receipt.passiveVehicleLatestCallbackShapeMatches,
+    active:receipt.passiveVehicleActive,crossThread:receipt.passiveVehicleCrossThread,saturated:receipt.passiveVehicleSaturated});
 };
 const gateControls=Object.freeze({
   hold:NATIVE_RUNTIME_CAPABILITIES.simulationHold,

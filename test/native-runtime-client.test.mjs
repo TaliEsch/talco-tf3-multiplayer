@@ -21,15 +21,18 @@ test('native runtime capability contract names execution gates without enabling 
 test('passive vehicle diagnostics require a complete pointer-free lossless snapshot',()=>{
   const valid={passiveVehicleFactoryHits:'18446744073709551615',passiveVehicleAdmissionHits:'9',
     passiveVehicleCorrelatedHits:'8',passiveVehicleDroppedCandidates:'2',passiveVehicleThread:321,passiveVehicleLatestEntity:66005,
-    passiveVehicleLatestStopped:1,passiveVehicleLatestValid:true,passiveVehicleActive:true,
+    passiveVehicleLatestStopped:1,passiveVehicleLatestValid:true,
+    passiveVehicleLatestEntryResultZero:true,passiveVehicleLatestCallbackShapeMatches:true,passiveVehicleActive:true,
     passiveVehicleCrossThread:false,passiveVehicleSaturated:true};
   assert.deepEqual(validatePassiveVehicleActionObservation(valid),{
     factoryHits:valid.passiveVehicleFactoryHits,admissionHits:'9',correlatedHits:'8',droppedCandidates:'2',ownerThread:321,
-    latestEntity:66005,latestStopped:1,latestValid:true,active:true,crossThread:false,saturated:true});
+    latestEntity:66005,latestStopped:1,latestValid:true,latestEntryResultZero:true,
+    latestCallbackShapeMatches:true,active:true,crossThread:false,saturated:true});
   for(const change of [
     {passiveVehicleFactoryHits:18446744073709551615n},
     {passiveVehicleFactoryHits:'18446744073709551616'},
     {passiveVehicleLatestStopped:2},
+    {passiveVehicleLatestCallbackShapeMatches:1},
     {passiveVehicleLatestEntity:0,passiveVehicleLatestValid:false,passiveVehicleActive:false},
     {passiveVehicleNativePointer:'7ff600000000'},
   ]) {

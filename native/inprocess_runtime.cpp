@@ -194,7 +194,8 @@ tf3runtimeipc::PassiveVehicleActionObservation ReadPassiveVehicleObservation() n
     return {snapshot.factory_hits, snapshot.admission_hits,
             snapshot.correlated_hits, snapshot.dropped_candidates, snapshot.owner_thread,
             snapshot.latest_entity, snapshot.latest_stopped,
-            snapshot.latest_valid, snapshot.active,
+            snapshot.latest_valid, snapshot.latest_entry_result_zero,
+            snapshot.latest_callback_shape_matches, snapshot.active,
             snapshot.cross_thread, snapshot.saturated};
 }
 

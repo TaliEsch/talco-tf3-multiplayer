@@ -166,13 +166,18 @@ try{
     assert.ok(BigInt(current.correlatedHits)>BigInt(baseline.correlatedHits),
       `PASSIVE_VEHICLE_ACTION_NOT_CORRELATED:${actionCounters}`);
     assert.equal(current.latestValid,true,'PASSIVE_VEHICLE_ACTION_NOT_CORRELATED');
+    assert.equal(current.latestEntryResultZero,true,
+      `PASSIVE_VEHICLE_ENTRY_RESULT_NOT_ZERO:${actionCounters}`);
+    assert.equal(current.latestCallbackShapeMatches,true,
+      `PASSIVE_VEHICLE_CALLBACK_SHAPE_MISMATCH:${actionCounters}`);
     vehicleObservation=current;
     process.stdout.write(`${JSON.stringify({event:'tf3-passive-vehicle-action-observed',
       factoryHits:current.factoryHits,admissionHits:current.admissionHits,
       correlatedHits:current.correlatedHits,
       droppedCandidates:current.droppedCandidates,ownerThread:current.ownerThread,
       crossThread:current.crossThread,entity:current.latestEntity,
-      stopped:current.latestStopped})}\n`);
+      stopped:current.latestStopped,entryResultZero:current.latestEntryResultZero,
+      callbackShapeMatches:current.latestCallbackShapeMatches})}\n`);
   }
   let gateEvidence=null;
   const epoch=String(launchedAt);
