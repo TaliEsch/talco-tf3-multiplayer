@@ -8,18 +8,40 @@ import {NativeRuntimeClient,createRuntimeIpcCredentials} from '../src/native-run
 
 const host=fileURLToPath(new URL('../dist/native/TF3RuntimeIpcHost.exe',import.meta.url));
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+async function controlStep(client,control){try{return await client.control(control);}catch(error){error.message=`${error.message}:${control}`;throw error;}}
 function wire(type,id,session,payload){const body=Buffer.from(JSON.stringify(payload));const out=Buffer.alloc(36+body.length);out.writeUInt32LE(0x54463349,0);out.writeUInt16LE(1,4);out.writeUInt16LE(type,6);out.writeUInt32LE(body.length,8);out.writeBigUInt64LE(BigInt(id),12);session.copy(out,20);body.copy(out,36);return out;}
+function rawWire(type,id,session,json){const body=Buffer.from(json);const out=Buffer.alloc(36+body.length);out.writeUInt32LE(0x54463349,0);out.writeUInt16LE(1,4);out.writeUInt16LE(type,6);out.writeUInt32LE(body.length,8);out.writeBigUInt64LE(BigInt(id),12);session.copy(out,20);body.copy(out,36);return out;}
 async function rawSocket(pipe){for(let i=0;i<30;i++){try{return await new Promise((resolve,reject)=>{const s=net.createConnection({path:`\\\\.\\pipe\\${pipe}`});s.once('connect',()=>resolve(s));s.once('error',reject);});}catch{await sleep(25);}}throw new Error('native IPC host did not open pipe');}
 async function start(){const credentials=createRuntimeIpcCredentials();const child=spawn(host,['--pipe',credentials.pipe,'--token',credentials.token],{windowsHide:true,stdio:'ignore'});for(let attempt=0;attempt<30;attempt++){try{const client=await NativeRuntimeClient.connect({...credentials,timeoutMs:300});return {child,client,credentials};}catch{await sleep(25);}}child.kill();throw new Error('native IPC host did not accept a local client');}
+
+test('in-process IPC mode authenticates and persists one session binding without claiming engine control',{skip:!existsSync(host)},async()=>{
+  const credentials=createRuntimeIpcCredentials();
+  const child=spawn(host,['--in-process','--pipe',credentials.pipe,'--token',credentials.token],{windowsHide:true,stdio:'ignore'});
+  let client;
+  for(let attempt=0;attempt<30&&!client;attempt++){
+    try{client=await NativeRuntimeClient.connect({...credentials,timeoutMs:300});}catch{await sleep(25);}
+  }
+  assert.ok(client,'in-process IPC host did not accept a local client');
+  assert.deepEqual(client.capabilities,['transport.health','session.bind']);
+  assert.deepEqual(client.handshake,{engineObserver:false,productionQualified:false,guiFreezes:false});
+  const receipt=await client.bindSession({sessionId:'owned.fixture:1',role:'host'});
+  assert.equal(receipt.boundSessionId,'owned.fixture:1');
+  assert.equal(receipt.boundRole,'host');
+  assert.equal(receipt.productionQualified,false);
+  await assert.rejects(client.bindSession({sessionId:'owned.fixture:1',role:'host'}),/ALREADY_BOUND/);
+  assert.equal((await client.control('ping')).state,'running');
+  await client.control('shutdown');client.close();
+  await new Promise(resolve=>child.once('exit',resolve));
+});
 
 test('owned native IPC host authenticates, preserves control while held, and distinguishes engine halt',{skip:!existsSync(host)},async()=>{
   const {child,client}=await start();
   assert.deepEqual(client.capabilities,['transport.health']);
-  assert.equal((await client.control('hold')).state,'held');
-  assert.equal((await client.control('ping')).state,'held');
-  assert.equal((await client.control('release')).state,'running');
-  assert.equal((await client.control('halt')).state,'transport_halt_not_engine_halt');
-  assert.equal((await client.control('shutdown')).control,'shutdown');client.close();
+  assert.equal((await controlStep(client,'hold')).state,'held');
+  assert.equal((await controlStep(client,'ping')).state,'held');
+  assert.equal((await controlStep(client,'release')).state,'running');
+  assert.equal((await controlStep(client,'halt')).state,'transport_halt_not_engine_halt');
+  assert.equal((await controlStep(client,'shutdown')).control,'shutdown');client.close();
   await new Promise(resolve=>child.once('exit',resolve));
 });
 test('native IPC host fails closed on duplicate correlation and malformed wire frame',{skip:!existsSync(host)},async()=>{
@@ -28,6 +50,20 @@ test('native IPC host fails closed on duplicate correlation and malformed wire f
   socket.write(wire(3,2,session,{control:'ping'}));await new Promise(resolve=>socket.once('data',resolve));
   socket.write(wire(3,2,session,{control:'ping'}));const duplicate=await new Promise(resolve=>socket.once('data',resolve));assert.match(duplicate.subarray(36).toString(),/DUPLICATE_ID/);
   socket.end(Buffer.from([1,2,3,4]));await new Promise(resolve=>child.once('exit',resolve));socket.destroy();
+});
+test('in-process IPC rejects native rebinding and ambiguous duplicate JSON keys',{skip:!existsSync(host)},async()=>{
+  const credentials=createRuntimeIpcCredentials();const child=spawn(host,['--in-process','--pipe',credentials.pipe,'--token',credentials.token],{windowsHide:true,stdio:'ignore'});const socket=await rawSocket(credentials.pipe);
+  socket.write(wire(1,1,Buffer.alloc(16),{token:credentials.token}));const ack=await new Promise(resolve=>socket.once('data',resolve));const session=ack.subarray(20,36);
+  socket.write(rawWire(3,2,session,'{"control":"bind","sessionId":"owned.raw:1","role":"host"}'));const bound=await new Promise(resolve=>socket.once('data',resolve));assert.match(bound.subarray(36).toString(),/"status":"accepted"/);
+  socket.write(rawWire(3,3,session,'{"control":"bind","sessionId":"owned.raw:2","role":"host"}'));const rebound=await new Promise(resolve=>socket.once('data',resolve));assert.match(rebound.subarray(36).toString(),/SESSION_ALREADY_BOUND/);
+  socket.write(rawWire(3,4,session,'{"control":"shutdown","control":"ping"}'));const ambiguous=await new Promise(resolve=>socket.once('data',resolve));assert.match(ambiguous.subarray(36).toString(),/INVALID_CONTROL/);
+  socket.write(wire(3,5,session,{control:'shutdown'}));await new Promise(resolve=>socket.once('data',resolve));socket.destroy();await new Promise(resolve=>child.once('exit',resolve));
+});
+test('in-process IPC abandons a connected peer stalled mid-header',{skip:!existsSync(host),timeout:8000},async()=>{
+  const credentials=createRuntimeIpcCredentials();const child=spawn(host,['--in-process','--pipe',credentials.pipe,'--token',credentials.token],{windowsHide:true,stdio:'ignore'});const socket=await rawSocket(credentials.pipe);
+  socket.write(Buffer.from([0x49]));
+  const code=await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(new Error('native stalled-header deadline did not fire')),7000);child.once('exit',value=>{clearTimeout(timer);resolve(value);});});
+  assert.equal(code,12);socket.destroy();
 });
 test('runtime client reports a handshake timeout without retrying',async()=>{
   const credentials=createRuntimeIpcCredentials();const server=net.createServer(socket=>socket.on('data',()=>{}));

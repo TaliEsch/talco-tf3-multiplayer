@@ -36,9 +36,11 @@ export class NativeRuntimeClient extends EventEmitter {
     const handshake=reply.payload;
     if(reply.type!==TYPES.helloAck||this.#session.equals(Buffer.alloc(16))||typeof handshake?.engineObserver!=='boolean'
       ||!Array.isArray(handshake.capabilities)||handshake.capabilities.some(value=>typeof value!=='string'||value.length<1||value.length>64)
-      ||['productionQualified','guiFreezes'].some(key=>Object.hasOwn(handshake,key)&&typeof handshake[key]!=='boolean'))throw new Error('NATIVE_RUNTIME_IPC_HANDSHAKE_REJECTED');
+      ||['productionQualified','guiFreezes'].some(key=>Object.hasOwn(handshake,key)&&typeof handshake[key]!=='boolean')
+      ||(Object.hasOwn(handshake,'observerStartStatus')&&(!Number.isInteger(handshake.observerStartStatus)||handshake.observerStartStatus<1||handshake.observerStartStatus>255)))throw new Error('NATIVE_RUNTIME_IPC_HANDSHAKE_REJECTED');
     const metadata={engineObserver:handshake.engineObserver};
     for(const key of ['productionQualified','guiFreezes'])if(Object.hasOwn(handshake,key))metadata[key]=handshake[key];
+    if(Object.hasOwn(handshake,'observerStartStatus'))metadata.observerStartStatus=handshake.observerStartStatus;
     this.handshake=Object.freeze(metadata);
     this.capabilities=Object.freeze([...new Set(handshake.capabilities)]);this.#connected=true;
   }
