@@ -19,7 +19,10 @@ CLI test files passed 14/14. The full permitted suite failed five existing
 native debugger-fixture cases; focused repetition passed 25/30 and reproduced
 those same five failures. Three reject emitted teardown diagnostics on stderr;
 two report target-survival/restore failure (1067/121). The suite is **not**
-green. The optional mod bridge was stale in the first live trial; its checker
+green. A single isolated action-trace rerun also failed with Win32 access
+denied (5) while suspending owned fixture threads; its exact orphaned
+`--fixture-action-trace` process was identified and stopped. The optional mod
+bridge was stale in the first live trial; its checker
 correctly returned `GAME_BRIDGE_OBSERVATION_UNAVAILABLE`. The second
 native-only trial passed; do not infer game-bridge clock correlation from it.
 TF3 closed normally. The staged loader and exact disposable copy/preview

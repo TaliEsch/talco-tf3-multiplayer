@@ -32,7 +32,9 @@ when rerun with child-process permissions. A focused rerun reproduced the
 five debugger-fixture failures (25/30 passed). Three assert that stderr must
 be empty despite emitted teardown diagnostics; two report debugger target
 survival/restore failures (Win32 1067/121). These are open verification
-failures, not a green-suite claim. The installed executable was not modified.
+failures, not a green-suite claim. An isolated action-trace rerun also hit
+Win32 access denied (5) while suspending owned fixture threads; its exact
+orphaned fixture process was stopped. The installed executable was not modified.
 TF3 exited normally; three hash-matched staged loader files and manifest,
 then the exact hash-matched disposable save/preview, were removed. The
 original save/preview remain unchanged. No second instance was run.
