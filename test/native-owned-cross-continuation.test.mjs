@@ -5,6 +5,7 @@ import {fileURLToPath} from 'node:url';
 import test from 'node:test';
 
 const host = fileURLToPath(new URL('../dist/owned-cross-continuation/TF3OwnedCrossContinuation.exe', import.meta.url));
+const legacyHost = fileURLToPath(new URL('../dist/owned-cross-continuation/TF3OwnedCrossLegacyContinuation.exe', import.meta.url));
 const skip = process.platform !== 'win32' || !existsSync(host);
 
 test('owned EXE/DLL continuation preserves state and survives native exception and pinned teardown', {skip}, () => {
@@ -17,7 +18,8 @@ test('owned EXE/DLL continuation preserves state and survives native exception a
     'workerHeld', 'nativeExceptionReachedExeCaller', 'busyStopRejected', 'stopAfterJoin',
     'badXcr0Rejected', 'badResumeRejected', 'wrongOwnerRejected', 'faultLatched',
     'freeLibrarySucceeded', 'pinnedModuleRemainedLoaded', 'inertBypassPreservedState',
-    'entryEhcont', 'resumeEhcont']) assert.equal(report[field], true, field);
+    'entryEhcont', 'resumeEhcont', 'ownerXstatePrecommitted', 'ownerXstateExternal',
+    'ownerXstateRetained', 'ehcontParserCasesPassed']) assert.equal(report[field], true, field);
   for (const field of ['activationPermitted', 'tf3Qualified', 'productionLifecycleQualified'])
     assert.equal(report[field], false, field);
   assert.equal(report.normalCases, 8);
@@ -26,13 +28,47 @@ test('owned EXE/DLL continuation preserves state and survives native exception a
   assert.equal(report.inertBypasses, 1);
   assert.equal(report.controllerProgress, 800);
   assert.equal(report.unwindPassed, report.unwindExamined);
-  assert.equal(report.unwindExamined, 56);
+  assert.equal(report.unwindExamined, 44);
+  assert.equal(report.gateStackBytes, 0x100);
+  assert.equal(report.ownerXstateBytes, report.xstateBytes);
   assert.ok(report.xstateBytes >= 576 && report.xstateBytes <= 0x3dc0);
   assert.equal(report.xcr0 & 7, 7);
   // The code has no relative return branch. Whether ASLR happens to place these
   // two images farther than 2 GiB is evidence, not an input the fixture controls.
   assert.equal(typeof report.imagesBeyondRel32, 'boolean');
+  assert.equal(report.legacyExeWithoutEhcont, false);
+  assert.equal(report.entryEhcontState, 2);
+  assert.equal(report.resumeEhcontState, 2);
 });
+
+test('owned EHCONT DLL gate returns into a legacy EXE with no Guard EH Continuation table',
+  {skip: skip || !existsSync(legacyHost)}, () => {
+    const run = spawnSync(legacyHost, [], {windowsHide: true, encoding: 'utf8', timeout: 20_000});
+    assert.ifError(run.error);
+    assert.equal(run.status, 0, run.stderr || run.stdout);
+    const report = JSON.parse(run.stdout);
+    assert.equal(report.scope, 'owned-cross-image-continuation');
+    assert.equal(report.fixturePassed, true);
+    assert.equal(report.legacyExeWithoutEhcont, true);
+    assert.equal(report.entryEhcont, true);
+    assert.equal(report.entryEhcontState, 2);
+    assert.equal(report.resumeEhcont, false);
+    // Parser states deliberately distinguish an omitted EHCONT table (0) from
+    // a present table whose target is absent (1) and a qualified target (2).
+    assert.equal(report.resumeEhcontState, 0);
+    for (const field of ['gprAndFlagsPreserved', 'enabledXstatePreserved',
+      'nativeExceptionReachedExeCaller', 'busyStopRejected', 'stopAfterJoin',
+      'faultLatched', 'freeLibrarySucceeded', 'pinnedModuleRemainedLoaded',
+      'inertBypassPreservedState', 'ownerXstatePrecommitted', 'ownerXstateExternal',
+      'ownerXstateRetained', 'ehcontParserCasesPassed']) assert.equal(report[field], true, field);
+    assert.equal(report.entries, 9);
+    assert.equal(report.returns, 8);
+    assert.equal(report.inertBypasses, 1);
+    assert.equal(report.unwindPassed, report.unwindExamined);
+    assert.equal(report.unwindExamined, 44);
+    assert.equal(report.gateStackBytes, 0x100);
+    assert.equal(report.ownerXstateBytes, report.xstateBytes);
+  });
 
 test('owned EXE/DLL fixture has no activation command mode', {skip}, () => {
   const run = spawnSync(host, ['--activate'], {windowsHide: true, encoding: 'utf8', timeout: 5_000});

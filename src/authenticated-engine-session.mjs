@@ -29,23 +29,48 @@ function companiesFromCapture(payload, playerId) {
 // authenticates, decodes, orders and session-checks a server frame. This helper
 // adds no transport, native-control, or production-qualification assertion.
 export function attachAuthenticatedEngineSession({ connection, createAdapter,
-  onAdapter = () => {}, onFailure = () => {} } = {}) {
+  onAdapter = () => {}, onFailure = () => {}, pollIntervalMs = 25 } = {}) {
   if (!connection || typeof connection.subscribe !== 'function' || typeof connection.send !== 'function'
     || !connection.socket || typeof createAdapter !== 'function'
-    || typeof onAdapter !== 'function' || typeof onFailure !== 'function') {
+    || typeof onAdapter !== 'function' || typeof onFailure !== 'function'
+    || !Number.isSafeInteger(pollIntervalMs) || pollIntervalMs < 10 || pollIntervalMs > 1000) {
     throw new TypeError('INVALID_AUTHENTICATED_ENGINE_SESSION_OPTIONS');
   }
   const playerId = connection.playerId;
   if (!ident(playerId)) throw new Error('AUTHENTICATED_PLAYER_ID_REQUIRED');
 
-  let adapter = null, attaching = null, closed = false, detach = null;
+  let adapter = null, attaching = null, closed = false, detach = null, closing = null;
+  let pollTimer = null, pollInFlight = null;
   const queued = [];
+  const stopPolling = () => {
+    if (pollTimer !== null) clearTimeout(pollTimer);
+    pollTimer = null;
+  };
+  const schedulePoll = () => {
+    if (closed || !adapter || pollTimer !== null || pollInFlight) return;
+    pollTimer = setTimeout(() => {
+      pollTimer = null;
+      if (closed || !adapter || pollInFlight) return;
+      // Schedule only after this promise settles: an engine adapter is never
+      // polled concurrently, even if its mailbox becomes slow or blocked.
+      pollInFlight = Promise.resolve().then(() => adapter.poll()).catch(fail).finally(() => {
+        pollInFlight = null;
+        schedulePoll();
+      });
+    }, pollIntervalMs);
+    pollTimer.unref?.();
+  };
   const close = async () => {
-    if (closed) return;
+    if (closing) return closing;
     closed = true;
-    detach?.();
-    try { connection.socket.destroy(); } catch { /* transport closure is best effort */ }
-    try { await adapter?.close?.(); } catch { /* lost engine control cannot retain authority */ }
+    stopPolling();
+    closing = (async () => {
+      detach?.();
+      try { connection.socket.destroy(); } catch { /* transport closure is best effort */ }
+      try { await pollInFlight; } catch { /* rejected polling already fails closed */ }
+      try { await adapter?.close(); } catch { /* lost engine control cannot retain authority */ }
+    })();
+    return closing;
   };
   const fail = error => {
     if (closed) return;
@@ -68,8 +93,13 @@ export function attachAuthenticatedEngineSession({ connection, createAdapter,
         playerId, companies, send: connection.send,
         disconnect: () => void close(), connection,
       }))).then(async result => {
-        if (!result || typeof result.receive !== 'function') throw new TypeError('INVALID_AUTHENTICATED_ENGINE_ADAPTER');
-        if (closed) { await result.close?.(); return; }
+        if (!result || typeof result.receive !== 'function' || typeof result.poll !== 'function' || typeof result.close !== 'function') {
+          throw new TypeError('INVALID_AUTHENTICATED_ENGINE_ADAPTER');
+        }
+        // A factory may finish after closure. The original close cannot await
+        // unbounded factory work, so this construction continuation owns that
+        // late resource and awaits its teardown before attachment settles.
+        if (closed) { await result.close(); return; }
         adapter = result;
         try { onAdapter(result); } catch { /* observers cannot change transport authority */ }
         const pending = [message, ...queued.splice(0)];
@@ -78,6 +108,7 @@ export function attachAuthenticatedEngineSession({ connection, createAdapter,
             throw new Error('AUTHENTICATED_COORDINATOR_FRAME_REJECTED');
           }
         }
+        schedulePoll();
       }).catch(fail);
       return;
     }

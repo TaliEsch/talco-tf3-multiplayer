@@ -11,10 +11,12 @@ const lua=p=>`function data() return {${Object.entries(p).map(([k,v])=>`${k}=${J
 for(const locked of [false,true])test(`session adapter requires observed binding, capture and controls for release: locked=${locked}`,async()=>{
   const root=await mkdtemp(path.join(os.tmpdir(),'tf3mp-adapter-')),directory=path.join(root,'tf3mp_status_1');await mkdir(directory);
   const nonce='a'.repeat(32),sent=[];let controls=locked,health=true,disconnected=0,adapter,time=0;
-  const native=new EventEmitter(),nativeControls=[],nativeEvents=[];
-  native.requireCapability=capability=>assert.equal(capability,'session.bind');
+  const native=new EventEmitter(),nativeControls=[],nativeEvents=[];let nativeClosed=0;
+  native.requireCapability=capability=>assert.ok(['session.bind','simulation.hold','engine.halt','simulation.gate-receipts.v1'].includes(capability));
   native.bindSession=async binding=>{assert.deepEqual(binding,{sessionId:'native.session:1',role:'participant'});return {status:'accepted',boundSessionId:binding.sessionId,boundRole:binding.role};};
-  native.control=async control=>{nativeControls.push(control);return {status:'accepted',control,state:'qualification_only'};};
+  native.gateControl=async command=>{nativeControls.push(command);return {status:'halt_requested',...command,haltGeneration:command.generation};};
+  native.awaitGateEvent=async command=>({event:'terminal_parked',...command,haltGeneration:command.generation});
+  native.close=()=>{nativeClosed++;};
   const lease={phase:'active',get active(){return this.phase==='active';},stop(){this.phase='closed';}};
   const observation={available:true,sample:{counter:1,updateCount:100,speedup:1}};
   const bridge={nonce,get engineObservation(){return observation;},async startCoordinationLease(){return lease;}};
@@ -28,7 +30,7 @@ for(const locked of [false,true])test(`session adapter requires observed binding
   try {
     adapter=await createEngineSessionAdapter({directory,bridge,playerId:'a',companies:new Map([['a',7],['b',9]]),
       healthy:()=>health,controlsReady:()=>controls,send:(kind,payload)=>sent.push({kind,payload}),disconnect:()=>disconnected++,now:()=>time,
-      checkpointEvidenceScope:'local_diagnostic',nativeRuntime:{client:native,sessionId:'native.session:1',role:'participant',logger:event=>nativeEvents.push(event)}});
+      checkpointEvidenceScope:'local_diagnostic',nativeRuntime:{client:native,sessionId:'native.session:1',role:'participant',gateControl:native.gateControl,awaitGateEvent:native.awaitGateEvent,logger:event=>nativeEvents.push(event)}});
     adapter.receive('coordination_capture',{roundId:'r',updateCount:140,players:[{playerId:'a',companyEntity:7},{playerId:'b',companyEntity:9}]});
     await new Promise(resolve=>setImmediate(resolve));
     assert.deepEqual(nativeControls,[],'qualification controller hold is not a world hold and has no release path');
@@ -58,8 +60,10 @@ for(const locked of [false,true])test(`session adapter requires observed binding
     }
     assert.equal(adapter.phase,'halted');assert.equal(disconnected,1);assert.equal(lease.phase,'closed');
     await new Promise(resolve=>setImmediate(resolve));
-    assert.equal(nativeControls.filter(control=>control==='halt').length,1,'participant fault requests one native halt without retry');
-    assert.equal(nativeEvents.some(event=>event.gameWorldReceipt===true),false);
+    assert.equal(nativeControls.filter(command=>command.control==='halt').length,1,'participant fault requests one typed native halt without retry');
+    assert.deepEqual(nativeControls[0],{control:'halt',epoch:'1',generation:'0'});
+    assert.equal(nativeEvents.some(event=>event.event==='native_runtime_halt_confirmed'&&event.gameWorldReceipt===true),true);
+    assert.equal(nativeClosed,0,'a confirmed terminal park does not use the fail-stop close');
     const halt=await waitOperation('halt');
     assert.equal(halt.operation,'halt');
     assert.notEqual(adapter.haltState,'confirmed');
@@ -76,21 +80,25 @@ for(const locked of [false,true])test(`session adapter requires observed binding
   } finally {await adapter?.close();await rm(root,{recursive:true,force:true});}
 });
 
-test('native runtime disconnect latches the participant and issues one best-effort native halt',async()=>{
+test('native runtime disconnect latches the participant, issues one typed halt, and closes fail-stop when terminal state is unknown',async()=>{
   const root=await mkdtemp(path.join(os.tmpdir(),'tf3mp-native-disconnect-')),directory=path.join(root,'tf3mp_status_1');await mkdir(directory);
-  const native=new EventEmitter(),controls=[];let disconnected=0,adapter;
-  native.requireCapability=capability=>assert.equal(capability,'session.bind');
+  const native=new EventEmitter(),controls=[],events=[];let disconnected=0,adapter,nativeClosed=0;
+  native.requireCapability=capability=>assert.ok(['session.bind','simulation.hold','engine.halt','simulation.gate-receipts.v1'].includes(capability));
   native.bindSession=async()=>({status:'accepted',boundSessionId:'native.session:2',boundRole:'participant'});
-  native.control=async control=>{controls.push(control);return {status:'accepted',control};};
+  native.gateControl=async command=>{controls.push(command);return {status:'halt_requested',...command,haltGeneration:command.generation};};
+  native.awaitGateEvent=async()=>{throw new Error('NATIVE_GATE_EVENT_UNKNOWN_NO_RETRY');};
+  native.close=()=>{nativeClosed++;};
   const lease={phase:'active',get active(){return this.phase==='active';},stop(){this.phase='closed';}};
   const bridge={nonce:'b'.repeat(32),engineObservation:{available:true,sample:{counter:1,updateCount:100,speedup:1}},async startCoordinationLease(){return lease;}};
   try {
     adapter=await createEngineSessionAdapter({directory,bridge,playerId:'a',companies:new Map([['a',7],['b',9]]),healthy:()=>true,
-      controlsReady:()=>true,send:()=>{},disconnect:()=>disconnected++,nativeRuntime:{client:native,sessionId:'native.session:2',role:'participant',logger:()=>{}}});
+      controlsReady:()=>true,send:()=>{},disconnect:()=>disconnected++,nativeRuntime:{client:native,sessionId:'native.session:2',role:'participant',gateControl:native.gateControl,awaitGateEvent:native.awaitGateEvent,logger:event=>events.push(event)}});
     native.emit('disconnect','NATIVE_RUNTIME_IPC_DISCONNECTED');
     await new Promise(resolve=>setImmediate(resolve));
     assert.equal(adapter.phase,'halted');assert.equal(adapter.fault,'NATIVE_RUNTIME_DISCONNECTED');assert.equal(disconnected,1);
-    assert.deepEqual(controls,['halt']);
+    assert.deepEqual(controls,[{control:'halt',epoch:'1',generation:'0'}]);
+    assert.equal(nativeClosed,1);
+    assert.deepEqual(events.filter(event=>event.event==='native_runtime_halt_unknown'),[{level:'error',event:'native_runtime_halt_unknown',reason:'NATIVE_RUNTIME_DISCONNECTED',code:'NATIVE_GATE_EVENT_UNKNOWN_NO_RETRY',control:'halt',epoch:'1',generation:'0',noRetry:true,engineHaltConfirmed:false,failStopClientClosed:true,gameWorldReceipt:false}]);
   } finally {await adapter?.close();await rm(root,{recursive:true,force:true});}
 });
 
@@ -98,11 +106,13 @@ test('invalid native binding receipt rejects adapter setup before a lease can st
   const root=await mkdtemp(path.join(os.tmpdir(),'tf3mp-native-bind-')),directory=path.join(root,'tf3mp_status_1');await mkdir(directory);
   const native=new EventEmitter();let leaseStarted=false;
   native.requireCapability=()=>{};native.bindSession=async()=>({status:'accepted',boundSessionId:'other',boundRole:'participant'});
-  native.control=async()=>({status:'accepted',control:'halt'});
+  native.gateControl=async command=>({status:'halt_requested',...command,haltGeneration:command.generation});
+  native.awaitGateEvent=async command=>({event:'terminal_parked',...command,haltGeneration:command.generation});
+  native.close=()=>{};
   const bridge={nonce:'d'.repeat(32),engineObservation:{available:true,sample:{counter:1,updateCount:100,speedup:1}},async startCoordinationLease(){leaseStarted=true;}};
   try {
     await assert.rejects(createEngineSessionAdapter({directory,bridge,playerId:'a',companies:new Map([['a',7],['b',9]]),healthy:()=>true,
-      controlsReady:()=>true,send:()=>{},disconnect:()=>{},nativeRuntime:{client:native,sessionId:'native.session:4',role:'participant',logger:()=>{}}}),/INVALID_BIND_RECEIPT/);
+      controlsReady:()=>true,send:()=>{},disconnect:()=>{},nativeRuntime:{client:native,sessionId:'native.session:4',role:'participant',gateControl:native.gateControl,awaitGateEvent:native.awaitGateEvent,logger:()=>{}}}),/INVALID_BIND_RECEIPT/);
     assert.equal(leaseStarted,false);
   } finally {await rm(root,{recursive:true,force:true});}
 });
@@ -114,12 +124,14 @@ test('adapter reuses the gate binding with real-client semantics instead of rebi
   native.requireCapability=()=>{};
   native.binding=Object.freeze({sessionId:'native.session:3',role:'participant',receipt:Object.freeze({status:'accepted',boundSessionId:'native.session:3',boundRole:'participant'})});
   native.bindSession=async()=>{bindCalls++;throw new Error('NATIVE_RUNTIME_SESSION_ALREADY_BOUND');};
-  native.control=async control=>({status:'accepted',control});
+  native.gateControl=async command=>({status:'halt_requested',...command,haltGeneration:command.generation});
+  native.awaitGateEvent=async command=>({event:'terminal_parked',...command,haltGeneration:command.generation});
+  native.close=()=>{};
   const lease={phase:'active',get active(){return this.phase==='active';},stop(){this.phase='closed';}};
   const bridge={nonce:'c'.repeat(32),engineObservation:{available:true,sample:{counter:1,updateCount:100,speedup:1}},async startCoordinationLease(){return lease;}};
   try {
     adapter=await createEngineSessionAdapter({directory,bridge,playerId:'a',companies:new Map([['a',7],['b',9]]),healthy:()=>true,
-      controlsReady:()=>true,send:()=>{},disconnect:()=>{},nativeRuntime:{client:native,sessionId:'native.session:3',role:'participant',logger:()=>{}}});
+      controlsReady:()=>true,send:()=>{},disconnect:()=>{},nativeRuntime:{client:native,sessionId:'native.session:3',role:'participant',gateControl:native.gateControl,awaitGateEvent:native.awaitGateEvent,logger:()=>{}}});
     adapter.receive('coordination_capture',{roundId:'r',updateCount:140,players:[{playerId:'a',companyEntity:7},{playerId:'b',companyEntity:9}]});
     await new Promise(resolve=>setImmediate(resolve));
     assert.equal(bindCalls,0);assert.equal(adapter.phase,'binding_session');

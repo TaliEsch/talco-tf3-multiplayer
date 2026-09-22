@@ -15,18 +15,19 @@ function bridge() {
     async startCoordinationLease() { return { active: true, phase: 'active', stop() {} }; },
   };
 }
-function client() {
+function client(missingCapability=null) {
   return {
-    requireCapability() {}, async bindSession({ sessionId, role }) {
+    handshake:{productionQualified:true},
+    requireCapability(capability) {if(capability===missingCapability)throw new Error('CAPABILITY_UNAVAILABLE');}, async bindSession({ sessionId, role }) {
       return { status: 'accepted', boundSessionId: sessionId, boundRole: role };
-    }, async control() { return { status: 'accepted' }; }, on() {}, off() {},
+    }, async control() { return { status: 'accepted' }; }, on() {}, off() {}, close() {},
   };
 }
 function context({ role, directory, bindingRole = role === 'join' ? 'participant' : 'host', extra = {} }) {
   return {
     bridge: bridge(), engineSessionDirectory: directory, sessionId: 'provider-test', buildHash,
     modManifestHash, requiredSave: verifiedSave, verifiedSave,
-    nativeRuntime: { client: client(), binding: { sessionId: 'provider-test', role: bindingRole,
+    nativeRuntime: { client: client(), gateControl: async () => ({status:'held'}), awaitGateEvent: async () => ({event:'boundary_applied'}), binding: { sessionId: 'provider-test', role: bindingRole,
       receipt: { status: 'accepted', boundSessionId: 'provider-test', boundRole: bindingRole } }, sessionId: 'provider-test', role, logger() {} },
     ...extra,
   };
@@ -36,6 +37,17 @@ test('provider refuses missing save verification and bridge directory rather tha
   const base = context({ role: 'host', directory: '' });
   assert.throws(() => createHostLocalEngineBinding(base), /CONTEXT_INCOMPLETE/);
   assert.throws(() => createHostLocalEngineBinding({ ...base, engineSessionDirectory: 'C:/x', verifiedSave: undefined }), /CONTEXT_INCOMPLETE/);
+});
+
+test('provider refuses a production label without real hold/halt capabilities and typed gate control', () => {
+  const base=context({role:'host',directory:'C:/x'});
+  base.nativeRuntime.client.handshake={productionQualified:false};
+  assert.throws(()=>createHostLocalEngineBinding(base),/NATIVE_GATE_UNQUALIFIED/);
+  const missingGate=context({role:'host',directory:'C:/x'});delete missingGate.nativeRuntime.gateControl;
+  assert.throws(()=>createHostLocalEngineBinding(missingGate),/TYPED_GATE_REQUIRED/);
+  const missingReceipts=context({role:'host',directory:'C:/x'});
+  missingReceipts.nativeRuntime.client=client('simulation.gate-receipts.v1');
+  assert.throws(()=>createHostLocalEngineBinding(missingReceipts),/NATIVE_GATE_INCOMPLETE/);
 });
 
 test('host-local provider returns an opaque binding and creates the shared engine adapter', async () => {

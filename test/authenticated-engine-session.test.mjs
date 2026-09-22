@@ -15,7 +15,7 @@ function connection() {
 test('authenticated capture builds one real adapter from its roster and forwards later coordinator frames', async () => {
   const c = connection(), calls = [], received = [];
   const attached = attachAuthenticatedEngineSession({ connection: c, createAdapter: context => {
-    calls.push(context); return { receive(kind, payload) { received.push({ kind, payload }); return true; }, close() {} };
+    calls.push(context); return { receive(kind, payload) { received.push({ kind, payload }); return true; }, poll() {}, close() {} };
   } });
   c.emit({ kind: 'coordination_capture', payload: capture });
   await attached.attachment;
@@ -29,13 +29,13 @@ test('authenticated capture builds one real adapter from its roster and forwards
 
 test('untrusted/malformed capture and a rejected coordinator frame close instead of making an adapter', async () => {
   const c = connection(); let constructed = false;
-  const attached = attachAuthenticatedEngineSession({ connection: c, createAdapter() { constructed = true; return { receive() { return true; } }; } });
+  const attached = attachAuthenticatedEngineSession({ connection: c, createAdapter() { constructed = true; return { receive() { return true; }, poll() {}, close() {} }; } });
   c.emit({ kind: 'coordination_capture', payload: { ...capture, players: [{ playerId: 'a', companyEntity: 7 }] } });
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(constructed, false); assert.equal(c.socket.destroyed, true); assert.equal(attached.ready, false);
 
   const second = connection();
-  const rejected = attachAuthenticatedEngineSession({ connection: second, createAdapter() { return { receive() { return false; } }; } });
+  const rejected = attachAuthenticatedEngineSession({ connection: second, createAdapter() { return { receive() { return false; }, poll() {}, close() {} }; } });
   second.emit({ kind: 'coordination_capture', payload: capture });
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(second.socket.destroyed, true); assert.equal(rejected.ready, false);
@@ -43,10 +43,35 @@ test('untrusted/malformed capture and a rejected coordinator frame close instead
 
 test('frames arriving during adapter construction retain authenticated order', async () => {
   const c = connection(), received = []; let resolve;
-  const attached = attachAuthenticatedEngineSession({ connection: c, createAdapter: () => new Promise(done => { resolve = () => done({ receive(kind) { received.push(kind); return true; }, close() {} }); }) });
+  const attached = attachAuthenticatedEngineSession({ connection: c, createAdapter: () => new Promise(done => { resolve = () => done({ receive(kind) { received.push(kind); return true; }, poll() {}, close() {} }); }) });
   c.emit({ kind: 'coordination_capture', payload: capture });
   c.emit({ kind: 'coordination_heartbeat', payload: { roundId: 'round' } });
   resolve(); await attached.attachment;
   assert.deepEqual(received, ['coordination_capture', 'coordination_heartbeat']);
   await attached.close();
+});
+
+test('authenticated adapter polling is serialized, teardown is awaited, and a rejected poll closes transport', async () => {
+  const c = connection(); let polls = 0, concurrent = 0, maximum = 0, release, closes = 0;
+  const attached = attachAuthenticatedEngineSession({ connection: c, pollIntervalMs: 10, createAdapter: () => ({
+    receive() { return true; },
+    poll() { polls++; concurrent++; maximum = Math.max(maximum, concurrent); return new Promise(resolve => { release = () => { concurrent--; resolve(); }; }); },
+    async close() { closes++; },
+  }) });
+  c.emit({ kind: 'coordination_capture', payload: capture });
+  await attached.attachment;
+  await new Promise(resolve => setTimeout(resolve, 25));
+  assert.equal(polls, 1); assert.equal(maximum, 1);
+  const closing = attached.close();
+  release(); await closing;
+  assert.equal(closes, 1); assert.equal(c.socket.destroyed, true);
+
+  const rejectedConnection = connection();
+  const rejected = attachAuthenticatedEngineSession({ connection: rejectedConnection, pollIntervalMs: 10,
+    createAdapter: () => ({ receive() { return true; }, poll() { return Promise.reject(new Error('bridge lost')); }, close() {} }) });
+  rejectedConnection.emit({ kind: 'coordination_capture', payload: capture });
+  await rejected.attachment;
+  await new Promise(resolve => setTimeout(resolve, 25));
+  assert.equal(rejectedConnection.socket.destroyed, true);
+  await rejected.close();
 });

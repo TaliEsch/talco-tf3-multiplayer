@@ -20,7 +20,12 @@ enum class Status : std::uint32_t {
 };
 struct Snapshot {
     std::uint64_t hits;
+    std::uint64_t minimum_stack_headroom;
     std::uint32_t owner_thread;
+    std::uint32_t cfg_flags;
+    std::uint32_t cet_flags;
+    bool cfg_known;
+    bool cet_known;
     bool active;
     bool cross_thread;
     bool saturated;
@@ -31,6 +36,9 @@ struct Snapshot {
 Status Start() noexcept;
 Status Stop() noexcept;
 Snapshot ReadSnapshot() noexcept;
+// Shared read-only exact-build/site qualification for the exclusive production
+// boundary owner. This never installs a handler or changes executable bytes.
+Status QualifyExactSite(void** site) noexcept;
 
 #ifdef TF3_POST_OBSERVER_OWNED_TEST
 Status StartOwnedFixture(void* site) noexcept;

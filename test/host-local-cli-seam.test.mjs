@@ -17,6 +17,8 @@ const nativeGate = {
   ready: true,
   binding: { sessionId, role: 'host' },
   client: { requireCapability() {} },
+  gateControl() {},
+  awaitGateEvent() {},
 };
 const engineSessionDirectory = path.join(path.parse(process.cwd()).root, 'tf3mp_status_1');
 const options = modulePath => ({ modulePath, bridge, nativeGate, sessionId, buildHash,
@@ -29,6 +31,8 @@ test('host-local CLI seam is absent unless an explicit adapter module is selecte
 test('host-local CLI seam rejects diagnostic, stale, and non-live bindings before importing a provider', async () => {
   await assert.rejects(loadHostLocalEngineFactory(options('relative-provider.mjs')), /ABSOLUTE_PATH_REQUIRED/);
   await assert.rejects(loadHostLocalEngineFactory({ ...options('C:/provider.mjs'), nativeGate: null }), /NATIVE_BINDING_REQUIRED/);
+  const missingTypedGate={...nativeGate};delete missingTypedGate.awaitGateEvent;
+  await assert.rejects(loadHostLocalEngineFactory({ ...options('C:/provider.mjs'), nativeGate: missingTypedGate }), /NATIVE_BINDING_REQUIRED/);
   await assert.rejects(loadHostLocalEngineFactory({ ...options('C:/provider.mjs'), bridge: { ...bridge, connected: false } }), /LIVE_ENGINE_OBSERVATION_REQUIRED/);
 });
 
@@ -38,7 +42,7 @@ test('host-local CLI seam accepts only an explicit, qualified factory with exact
   const badSave = path.join(root, 'bad-save-provider.mjs');
   try {
     await writeFile(valid, `export async function createHostLocalEngineBinding(context) {
-      if (context.nativeRuntime.role !== 'host' || context.requiredSave.sha256 !== '${requiredSave.sha256}') throw new Error('wrong context');
+      if (context.nativeRuntime.role !== 'host' || typeof context.nativeRuntime.gateControl !== 'function' || typeof context.nativeRuntime.awaitGateEvent !== 'function' || context.requiredSave.sha256 !== '${requiredSave.sha256}') throw new Error('wrong context');
       return { engineBinding: Object.freeze({ source: 'qualified-provider' }), createAdapter() { throw new Error('not constructed by loader'); }, productionQualified: true, verifiedSave: { bytes: 1, sha256: '${requiredSave.sha256}' } };
     }`);
     await writeFile(badSave, `export function createHostLocalEngineBinding() {

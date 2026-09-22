@@ -81,8 +81,16 @@ int main(int argc, char**) {
     if (!start || !arm || !finish || !set_fault || !stop || !read) return 1;
     HANDLE entered = CreateEventW(nullptr, TRUE, FALSE, nullptr);
     HANDLE release = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    constexpr bool legacy_host =
+#ifdef OWNED_CROSS_LEGACY_HOST
+        true;
+#else
+        false;
+#endif
+    const auto resume_policy = legacy_host ? OwnedCrossResumePolicy::require_legacy_no_table :
+        OwnedCrossResumePolicy::require_ehcont;
     const OwnedCrossConfig config{sizeof(OwnedCrossConfig), GetModuleHandleW(nullptr),
-        &OwnedCrossTrap, &OwnedCrossResume, entered, release, OwnedCrossXcr0};
+        &OwnedCrossTrap, &OwnedCrossResume, entered, release, OwnedCrossXcr0, resume_policy};
     OwnedCrossConfig invalid = config;
     invalid.xcr0 ^= 1;
     const bool bad_xcr0_rejected = start(&invalid) == FALSE;
@@ -93,6 +101,10 @@ int main(int argc, char**) {
         std::cerr << "owned fixture qualification failed before activation\n";
         return 1;
     }
+    OwnedCrossReport initial{sizeof(OwnedCrossReport)};
+    const bool owner_xstate_precommitted = read(&initial) && initial.owner_xstate_committed &&
+        initial.owner_xstate_bytes == xstate_bytes && initial.owner_xstate_address != 0 &&
+        (initial.owner_xstate_address & 63) == 0;
     for (std::size_t i = 0; i < sizeof(OwnedCrossPatterns); ++i)
         OwnedCrossPatterns[i] = static_cast<unsigned char>((i * 17 + 3) & 0xff);
     const std::array<DWORD64, 8> seeds{0, 0xf, 0xff, 0x7fffffff,
@@ -148,6 +160,9 @@ int main(int argc, char**) {
     }
     CloseHandle(entered);
     CloseHandle(release);
+    const bool owner_xstate_retained = report.owner_xstate_committed &&
+        report.owner_xstate_address == initial.owner_xstate_address &&
+        report.owner_xstate_bytes == initial.owner_xstate_bytes;
     const auto exe_address = reinterpret_cast<std::uintptr_t>(config.executable);
     const auto dll_address = reinterpret_cast<std::uintptr_t>(dll);
     const auto image_distance = exe_address > dll_address ? exe_address - dll_address : dll_address - exe_address;
@@ -155,8 +170,13 @@ int main(int argc, char**) {
         bad_xcr0_rejected && bad_resume_rejected && wrong_owner_rejected &&
         normal_cases == 8 && controller_progress == 800 && native_exception && stop_after_join &&
         fault_latched && free_succeeded && remained_loaded && inert_bypass &&
+        owner_xstate_precommitted && owner_xstate_retained && report.owner_xstate_external &&
+        report.ehcont_parser_cases && report.gate_stack_bytes == 0x100 &&
         report.entries == 9 && report.returns == 8 && report.bypasses == 1 &&
-        report.entry_ehcont && report.resume_ehcont && report.unwind_passed == report.unwind_examined;
+        report.entry_ehcont &&
+        (legacy_host ? report.resume_ehcont_state == OwnedCrossEhContinuationState::table_absent :
+                       report.resume_ehcont != 0) &&
+        report.unwind_passed == report.unwind_examined && report.unwind_examined == 44;
     std::cout << std::boolalpha <<
         "{\"scope\":\"owned-cross-image-continuation\",\"activationPermitted\":false,"
         "\"tf3Qualified\":false,\"productionLifecycleQualified\":false,\"fixturePassed\":" << passed <<
@@ -164,6 +184,12 @@ int main(int argc, char**) {
         ",\"returns\":" << report.returns << ",\"inertBypasses\":" << report.bypasses <<
         ",\"gprAndFlagsPreserved\":" << registers << ",\"enabledXstatePreserved\":" << xstate <<
         ",\"xstateBytes\":" << xstate_bytes << ",\"xcr0\":" << OwnedCrossXcr0 <<
+        ",\"gateStackBytes\":" << report.gate_stack_bytes <<
+        ",\"ownerXstateBytes\":" << report.owner_xstate_bytes <<
+        ",\"ownerXstatePrecommitted\":" << owner_xstate_precommitted <<
+        ",\"ownerXstateExternal\":" << (report.owner_xstate_external != 0) <<
+        ",\"ownerXstateRetained\":" << owner_xstate_retained <<
+        ",\"ehcontParserCasesPassed\":" << (report.ehcont_parser_cases != 0) <<
         ",\"workerHeld\":" << held << ",\"controllerProgress\":" << controller_progress <<
         ",\"nativeExceptionReachedExeCaller\":" << native_exception <<
         ",\"busyStopRejected\":" << busy_stop_rejected << ",\"stopAfterJoin\":" << stop_after_join <<
@@ -174,6 +200,9 @@ int main(int argc, char**) {
         ",\"inertBypassPreservedState\":" << inert_bypass <<
         ",\"entryEhcont\":" << (report.entry_ehcont != 0) <<
         ",\"resumeEhcont\":" << (report.resume_ehcont != 0) <<
+        ",\"entryEhcontState\":" << static_cast<unsigned int>(report.entry_ehcont_state) <<
+        ",\"resumeEhcontState\":" << static_cast<unsigned int>(report.resume_ehcont_state) <<
+        ",\"legacyExeWithoutEhcont\":" << legacy_host <<
         ",\"cfgEnabled\":" << (report.cfg != 0) << ",\"cetEnabled\":" << (report.cet != 0) <<
         ",\"cetIpValidation\":" << (report.ip_validation != 0) <<
         ",\"unwindPassed\":" << report.unwind_passed << ",\"unwindExamined\":" << report.unwind_examined <<

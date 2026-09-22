@@ -6,7 +6,6 @@
 #include <cwctype>
 #include <cstring>
 #include <string>
-#include <vector>
 #include "runtime_ipc.h"
 
 extern "C" BOOLEAN WINAPI SystemFunction036(PVOID, ULONG);
@@ -97,6 +96,75 @@ bool IsSafeControl(const std::string& payload, std::string* control) {
   }
   return false;
 }
+bool ParseCanonicalUint64(const std::string& text, std::uint64_t* value) {
+  if (text.empty() || (text.size() > 1 && text[0] == '0') || text.size() > 20) return false;
+  std::uint64_t out = 0;
+  for (const char c : text) {
+    if (c < '0' || c > '9') return false;
+    const auto digit = static_cast<std::uint64_t>(c - '0');
+    if (out > (UINT64_MAX - digit) / 10) return false;
+    out = out * 10 + digit;
+  }
+  *value = out; return true;
+}
+bool ExtractGateRequest(const std::string& payload, GateRequest* request) {
+  // This byte-for-byte canonical form rejects duplicate keys, numeric JSON
+  // coercion, alternate key order, and leading-zero identifiers.
+  constexpr const char* names[] = {"hold", "release", "halt", "detach"};
+  for (std::size_t i = 0; i != _countof(names); ++i) {
+    const std::string prefix = "{\"control\":\"" + std::string(names[i]) + "\",\"epoch\":\"";
+    if (payload.compare(0, prefix.size(), prefix) != 0) continue;
+    const auto epoch_end = payload.find('"', prefix.size());
+    if (epoch_end == std::string::npos || payload.compare(epoch_end, 16, "\",\"generation\":\"") != 0 || payload.back() != '}') return false;
+    const auto generation_begin = epoch_end + 16;
+    const auto generation_end = payload.find('"', generation_begin);
+    if (generation_end == std::string::npos || generation_end + 2 != payload.size() || payload[generation_end + 1] != '}') return false;
+    std::uint64_t epoch = 0, generation = 0;
+    if (!ParseCanonicalUint64(payload.substr(prefix.size(), epoch_end - prefix.size()), &epoch) ||
+        !ParseCanonicalUint64(payload.substr(generation_begin, generation_end - generation_begin), &generation)) return false;
+    request->control = static_cast<GateControl>(i);
+    request->epoch = epoch; request->generation = generation; return true;
+  }
+  return false;
+}
+const char* GateControlName(GateControl control) {
+  constexpr const char* names[] = {"hold", "release", "halt", "detach"};
+  const auto index = static_cast<unsigned int>(control);
+  return index < _countof(names) ? names[index] : nullptr;
+}
+const char* GateReceiptName(GateReceipt receipt) {
+  constexpr const char* names[] = {"held", "permit_consumed", "halt_requested", "detach_prepared"};
+  const auto index = static_cast<unsigned int>(receipt);
+  return index < _countof(names) ? names[index] : nullptr;
+}
+const char* GateEventName(GateEvent event) {
+  constexpr const char* names[] = {"boundary_applied", "terminal_parked", "detached"};
+  const auto index = static_cast<unsigned int>(event);
+  return index < _countof(names) ? names[index] : nullptr;
+}
+bool ReceiptMatches(GateControl control, GateReceipt receipt) {
+  return static_cast<unsigned int>(control) == static_cast<unsigned int>(receipt);
+}
+std::string GateReceiptJson(const GateRequest& request, GateReceipt receipt) {
+  const char* const control = GateControlName(request.control);
+  const char* const status = GateReceiptName(receipt);
+  if (!control || !status || !ReceiptMatches(request.control, receipt)) return {};
+  const char* field = request.control == GateControl::hold ? "heldGeneration" :
+    request.control == GateControl::release ? "permitConsumedGeneration" :
+    request.control == GateControl::halt ? "haltGeneration" : "detachGeneration";
+  const auto epoch = std::to_string(request.epoch), generation = std::to_string(request.generation);
+  return "{\"status\":\"" + std::string(status) + "\",\"control\":\"" + control +
+    "\",\"epoch\":\"" + epoch + "\",\"generation\":\"" + generation + "\",\"" + field + "\":\"" + generation + "\"}";
+}
+std::string GateEventJson(const GateEventRecord& event) {
+  const char* const name = GateEventName(event.event);
+  if (!name) return {};
+  const char* field = event.event == GateEvent::boundary_applied ? "releaseAppliedGeneration" :
+    event.event == GateEvent::terminal_parked ? "haltGeneration" : "detachGeneration";
+  const auto epoch = std::to_string(event.epoch), generation = std::to_string(event.generation);
+  return "{\"event\":\"" + std::string(name) + "\",\"epoch\":\"" + epoch +
+    "\",\"generation\":\"" + generation + "\",\"" + field + "\":\"" + generation + "\"}";
+}
 bool ValidPipeName(const std::wstring& n) { if (n.empty() || n.size()>80) return false; for (wchar_t c:n) if (!(std::iswalnum(c)||c==L'_'||c==L'-')) return false; return true; }
 bool ValidToken(const std::string& token) {
   if (token.size() != 64) return false;
@@ -128,7 +196,9 @@ bool ExtractBinding(const std::string& payload, std::string* session, std::strin
 }
 
 int ServeMode(const std::wstring& name, const std::string& token, bool inProcess,
-              RuntimeObservationProvider observer, std::uint32_t observerStartStatus) {
+              RuntimeObservationProvider observer, std::uint32_t observerStartStatus,
+              const GateProvider* gateProvider,
+              std::uint32_t authenticatedSessionLeaseMs) {
   if (!ValidPipeName(name) || !ValidToken(token)) return 9;
   HANDLE pipe=CreateOwnerPipe(name,inProcess); if(pipe==INVALID_HANDLE_VALUE) return 10;
   bool connected=false;
@@ -144,36 +214,109 @@ int ServeMode(const std::wstring& name, const std::string& token, bool inProcess
   if(!ReadFrame(pipe,&h,&payload,inProcess)||h.type!=static_cast<std::uint16_t>(Tf3RuntimeIpcType::hello)||h.correlation_id==0||!ExtractToken(payload,&supplied)||!ConstantTimeEqual(token,supplied)){CloseHandle(pipe);return 12;}
   std::array<unsigned char,16> session{}; if(!SystemFunction036(session.data(),static_cast<ULONG>(session.size()))){CloseHandle(pipe);return 13;}
   const bool observing = observer != nullptr && observer().active;
+  const bool gateAvailable = inProcess && gateProvider != nullptr && gateProvider->qualification_enabled &&
+    gateProvider->submit != nullptr && gateProvider->poll_notification != nullptr;
+  // A lease is deliberately meaningful only to the in-process qualified gate.
+  // Standalone diagnostic transport keeps its historical indefinite session
+  // behavior.  The initial hello is authenticated by the one-shot token and
+  // establishes the random session carried by all later control frames.
+  const bool gateLeaseEnabled = gateAvailable;
+  const ULONGLONG gateLeaseDuration = authenticatedSessionLeaseMs;
+  ULONGLONG gateLeaseDeadline = gateLeaseEnabled
+    ? GetTickCount64() + gateLeaseDuration : 0;
   const std::string hello = inProcess
     ? (observing
-      ? "{\"capabilities\":[\"transport.health\",\"session.bind\",\"qualification.inprocess.observer\"],\"engineObserver\":true,\"productionQualified\":false,\"guiFreezes\":false}"
-      : "{\"capabilities\":[\"transport.health\",\"session.bind\"],\"engineObserver\":false,\"productionQualified\":false,\"guiFreezes\":false"+
+      ? "{\"capabilities\":[\"transport.health\",\"session.bind\",\"qualification.inprocess.observer\"" +
+        std::string(gateAvailable ? ",\"qualification.inprocess.gate\",\"simulation.hold\",\"engine.halt\",\"simulation.gate-receipts.v1\",\"engine.detach\"" : "") +
+        "],\"engineObserver\":true,\"productionQualified\":" + std::string(gateProvider && gateProvider->production_qualified ? "true" : "false") + ",\"guiFreezes\":" + std::string(gateProvider && gateProvider->production_qualified ? "true" : "false") + "}"
+      : "{\"capabilities\":[\"transport.health\",\"session.bind\"" +
+        std::string(gateAvailable ? ",\"qualification.inprocess.gate\",\"simulation.hold\",\"engine.halt\",\"simulation.gate-receipts.v1\",\"engine.detach\"" : "") +
+        "],\"engineObserver\":false,\"productionQualified\":" + std::string(gateProvider && gateProvider->production_qualified ? "true" : "false") + ",\"guiFreezes\":false"+
         (observerStartStatus==0?std::string():",\"observerStartStatus\":"+std::to_string(observerStartStatus))+"}")
     : "{\"capabilities\":[\"transport.health\"],\"engineObserver\":false}";
   if(!SendFrame(pipe,Tf3RuntimeIpcType::hello_ack,h.correlation_id,session,hello,inProcess)){CloseHandle(pipe);return 14;}
-  bool held=false; std::vector<std::uint64_t> ids;
+  bool held=false;
+  // Correlation IDs are a strictly increasing per-connection sequence.  This
+  // single bounded high-water mark rejects both replay and out-of-order input
+  // without retaining an arbitrary 512-request lifetime cache.
+  std::uint64_t lastCorrelationId = h.correlation_id;
   std::string boundSession, boundRole;
-  while(ReadFrame(pipe,&h,&payload,inProcess)) {
+  while(true) {
+    if (gateLeaseEnabled && GetTickCount64() >= gateLeaseDeadline) {
+      // Returning makes the in-process runtime's existing cleanup path request
+      // a real engine halt unless a verified detach already happened.
+      DisconnectNamedPipe(pipe); CloseHandle(pipe); return 17;
+    }
+    // The native update boundary reports events only by polling. Never wait on
+    // a gate receipt here: a held simulation must still service ping/teardown.
+    if (gateAvailable) {
+      GateNotification notification{};
+      if (gateProvider->poll_notification(&notification)) {
+        const auto& request = notification.request;
+        const bool receipt = notification.kind == GateNotificationKind::receipt;
+        const auto json = receipt ? GateReceiptJson(request, notification.receipt) :
+          GateEventJson({notification.event, request.epoch, request.generation,
+                         request.correlation_id});
+        if (json.empty() || request.correlation_id == 0 ||
+            !SendFrame(pipe, receipt ? Tf3RuntimeIpcType::receipt : Tf3RuntimeIpcType::event,
+                       request.correlation_id, session, json, true)) break;
+        continue;
+      }
+      DWORD available = 0;
+      if (!PeekNamedPipe(pipe, nullptr, 0, nullptr, &available, nullptr)) break;
+      if (available == 0) { Sleep(2); continue; }
+    }
+    if (!ReadFrame(pipe,&h,&payload,inProcess)) break;
     if(!IsSession(h,session)||h.type!=static_cast<std::uint16_t>(Tf3RuntimeIpcType::control)||h.correlation_id==0){CloseHandle(pipe);return 15;}
-    bool duplicate=false; for(auto id:ids) if(id==h.correlation_id) duplicate=true;
+    const bool duplicate = h.correlation_id == lastCorrelationId;
+    const bool outOfOrder = h.correlation_id < lastCorrelationId;
+    if (duplicate || outOfOrder) {
+      const char* const code = duplicate ? "DUPLICATE_ID" : "OUT_OF_ORDER_ID";
+      if (!SendFrame(pipe, Tf3RuntimeIpcType::error, h.correlation_id, session,
+                     "{\"code\":\"" + std::string(code) + "\"}", inProcess)) break;
+      continue;
+    }
+    lastCorrelationId = h.correlation_id;
     std::string control, requestedSession, requestedRole;
     const bool binding = inProcess && ExtractBinding(payload, &requestedSession, &requestedRole);
-    if(duplicate||(!binding&&!IsSafeControl(payload,&control))) { if(!SendFrame(pipe,Tf3RuntimeIpcType::error,h.correlation_id,session,"{\"code\":\""+std::string(duplicate?"DUPLICATE_ID":"INVALID_CONTROL")+"\"}",inProcess))break; continue; }
-    ids.push_back(h.correlation_id); if(ids.size()>512){CloseHandle(pipe);return 16;}
+    GateRequest gateRequest{};
+    const bool gateControl = gateAvailable && ExtractGateRequest(payload, &gateRequest);
+    const bool safeControl = IsSafeControl(payload, &control);
+    if(!binding&&!gateControl&&!safeControl) {
+      if(!SendFrame(pipe,Tf3RuntimeIpcType::error,h.correlation_id,session,"{\"code\":\"INVALID_CONTROL\"}",inProcess))break;
+      continue;
+    }
+    // Semantic validation above, not merely a byte arriving on the pipe,
+    // refreshes the fail-safe lease.  Gate notifications are outbound-only and
+    // intentionally cannot keep a silent helper alive.
+    if (gateLeaseEnabled) gateLeaseDeadline = GetTickCount64() + gateLeaseDuration;
     if (binding) {
       if (!boundSession.empty()) {
         if(!SendFrame(pipe,Tf3RuntimeIpcType::error,h.correlation_id,session,"{\"code\":\"SESSION_ALREADY_BOUND\"}",inProcess))break;
         continue;
       }
       boundSession=requestedSession; boundRole=requestedRole;
-      const std::string receipt="{\"status\":\"accepted\",\"control\":\"bind\",\"boundSessionId\":\""+boundSession+"\",\"boundRole\":\""+boundRole+"\",\"engineObserver\":"+std::string(observing?"true":"false")+",\"productionQualified\":false}";
+      const std::string receipt="{\"status\":\"accepted\",\"control\":\"bind\",\"boundSessionId\":\""+boundSession+"\",\"boundRole\":\""+boundRole+"\",\"engineObserver\":"+std::string(observing?"true":"false")+",\"productionQualified\":"+std::string(gateProvider && gateProvider->production_qualified?"true":"false")+"}";
       if(!SendFrame(pipe,Tf3RuntimeIpcType::receipt,h.correlation_id,session,receipt,inProcess))break;
+      continue;
+    }
+    if (gateControl) {
+      gateRequest.correlation_id = h.correlation_id;
+      if (boundSession.empty()) {
+        if (!SendFrame(pipe, Tf3RuntimeIpcType::error, h.correlation_id, session,
+                       "{\"code\":\"SESSION_NOT_BOUND\"}", true)) break;
+        continue;
+      }
+      if (!gateProvider->submit(gateRequest)) {
+        if (!SendFrame(pipe, Tf3RuntimeIpcType::error, h.correlation_id, session, "{\"code\":\"GATE_REJECTED\"}", true)) break;
+        continue;
+      }
       continue;
     }
     if(control=="hold")held=true; if(control=="release")held=false;
     const std::string state=control=="halt"?"transport_halt_not_engine_halt":(held?"held":"running");
     std::string receipt="{\"status\":\"accepted\",\"control\":\""+control+"\",\"state\":\""+state+"\",\"engineObserver\":"+std::string(observing?"true":"false");
-    if(control=="ping"&&observing){const auto observation=observer();receipt+=",\"observationHits\":"+std::to_string(observation.hits)+",\"observationThread\":"+std::to_string(observation.owner_thread)+",\"observationActive\":"+std::string(observation.active?"true":"false")+",\"observationCrossThread\":"+std::string(observation.cross_thread?"true":"false")+",\"observationSaturated\":"+std::string(observation.saturated?"true":"false");}
+    if(control=="ping"&&observing){const auto observation=observer();receipt+=",\"observationHits\":"+std::to_string(observation.hits)+",\"observationMinimumStackHeadroom\":"+std::to_string(observation.minimum_stack_headroom)+",\"observationThread\":"+std::to_string(observation.owner_thread)+",\"observationCfgFlags\":"+std::to_string(observation.cfg_flags)+",\"observationCetFlags\":"+std::to_string(observation.cet_flags)+",\"observationCfgKnown\":"+std::string(observation.cfg_known?"true":"false")+",\"observationCetKnown\":"+std::string(observation.cet_known?"true":"false")+",\"observationActive\":"+std::string(observation.active?"true":"false")+",\"observationCrossThread\":"+std::string(observation.cross_thread?"true":"false")+",\"observationSaturated\":"+std::string(observation.saturated?"true":"false");}
     receipt+="}";
     if(!SendFrame(pipe,Tf3RuntimeIpcType::receipt,h.correlation_id,session,receipt,inProcess))break;
     if(control=="shutdown"){
@@ -186,8 +329,15 @@ int ServeMode(const std::wstring& name, const std::string& token, bool inProcess
   }
   DisconnectNamedPipe(pipe); CloseHandle(pipe); return 0;
 }
-int Serve(const std::wstring& name, const std::string& token) { return ServeMode(name, token, false, nullptr, 0); }
+int Serve(const std::wstring& name, const std::string& token) { return ServeMode(name, token, false, nullptr, 0, nullptr, 0); }
 int ServeInProcess(const std::wstring& name, const std::string& token,
                    RuntimeObservationProvider observer,
-                   std::uint32_t observerStartStatus) { return ServeMode(name, token, true, observer, observerStartStatus); }
+                   std::uint32_t observerStartStatus,
+                   const GateProvider* gateProvider,
+                   std::uint32_t authenticatedSessionLeaseMs) {
+  if (gateProvider != nullptr && gateProvider->qualification_enabled &&
+      (authenticatedSessionLeaseMs < 100 || authenticatedSessionLeaseMs > 30000)) return 18;
+  return ServeMode(name, token, true, observer, observerStartStatus, gateProvider,
+                   authenticatedSessionLeaseMs);
+}
 } // namespace tf3runtimeipc

@@ -1,5 +1,172 @@
 # Native-integration review handoff — 21 September 2026
 
+## Authoritative current handoff — 22 September 2026
+
+This section supersedes older status statements below; the remainder is retained
+as chronological evidence. The full multiplayer goal is active and incomplete.
+Readiness is approximately **5.3/10**: real TF3 simulation hold/release/halt and
+controlled detach now work, but no native gameplay command has yet completed the
+capture → suppression → host order → exactly-once replay path.
+
+### What became functional
+
+- `native/production_boundary_gate.cpp` now owns the exact-build post-update
+  byte at RVA `0x159581`, preserves full enabled XSTATE outside VEH, holds the
+  simulation owner, consumes one release permit, fail-stops, restores its byte,
+  and confirms detach. Activation is gated by executable SHA-256
+  `a4843accd706b9c476c645860e2b68f6488c9b89f33ef97efe00cffb74a47be5`,
+  exact bytes, unwind/EHCONT and live mitigation checks.
+- `native/inprocess_runtime.cpp` exposes that gate through
+  `native/runtime_ipc.cpp`. The IPC worker remains responsive while the engine
+  owner is held and publishes correlated typed receipts/events for hold,
+  release, halt and detach.
+- `src/native-runtime-client.mjs`, `src/native-host-join.mjs`, and
+  `src/production-engine-binding-provider.mjs` carry the production
+  qualification and typed gate contract into the retained Host/Join seams.
+  Admission fails closed without `simulation.hold`, `engine.halt`, typed gate
+  receipts and an authenticated session binding. Invalid/unmatched terminal
+  events, malformed receipts, timeouts and disconnects now revoke readiness,
+  reject every waiter and close the native endpoint exactly once. The engine
+  adapter requests a typed generation-zero terminal halt and accepts it only
+  after both its receipt and correlated `terminal_parked` event validate.
+  Ordinary authenticated Host and Join attachments now own a serialized adapter
+  poll loop, so mailbox receipts and deadlines are serviced outside test
+  harnesses. This is integration of engine control, not yet integration of
+  gameplay execution.
+
+The live end-to-end control path is:
+
+`Stage-NativeLoader.ps1` → application-local `native/winhttp_proxy.cpp` →
+one-shot `native/native_session_handoff.cpp` → `native/inprocess_runtime.cpp` →
+`native/production_boundary_gate.cpp` → `native/runtime_ipc.cpp` →
+`src/native-runtime-client.mjs`. Host/Join consumes the same client through
+`src/native-host-join.mjs` and `src/production-engine-binding-provider.mjs`.
+
+### Live qualification evidence
+
+The clean production-qualified disposable-world run reported
+`productionQualified:true`, `engineObserver:true`, `guiFreezes:true`, and the
+capabilities `simulation.hold`, `engine.halt`, `simulation.gate-receipts.v1`
+and `engine.detach`. Native hits 5→135 correlated with bridge tick/update
+57134/2846→57265/2977 (native delta 130; tick and update deltas 131). The gate
+then held the real world at tick/update 57266/2978, consumed one release and
+re-held at 57267/2979, restored its owned byte, detached, and the world resumed
+at 57268/2980. The owner was thread 12412, minimum observed stack headroom was
+324704 bytes, CFG policy was known, CET flags were 256, and no cross-thread
+observation was reported. The game remained responsive after detach. The exact
+test process was stopped and `Unstage-NativeLoader.ps1` removed only the three
+hash-matched loader files, one-shot handoff and manifest; installed game
+binaries were not overwritten.
+
+A final direct terminal-halt run correlated native hits 5→136 with bridge
+tick/update 57134/2846→57265/2977 (all three deltas 131), on owner thread
+16928 with 326160 bytes minimum stack headroom and known CFG/CET policy. From
+the initial running generation **0**, it terminal-parked the real world at
+tick/update **57267/2979**. A later authenticated ping proved native control
+traffic remained live, while the native boundary count and bridge tick/update
+remained unchanged. The typed receipt was `halt_requested` and the independently
+delivered event was `terminal_parked`, both carrying the same epoch/generation.
+This exercises the same running→halt coordinate used by the production adapter,
+not the weaker held→halt path. The exact TF3 process was then stopped; final
+inspection found zero TF3 processes and zero staged loader files. This is direct
+single-game engine-halt evidence, not a two-instance failure/recovery result.
+
+The native pipe now has a 15-second authenticated session lease for qualified
+gates. Host/Join refresh it with a non-overlapping one-second heartbeat even
+while the simulation owner is held; connected silence makes the native server
+return and the runtime's existing cleanup request a real halt. Correlation IDs
+use a constant-space monotonic high-water replay barrier rather than the former
+512-request lifetime cache. Owned native tests crossed 600 requests and verified
+duplicate, old-ID and connected-silence failure paths.
+
+This qualifies the exact current build's bounded update gate. It does not prove
+every speed/batch path, semantic command interception, command object ownership,
+two-instance agreement, or recovery. The TF3 continuation has no EHCONT table
+entry only when the image advertises no EHCONT table; that accepted legacy case
+and the exact continuation semantics remain review points. Stack headroom is
+checked before the first controlled hold rather than before passive startup.
+
+### Command boundary and TF2 baseline
+
+Fresh static inspection of the hash-matching TF3 executable identifies factory
+`0x9EEE60` (`VehicleSetStoppedByUser`) as the strongest capture candidate and
+Add `0x9D3120` as the matching admission/suppression candidate. Add moves the
+source into a `0x38`-stride vector, constructs a reference-counted 16-byte
+output pair (`0x3035600`/`0x30355A0`), and owns destruction of source, callback
+and progress inputs. Its output destructor at `0x3035650` tolerates null, but
+the stock vehicle caller's null-result/callback expectations are not qualified.
+No skip or return patch is authorized from this evidence.
+
+The TF2 reference remains at `9f99097cb05333db18015da8296b7356c76a1612`.
+Its `native/src/slice/add_hook.inl` supports factory/Add correlation,
+output-handle initialization and caller-specific callback handling as design
+evidence. TF2 explicitly does not implement vehicle stop/start replication, so
+there is no command implementation to transplant. No TF2 code has been copied.
+If compatible TF2 code is later adapted, retain its MIT copyright/licence text
+and attribution in third-party notices alongside TalCo's PolyForm
+Noncommercial licence.
+
+### Verification accounting
+
+- Clean unrestricted suite: **905 discovered, 875 passed, 0 failed, 30
+  skipped**, 53.724 seconds. An intermediate integration run failed 12 cases:
+  one obsolete test double lacked the newly mandatory `poll`/`close` contract,
+  and 11 owned-control cases rejected a stale native fixture before execution.
+  The test double was corrected, the fixture rebuilt, its 11 real native cases
+  passed, and the complete clean suite above then passed. The independent reviewer previously reran its
+  then-current tree and obtained **756/756**; **478/478 was an incomplete TAP
+  count**, not the review result.
+- Production boundary, integrated gate, cross-image continuation, in-process
+  control/IPC, runtime IPC, runtime loader and WinHTTP proxy builds passed their
+  MSVC x64 `/W4 /WX` builds and applicable smoke tests.
+- A separate attempt deliberately built the quarantined legacy debugger
+  observer/controller, activating 29 tests normally skipped. It produced five
+  teardown failures (three controller, two observer; Win32 121/1067) and is not
+  counted as a green suite. Those reproducible debugger executables were removed
+  afterward; the production in-process gate does not use that debugger path.
+- Single-game verified: exact-build load, authenticated bind, real boundary
+  correlation, hold, exactly-one update release, re-hold, detach/resume, and a
+  direct running-generation-zero terminal park with control traffic still live.
+- Isolated/model-tested only: coordinator ordering, duplicate/deadline fences,
+  save transfer, checkpoint schemas, company/economy adapters and recovery
+  state machines.
+- Not performed: two real TF3 instances, cross-machine, four-player, LAN/Internet
+  gameplay, integrated recovery and any native replicated gameplay action.
+
+### Supported scope, remaining implementation and acceptance
+
+No gameplay family is yet supported for general multiplayer. Road, depot, stop,
+line and vehicle modules below are diagnostic/model work; rail, shipping,
+aviation, terrain and every other action family are unsupported. Required
+implementation remains: qualify command lifetime and safe suppression; add a
+bounded semantic native capture event; route host and clients through the same
+authoritative sequence; resolve local identities; execute and observe exactly
+once; run a two-instance no-input baseline; connect the six-domain checkpoint
+producer to coordinated save/reload recovery; then complete and verify the road
+loop, ownership, charges, costs and income.
+
+There is no current external blocker to that implementation. A second physical
+machine and port-forwarded network are unavailable for later acceptance, so
+cross-machine/four-player/Internet gates must remain open unless suitable access
+becomes available.
+
+The consolidated current acceptance procedure is: build every production
+native component; stage only with the hash-gated scripts while TF3 is closed;
+start `tools/live-inprocess-loader-check.mjs` with the disposable bridge once
+with `--gate-detach` and once with `--gate-halt`; manually select only the named
+disposable save and Start Game; require the exact production handshake plus
+held/re-held/resumed evidence and separately stable terminal-park evidence;
+close the exact disposable process; run `Unstage-NativeLoader.ps1`; then run
+`npm run check` unrestricted. Full-product acceptance must extend this same
+procedure to two isolated TF3 instances and finally four/cross-machine/Internet;
+those latter steps are not yet runnable as a functioning product.
+
+Branch is `main`; private remote is
+`https://github.com/TaliEsch/talco-tf3-multiplayer.git`. Review should focus on
+VEH/XSTATE/unwind correctness, accepted EHCONT-absent continuation policy,
+gate/IPC epoch transitions, shutdown-versus-halt behavior, and the unresolved
+Add ownership/callback contract before any suppression experiment.
+
 ## Correlated live boundary and owned control — 22 September 2026
 
 The full-readiness goal remains active. A corrected disposable-world run now

@@ -66,17 +66,21 @@ The TF2 reference root LICENSE is MIT, copyright 2026 silver2127. There is no co
 
 The matrix is an assignment and gap map. It is not evidence that the listed TF3 capabilities work.
 
-## Current evidence correction and critical path (through `95d79c8`)
+## Current evidence correction and critical path (22 September 2026)
 
 The older TF3 cells above predate the latest in-process observer and live
 checkpoint work. Read them with these current facts:
 
-- `native/inprocess_post_observer.cpp` is now exact-image/site gated and live-game
-  verified at post-iteration RVA `0x159581`. It reported one hit on one TF3
-  thread through `native/runtime_ipc.cpp`, restored the original byte on
-  authenticated shutdown and left the disposable world running. This qualifies
-  read-only in-process observation only: the counter is intra-batch, not a
-  canonical world update, and hold/halt/command capabilities remain absent.
+- `native/production_boundary_gate.cpp` now owns the exact-image/site-gated
+  post-update RVA `0x159581`. A production-qualified disposable run correlated
+  it with the public bridge clock, held tick/update 57266/2978, released exactly
+  one update and re-held at 57267/2979, then restored/detached and resumed at
+  57268/2980 while authenticated `native/runtime_ipc.cpp` traffic remained live.
+  A separate live run went directly from running generation zero to terminal
+  park at 57267/2979; native and bridge clocks remained fixed while a later
+  authenticated ping succeeded. This
+  qualifies bounded single-game hold/release/halt/detach on the current
+  build; it does not qualify any gameplay command or two-instance agreement.
 
 - `native/runtime_observer.cpp` and `native/runtime_controller.cpp`, with `native/runtime_ipc*`, implement a TF3 exact-build observation/control path. It is not a qualified gameplay command hook. `docs/native-integration.md` records the disassembly evidence: candidate `GameSim::Step` entry `0x1593b0` may loop over multiple updates, so its entry count is not a canonical clock.
 - `docs/pause-barrier-test.md` records user-confirmed local pause/event/resume at update 2879 and exact hold at 2904; `docs/vehicle-hold-test.md` records an owned vehicle action inside a local hold. These are solo diagnostics, not synchronized peers, global input veto, or multiplayer command execution.
@@ -85,7 +89,12 @@ checkpoint work. Read them with these current facts:
 
 Three implementation assignments, in critical-path order:
 
-1. Qualify the exact-build TF3 canonical update unit and command admission/object lifetime; produce immutable intent, origin suppression, fail-closed unknown-outcome handling and safe teardown. Reuse the current observer/controller foothold, not TF2 ABI or offsets.
+1. Complete command admission/object-lifetime qualification around TF3 factory
+   `0x9EEE60` and Add `0x9D3120`; its source/callback/progress cleanup and
+   reference-counted output contract must be owned-tested before suppression.
+   Produce immutable intent, confirmed origin suppression, fail-closed
+   unknown-outcome handling and safe teardown. Reuse the production boundary
+   gate, not TF2 ABI or offsets.
 2. Connect that intent to Host/Join coordinator and native IPC: host-action parity, per-instance identity/ownership checks, sequence/dedup barriers, scheduled apply and correlated receipts. A timeout or ambiguous result halts admission without retry.
 3. Populate real canonical snapshot domains and compare two instances at equal updates; then complete one company-bound road-transport loop and checkpoint recovery before broadening supported actions. Local hold/checkpoint evidence does not replace this comparison.
 

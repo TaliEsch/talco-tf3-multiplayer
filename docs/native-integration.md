@@ -1,5 +1,35 @@
 # Native integration track — 21 September 2026
 
+## Current correction — 22 September 2026
+
+The exact-build production boundary adapter is now connected. A disposable TF3
+run authenticated through `runtime_ipc`, held the real world at update 2978,
+released exactly one update to 2979, re-held, restored its owned byte, detached
+and resumed at 2980. `native/inprocess_runtime.cpp` advertises the production
+gate only after the exact image/site/mitigation checks succeed, and the retained
+Host/Join seams require its hold/halt/typed-receipt capabilities.
+
+A final live run exercised the production adapter's direct running-generation-
+zero terminal path rather than detachable or held→halt control. Native
+hits and the bridge clock first correlated for 131 updates; the gate then
+terminal-parked at tick/update 57267/2979. Native hits, bridge tick and
+bridge update stayed fixed while a later authenticated ping succeeded. The IPC
+returned a correlated `halt_requested` receipt followed by a distinct
+`terminal_parked` event. Host/Join now closes admission on malformed,
+uncorrelated, timed-out or disconnected gate traffic, and the shared engine
+adapter uses that typed terminal path instead of the legacy diagnostic halt.
+Authenticated Host/Join attachments continuously poll their adapters and send
+one-second native heartbeats. The native gate has a 15-second connected-silence
+lease and a constant-space monotonic correlation barrier, so a hung controller
+cannot keep an advancing game admitted and long sessions no longer end after
+512 controls.
+
+This does not qualify gameplay interception or whole-world synchronization.
+Factory `0x9EEE60` and Add `0x9D3120` are the current vehicle stop/start
+capture/admission candidates; Add's source, callback, progress and
+reference-counted output ownership remain unresolved. Older statements below
+that no native adapter is connected describe the earlier milestone.
+
 ## Objective and scope
 
 Deliver up to four separate-company players, with host-ordered commands and

@@ -26,7 +26,9 @@ test('join bootstrap downloads and qualifies the exact save, then subscribes bef
   const c = connection(), order = [], received = [];
   const bootstrap = createJoinEngineBootstrap({ connection: c, modulePath: 'C:/qualified.mjs',
     downloadSave: async expected => { order.push('download'); assert.deepEqual(expected, save); return { ...save }; },
-    loadFactory: async options => { order.push('provider'); assert.equal('secret' in options, false); return loader(() => ({ receive(kind) { received.push(kind); return true; } }))(options); },
+    loadFactory: async options => { order.push('provider'); assert.equal('secret' in options, false); return loader(() => ({
+      receive(kind) { received.push(kind); return true; }, poll() {}, close() {},
+    }))(options); },
     onAdapter() { order.push('adapter'); },
   });
   const attachment = await bootstrap.admitted(admitted);
@@ -67,7 +69,7 @@ test('provider failure and repeat admission fail closed without producing a seco
 
 test('a duplicate admitted frame fails closed even after the first readiness message', async () => {
   const c = connection(), bootstrap = createJoinEngineBootstrap({ connection: c, modulePath: 'C:/qualified.mjs',
-    downloadSave: async () => ({ ...save }), loadFactory: loader(() => ({ receive() { return true; } })),
+    downloadSave: async () => ({ ...save }), loadFactory: loader(() => ({ receive() { return true; }, poll() {}, close() {} })),
   });
   await bootstrap.admitted(admitted);
   await assert.rejects(bootstrap.admitted(admitted), /ALREADY_STARTED/);

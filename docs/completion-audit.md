@@ -1,5 +1,71 @@
 # Completion audit against the build prompt
 
+## Production boundary-control audit — 22 September 2026
+
+The full objective remains incomplete and active. This batch crosses the native
+control threshold but not the multiplayer-action threshold.
+
+Implemented and single-game verified:
+
+- exact-hash/site/mitigation-gated in-process TF3 boundary ownership;
+- authenticated production IPC and Host/Join capability admission;
+- real hold with control traffic alive, exactly-one boundary release, re-hold,
+  owned-byte restoration, detach and resumed world updates;
+- a separate real direct running-generation-zero terminal halt at tick/update
+  57267/2979 with correlated
+  `halt_requested`/`terminal_parked` evidence, responsive authenticated IPC and
+  no native or bridge-clock advance during the observation window;
+- fail-closed Host/Join gate cleanup for invalid/unmatched events, malformed
+  receipts, timeouts and disconnects, plus typed terminal halt from the shared
+  engine adapter without retrying an unknown outcome;
+- serialized production Host/Join adapter polling, a one-second authenticated
+  heartbeat, a native 15-second connected-silence lease and constant-space
+  monotonic correlation replay protection without a 512-request session cap;
+- live production handshake `engineObserver:true`,
+  `productionQualified:true`, `guiFreezes:true`;
+- bridge evidence: held tick/update 57266/2978, re-held 57267/2979 and resumed
+  57268/2980, with no cross-thread observation;
+- reversible staging and hash-matched cleanup without replacing installed game
+  binaries or modifying an existing user save.
+
+Implemented but isolated/model-tested only: host ordering (including host-local),
+duplicate/deadline/unknown-outcome fences, save transfer, checkpoint schemas,
+six-domain public-state canonicalization, company/economy adapters and recovery
+state machines. None of those substitutes for a real second TF3 process.
+
+Unimplemented or unverified: stock command suppression and lifetime, semantic
+native gameplay IPC, exactly-once replay in TF3, two-instance agreement,
+integrated game-side checkpoint recovery, complete road gameplay, synchronized
+separate-company costs/revenue, cross-machine, four-player and port-forwarded
+Internet acceptance. No gameplay family is currently released as synchronized.
+
+The strongest command leads are factory `0x9EEE60` and Add `0x9D3120` on the
+qualified build. Static inspection proves Add owns source/callback/progress
+cleanup and a reference-counted output handle; it does not prove a safe
+cancellation result. Therefore no guessed suppression hook was activated.
+
+Verification:
+
+- authoritative clean suite: **905 tests, 875 passed, 0 failed, 30 skipped** in
+  53.724 seconds. The preceding integration run exposed one obsolete adapter
+  test double and 11 deliberately freshness-gated native fixture cases; after
+  updating the test double and rebuilding the fixture, its 11 native cases and
+  the complete suite passed;
+- all production-gate, integrated-gate, continuation, IPC, runtime-loader and
+  proxy builds/smokes passed;
+- an explicitly separate run activated normally skipped legacy debugger tests
+  and produced five teardown failures (three controller, two observer; Win32
+  121/1067). That failed run is retained as negative evidence and is not counted
+  as green;
+- the historical independent reviewer obtained **756/756**, not 478/478. The
+  latter was an incomplete visible TAP count.
+
+Evidence tier: single-game native control and terminal halt are verified; two-instance,
+cross-machine and product acceptance are open. There is no present external
+blocker to command-boundary implementation. Honest readiness is **5.3/10**.
+Older sections below are a chronological audit trail and may describe earlier
+capability/test counts; they do not override this section.
+
 ## Correlated-boundary continuation audit — 22 September 2026
 
 The objective remains active and incomplete. The current batch adds three

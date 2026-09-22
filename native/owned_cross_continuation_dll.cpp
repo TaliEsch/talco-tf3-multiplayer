@@ -15,6 +15,7 @@ extern const UnwindCase OwnedCrossCases[];
 extern const DWORD64 OwnedCrossCaseCount;
 void OwnedCrossClobber();
 DWORD64 OwnedCrossXcr0 = 0;
+unsigned char* OwnedCrossOwnerXstate = nullptr;
 DWORD OwnedCrossScratchMxcsr = 0x5f80;
 }
 namespace {
@@ -23,33 +24,82 @@ OwnedCrossConfig config{};
 std::atomic<DWORD> owner{0}, entries{0}, returns{0}, bypasses{0};
 std::atomic<bool> in_flight{false}, parked{false}, stopped{false}, native_fault{false};
 std::atomic<bool> force_fault{false};
+std::atomic<bool> owner_xstate_external{false};
 std::atomic<DWORD64> original_rsp{0};
 bool started = false, pinned = false, entry_ehcont = false, resume_ehcont = false;
+OwnedCrossEhContinuationState entry_ehcont_state = OwnedCrossEhContinuationState::table_absent;
+OwnedCrossEhContinuationState resume_ehcont_state = OwnedCrossEhContinuationState::table_absent;
 DWORD cfg_flags = 0, cet_flags = 0, ip_flags = 0;
 std::size_t unwind_passed = 0, unwind_examined = 0;
+DWORD gate_stack_bytes = 0, owner_xstate_bytes = 0;
+bool ehcont_parser_cases = false;
 static_assert(std::atomic<DWORD>::is_always_lock_free);
 static_assert(std::atomic<DWORD64>::is_always_lock_free);
 static_assert(std::atomic<bool>::is_always_lock_free);
 
-bool HasEhContinuation(HMODULE module, const void* target) {
+OwnedCrossEhContinuationState ParseEhContinuation(HMODULE module, const void* target) {
     const auto base = reinterpret_cast<std::uintptr_t>(module);
     const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
     const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS64*>(base + dos->e_lfanew);
     const auto dir = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_LOAD_CONFIG];
     if (dir.Size < offsetof(IMAGE_LOAD_CONFIG_DIRECTORY64, GuardEHContinuationCount) + sizeof(ULONGLONG))
-        return false;
+        return OwnedCrossEhContinuationState::table_absent;
     const auto* lc = reinterpret_cast<const IMAGE_LOAD_CONFIG_DIRECTORY64*>(base + dir.VirtualAddress);
-    if (!(lc->GuardFlags & IMAGE_GUARD_EH_CONTINUATION_TABLE_PRESENT) ||
-        lc->GuardEHContinuationCount == 0 || lc->GuardEHContinuationCount > 4096) return false;
+    if (!(lc->GuardFlags & IMAGE_GUARD_EH_CONTINUATION_TABLE_PRESENT))
+        return OwnedCrossEhContinuationState::table_absent;
+    // A declared table with zero entries is deliberately not a legacy image:
+    // Windows treats it as allowing no continuation targets.  Oversized or
+    // internally inconsistent declared metadata must likewise fail closed.
+    if (lc->GuardEHContinuationCount == 0 || lc->GuardEHContinuationCount > 4096 ||
+        lc->GuardEHContinuationTable == 0)
+        return OwnedCrossEhContinuationState::target_missing;
     const auto* table = reinterpret_cast<const unsigned char*>(lc->GuardEHContinuationTable);
     const auto stride = sizeof(DWORD) + (lc->GuardFlags >> 28);
     const auto rva = reinterpret_cast<std::uintptr_t>(target) - base;
     for (ULONGLONG i = 0; i < lc->GuardEHContinuationCount; ++i) {
         DWORD value = 0;
         std::memcpy(&value, table + i * stride, sizeof(value));
-        if (value == rva) return true;
+        if (value == rva) return OwnedCrossEhContinuationState::target_present;
     }
-    return false;
+    return OwnedCrossEhContinuationState::target_missing;
+}
+bool EhContinuationParserCases() {
+    // Owned synthetic headers exercise the distinction without mutating an image.
+    struct Image {
+        IMAGE_DOS_HEADER dos;
+        IMAGE_NT_HEADERS64 nt;
+        IMAGE_LOAD_CONFIG_DIRECTORY64 load;
+        DWORD target;
+    } image{};
+    image.dos.e_lfanew = offsetof(Image, nt);
+    auto& dir = image.nt.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_LOAD_CONFIG];
+    dir.VirtualAddress = offsetof(Image, load);
+    dir.Size = sizeof(image.load);
+    const auto module = reinterpret_cast<HMODULE>(&image);
+    const auto target = &image.target;
+    using State = OwnedCrossEhContinuationState;
+    if (ParseEhContinuation(module, target) != State::table_absent) return false;
+    image.load.GuardFlags = IMAGE_GUARD_EH_CONTINUATION_TABLE_PRESENT;
+    if (ParseEhContinuation(module, target) != State::target_missing) return false;
+    image.load.GuardEHContinuationCount = 1;
+    if (ParseEhContinuation(module, target) != State::target_missing) return false;
+    image.load.GuardEHContinuationTable = reinterpret_cast<ULONGLONG>(&image.target);
+    if (ParseEhContinuation(module, target) != State::target_missing) return false;
+    image.target = offsetof(Image, target);
+    if (ParseEhContinuation(module, target) != State::target_present) return false;
+    image.load.GuardEHContinuationCount = 0;
+    if (ParseEhContinuation(module, target) != State::target_missing) return false;
+    image.load.GuardEHContinuationCount = 4097;
+    return ParseEhContinuation(module, target) == State::target_missing;
+}
+bool OwnerXstateCommitted() {
+    MEMORY_BASIC_INFORMATION memory{};
+    return OwnedCrossOwnerXstate &&
+        (reinterpret_cast<std::uintptr_t>(OwnedCrossOwnerXstate) & 63) == 0 &&
+        VirtualQuery(OwnedCrossOwnerXstate, &memory, sizeof(memory)) == sizeof(memory) &&
+        memory.AllocationBase == OwnedCrossOwnerXstate && memory.Type == MEM_PRIVATE &&
+        memory.State == MEM_COMMIT && memory.Protect == PAGE_READWRITE &&
+        memory.RegionSize >= owner_xstate_bytes;
 }
 bool IsOwnedImageCode(HMODULE module, const void* address) {
     MEMORY_BASIC_INFORMATION memory{};
@@ -93,8 +143,8 @@ LONG CALLBACK Redirect(EXCEPTION_POINTERS* pointers) noexcept {
     return EXCEPTION_CONTINUE_SEARCH;
 }
 bool UnwindCases(std::size_t& passed, std::size_t& examined) {
-    alignas(16) std::array<DWORD64, 2200> stack{};
-    auto* body = stack.data() + 2100;
+    alignas(16) std::array<DWORD64, 96> stack{};
+    auto* body = stack.data() + 64;
     body[0x58 / 8] = 0x1122334455667788;
     body[0x30 / 8] = 15;
     body[0x38 / 8] = 13;
@@ -111,6 +161,11 @@ bool UnwindCases(std::size_t& passed, std::size_t& examined) {
         // Never treat CALL displacement bytes as possible instruction PCs.
         {
             const auto pc = OwnedCrossCases[i].pc;
+            const auto depth = OwnedCrossCases[i].depth;
+            if (depth > 0x100 || pc < reinterpret_cast<DWORD64>(&OwnedCrossGate) ||
+                pc >= reinterpret_cast<DWORD64>(&OwnedCrossGateEnd) ||
+                (i != 0 && pc <= OwnedCrossCases[i - 1].pc)) return false;
+            if (depth > gate_stack_bytes) gate_stack_bytes = static_cast<DWORD>(depth);
             CONTEXT context{};
             context.ContextFlags = CONTEXT_ALL;
             context.Rip = pc;
@@ -135,11 +190,16 @@ bool UnwindCases(std::size_t& passed, std::size_t& examined) {
                 OwnedCrossCases[i].depth << "\n";
         }
     }
-    return examined != 0 && passed == examined;
+    return examined == 44 && passed == examined && gate_stack_bytes == 0x100;
 }
 }
 
 extern "C" void OwnedCrossHelper() {
+    const auto* tib = reinterpret_cast<const NT_TIB*>(NtCurrentTeb());
+    const auto buffer = reinterpret_cast<std::uintptr_t>(OwnedCrossOwnerXstate);
+    const auto limit = reinterpret_cast<std::uintptr_t>(tib->StackLimit);
+    const auto base = reinterpret_cast<std::uintptr_t>(tib->StackBase);
+    owner_xstate_external.store(buffer + owner_xstate_bytes <= limit || buffer >= base);
     if (force_fault.load()) {
         RaiseException(kOwnedFault, 0, 0, nullptr);
         return;
@@ -158,6 +218,8 @@ extern "C" void OwnedCrossHelper() {
 extern "C" __declspec(dllexport) BOOL OwnedCrossStart(const OwnedCrossConfig* input) {
     if (started || !input || input->size != sizeof(OwnedCrossConfig) ||
         input->executable != GetModuleHandleW(nullptr) || !input->entered || !input->release ||
+        (input->resume_policy != OwnedCrossResumePolicy::require_ehcont &&
+         input->resume_policy != OwnedCrossResumePolicy::require_legacy_no_table) ||
         !IsOwnedImageCode(input->executable, input->trap) ||
         !IsOwnedImageCode(input->executable, input->continuation) ||
         reinterpret_cast<std::uintptr_t>(input->continuation) != reinterpret_cast<std::uintptr_t>(input->trap) + 1 ||
@@ -179,12 +241,31 @@ extern "C" __declspec(dllexport) BOOL OwnedCrossStart(const OwnedCrossConfig* in
     HMODULE self = nullptr;
     if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
             reinterpret_cast<LPCWSTR>(&OwnedCrossGate), &self)) return FALSE;
-    entry_ehcont = HasEhContinuation(self, &OwnedCrossGate);
-    resume_ehcont = HasEhContinuation(input->executable, input->continuation);
-    if (!entry_ehcont || !resume_ehcont || !UnwindCases(unwind_passed, unwind_examined)) return FALSE;
+    entry_ehcont_state = ParseEhContinuation(self, &OwnedCrossGate);
+    resume_ehcont_state = ParseEhContinuation(input->executable, input->continuation);
+    entry_ehcont = entry_ehcont_state == OwnedCrossEhContinuationState::target_present;
+    resume_ehcont = resume_ehcont_state == OwnedCrossEhContinuationState::target_present;
+    const bool resume_policy_met = input->resume_policy == OwnedCrossResumePolicy::require_ehcont
+        ? resume_ehcont
+        : resume_ehcont_state == OwnedCrossEhContinuationState::table_absent;
+    ehcont_parser_cases = EhContinuationParserCases();
+    if (!entry_ehcont || !resume_policy_met || !ehcont_parser_cases ||
+        !UnwindCases(unwind_passed, unwind_examined)) return FALSE;
     if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_PIN,
             reinterpret_cast<LPCWSTR>(&OwnedCrossGate), &self)) return FALSE;
     pinned = true;
+    // One owner at a time; retain this allocation with the pinned DLL until exit.
+    // Commit and touch all enabled state bytes before installing the handler.
+    // Neither VEH nor gate allocates, zeros a large area, or probes extra pages.
+    if (!OwnedCrossOwnerXstate) {
+        owner_xstate_bytes = static_cast<DWORD>(cpu[1]);
+        OwnedCrossOwnerXstate = static_cast<unsigned char*>(VirtualAlloc(nullptr,
+            owner_xstate_bytes, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
+        if (!OwnedCrossOwnerXstate) return FALSE;
+        for (DWORD i = 0; i < owner_xstate_bytes; ++i)
+            static_cast<volatile unsigned char*>(OwnedCrossOwnerXstate)[i] = 0;
+    }
+    if (!OwnerXstateCommitted()) return FALSE;
     config = *input;
     OwnedCrossXcr0 = input->xcr0;
     if (!AddVectoredExceptionHandler(1, Redirect)) return FALSE;
@@ -219,6 +300,9 @@ extern "C" __declspec(dllexport) BOOL OwnedCrossRead(OwnedCrossReport* output) {
         in_flight.load() ? 1u : 0u, parked.load() ? 1u : 0u, stopped.load() ? 1u : 0u,
         pinned ? 1u : 0u, native_fault.load() ? 1u : 0u,
         static_cast<DWORD>(unwind_passed), static_cast<DWORD>(unwind_examined),
-        entry_ehcont ? 1u : 0u, resume_ehcont ? 1u : 0u, cfg_flags, cet_flags, ip_flags};
+        entry_ehcont ? 1u : 0u, resume_ehcont ? 1u : 0u, cfg_flags, cet_flags, ip_flags,
+        entry_ehcont_state, resume_ehcont_state, gate_stack_bytes, owner_xstate_bytes,
+        OwnerXstateCommitted() ? 1u : 0u, owner_xstate_external.load() ? 1u : 0u,
+        ehcont_parser_cases ? 1u : 0u, reinterpret_cast<DWORD64>(OwnedCrossOwnerXstate)};
     return TRUE;
 }

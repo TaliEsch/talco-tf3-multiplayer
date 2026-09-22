@@ -28,6 +28,11 @@ std::atomic<bool> cross_thread{false};
 std::atomic<bool> saturated{false};
 std::atomic<std::uint32_t> owner_thread{0};
 std::atomic<std::uint64_t> hits{0};
+std::atomic<std::uint64_t> minimum_stack_headroom{(std::numeric_limits<std::uint64_t>::max)()};
+std::atomic<std::uint32_t> cfg_flags{0};
+std::atomic<std::uint32_t> cet_flags{0};
+std::atomic<bool> cfg_known{false};
+std::atomic<bool> cet_known{false};
 PVOID handler = nullptr;
 DWORD original_protection = 0;
 bool attempted = false;
@@ -75,12 +80,25 @@ LONG CALLBACK OnException(EXCEPTION_POINTERS* pointers) noexcept {
         if (owner_thread.load(std::memory_order_relaxed) != current) {
             cross_thread.store(true, std::memory_order_relaxed);
         } else {
+            const auto stack_limit = static_cast<std::uintptr_t>(
+                __readgsqword(FIELD_OFFSET(NT_TIB, StackLimit)));
+            const auto interrupted_rsp = static_cast<std::uintptr_t>(pointers->ContextRecord->Rsp);
+            const std::uint64_t headroom = interrupted_rsp >= stack_limit
+                ? static_cast<std::uint64_t>(interrupted_rsp - stack_limit) : 0;
+            auto minimum = minimum_stack_headroom.load(std::memory_order_relaxed);
+            if (headroom < minimum) {
+                // Only the immutable owner reaches this branch. One strong CAS
+                // keeps the VEH path bounded; a surprising contender may make
+                // the diagnostic conservative but cannot affect execution.
+                (void)minimum_stack_headroom.compare_exchange_strong(
+                    minimum, headroom, std::memory_order_relaxed);
+            }
             // Only the owner thread writes this counter. No allocation, locks,
             // IPC, logging, game-memory reads, or retry loops occur in VEH.
             const auto count = hits.load(std::memory_order_relaxed);
             if (count == (std::numeric_limits<std::uint64_t>::max)())
                 saturated.store(true, std::memory_order_relaxed);
-            else hits.store(count + 1, std::memory_order_relaxed);
+            else hits.store(count + 1, std::memory_order_release);
         }
     }
     return EXCEPTION_CONTINUE_EXECUTION;
@@ -88,11 +106,25 @@ LONG CALLBACK OnException(EXCEPTION_POINTERS* pointers) noexcept {
 
 bool CompatibleMitigations() noexcept {
     PROCESS_MITIGATION_DYNAMIC_CODE_POLICY dynamic{};
+    PROCESS_MITIGATION_CONTROL_FLOW_GUARD_POLICY cfg{};
+    PROCESS_MITIGATION_USER_SHADOW_STACK_POLICY cet{};
     // CFG does not constrain this design: no indirect branch target is created
     // or called. User shadow stacks track call/return pairs; the handler changes
     // neither and Windows resumes the supplied exception context itself. The
     // live target has CFG enabled, so treating it as incompatible would reject
     // a mitigation that is orthogonal to this exact-site INT3 observer.
+    const bool cfg_queried = GetProcessMitigationPolicy(GetCurrentProcess(),
+        ProcessControlFlowGuardPolicy, &cfg, sizeof(cfg)) != FALSE;
+    const bool cet_queried = GetProcessMitigationPolicy(GetCurrentProcess(),
+        ProcessUserShadowStackPolicy, &cet, sizeof(cet)) != FALSE;
+    cfg_known.store(cfg_queried, std::memory_order_relaxed);
+    cet_known.store(cet_queried, std::memory_order_relaxed);
+    if (cfg_queried) {
+        cfg_flags.store(cfg.Flags, std::memory_order_relaxed);
+    }
+    if (cet_queried) {
+        cet_flags.store(cet.Flags, std::memory_order_relaxed);
+    }
     return !IsDebuggerPresent() &&
         GetProcessMitigationPolicy(GetCurrentProcess(), ProcessDynamicCodePolicy,
                                    &dynamic, sizeof(dynamic)) && !dynamic.ProhibitDynamicCode;
@@ -262,6 +294,20 @@ Status Start() noexcept {
     return result;
 }
 
+Status QualifyExactSite(void** site) noexcept {
+    if (site == nullptr) return Status::invalid_site;
+    *site = nullptr;
+    try {
+        const auto image_status = ExactImageStatus();
+        if (image_status != Status::started) return image_status;
+        if (!CompatibleMitigations()) return Status::incompatible_mitigation;
+        auto* exact = reinterpret_cast<unsigned char*>(GetModuleHandleW(nullptr)) + kSiteRva;
+        if (!ValidSite(exact)) return Status::invalid_site;
+        *site = exact;
+        return Status::started;
+    } catch (...) { return Status::unsupported_image; }
+}
+
 Status Stop() noexcept {
     AcquireSRWLockExclusive(&lifecycle_lock);
     Status result = Status::never_started;
@@ -293,7 +339,12 @@ Status Stop() noexcept {
 
 Snapshot ReadSnapshot() noexcept {
     // Independent atomic fields: observational snapshot, not a world-state transaction.
-    return {hits.load(), owner_thread.load(), active.load(), cross_thread.load(), saturated.load()};
+    const auto observed_hits = hits.load(std::memory_order_acquire);
+    const auto headroom = minimum_stack_headroom.load(std::memory_order_acquire);
+    return {observed_hits, headroom == (std::numeric_limits<std::uint64_t>::max)() ? 0 : headroom,
+            owner_thread.load(), cfg_flags.load(), cet_flags.load(), cfg_known.load(),
+            cet_known.load(), active.load(),
+            cross_thread.load(), saturated.load()};
 }
 #ifdef TF3_POST_OBSERVER_OWNED_TEST
 Status StartOwnedFixture(void* site) noexcept {

@@ -71,7 +71,7 @@ test("host-local actions use the authenticated client authority path and share h
   let local, remote;
   try {
     local = connectHostLocalParticipant({ host: instance, displayName: "Host", engineBinding,
-      createAdapter: input => ({ receive() {}, close() {}, binding: input.engineBinding }),
+      createAdapter: input => ({ receive() {}, poll() {}, close() {}, binding: input.engineBinding }),
       onMessage: message => localMessages.push(message) });
     remote = connectClient({ secret: SECRET, sessionId: instance.sessionId, port: instance.server.address().port,
       displayName: "Remote", buildHash: BUILD, modManifestHash: MODS, onMessage: message => remoteMessages.push(message) });
@@ -107,7 +107,7 @@ test("host-local adapter attachment is a coordination gate and its closure remov
     const player = localMessages.find(message => message.kind === "admitted").payload.player;
     instance.authority.bindCompanyEntity(player.playerId, 101);
     assert.throws(() => instance.beginCoordination({ checkpointHash: "d".repeat(64), updateCount: 100 }), error => error.code === "LOCAL_ENGINE_BINDING_REQUIRED");
-    resolveAdapter({ receive() {}, close() {} });
+    resolveAdapter({ receive() {}, poll() {}, close() {} });
     await until(() => local.ready);
     await local.close();
     await until(() => instance.authority.players().length === 0);
@@ -131,7 +131,7 @@ test("host-local admission callback cannot race the pending adapter coordination
   try {
     await until(() => callbackError);
     assert.equal(callbackError.code, "LOCAL_ENGINE_BINDING_REQUIRED");
-    resolveAdapter({ receive() {}, close() {} });
+    resolveAdapter({ receive() {}, poll() {}, close() {} });
     await until(() => local.ready);
   } finally {
     await local.close();
@@ -148,9 +148,27 @@ test("host-local closes an engine adapter that resolves after transport teardown
   try {
     await until(() => typeof resolveAdapter === "function");
     await local.close();
-    resolveAdapter({ receive() {}, close() { closed++; } });
+    resolveAdapter({ receive() {}, poll() {}, close() { closed++; } });
     await local.attachment;
     assert.equal(closed, 1);
+    assert.equal(local.ready, false);
+  } finally {
+    await local.close();
+    await new Promise(resolve => instance.server.close(resolve));
+  }
+});
+
+test("host-local polling serializes real adapter work and fails closed on an adapter fault", async () => {
+  const instance = startHost({ secret: SECRET, sessionId: "host-local-poll-failure", port: 0, buildHash: BUILD, modManifestHash: MODS });
+  await once(instance.server, "listening");
+  let polls = 0, closing = 0;
+  const local = connectHostLocalParticipant({ host: instance, displayName: "Host", engineBinding: Object.freeze({ native: true }), pollIntervalMs: 10,
+    createAdapter: () => ({ receive() {}, poll() { polls++; return Promise.reject(new Error("native IPC gone")); }, async close() { closing++; } }) });
+  try {
+    await until(() => polls === 1 && instance.authority.players().length === 0);
+    await local.close();
+    assert.equal(polls, 1);
+    assert.equal(closing, 1);
     assert.equal(local.ready, false);
   } finally {
     await local.close();
@@ -163,7 +181,7 @@ test("host-local transport connects through the host's explicit loopback bind ad
     buildHash: BUILD, modManifestHash: MODS });
   await once(instance.server, "listening");
   const local = connectHostLocalParticipant({ host: instance, displayName: "Host", engineBinding: Object.freeze({ native: true }),
-    createAdapter: () => ({ receive() {}, close() {} }) });
+    createAdapter: () => ({ receive() {}, poll() {}, close() {} }) });
   try { await until(() => local.ready); }
   finally {
     await local.close();
@@ -182,7 +200,7 @@ test("host-local registration cannot claim a remote participant and verifies the
     await until(() => remote.playerId);
     assert.throws(() => instance.registerLocalParticipant(remote.playerId, { receive() {} }), error => error.code === "LOCAL_ENGINE_BINDING_REQUIRED");
     local = connectHostLocalParticipant({ host: instance, displayName: "Host", engineBinding: Object.freeze({ native: true }),
-      verifiedSave: requiredSave, createAdapter: () => ({ receive() {}, close() {} }) });
+      verifiedSave: requiredSave, createAdapter: () => ({ receive() {}, poll() {}, close() {} }) });
     await until(() => local.ready);
     instance.authority.bindCompanyEntity(remote.playerId, 101);
     instance.authority.bindCompanyEntity(local.connection.playerId, 102);

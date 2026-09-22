@@ -17,7 +17,8 @@ export async function loadJoinEngineFactory({ modulePath, bridge, nativeGate,
   if (!bridge || bridge.connected !== true || bridge.engineObservation?.available !== true
     || typeof bridge.startCoordinationLease !== 'function') throw new Error('JOIN_LIVE_ENGINE_OBSERVATION_REQUIRED');
   if (!nativeGate?.ready || !nativeGate.binding || nativeGate.binding.sessionId !== sessionId
-    || nativeGate.binding.role !== 'participant' || typeof nativeGate.client?.requireCapability !== 'function') {
+    || nativeGate.binding.role !== 'participant' || typeof nativeGate.client?.requireCapability !== 'function'
+    || typeof nativeGate.gateControl !== 'function' || typeof nativeGate.awaitGateEvent !== 'function') {
     throw new Error('JOIN_NATIVE_BINDING_REQUIRED');
   }
   if (typeof sessionId !== 'string' || !hash(buildHash) || !hash(modManifestHash)) throw new TypeError('INVALID_JOIN_ENGINE_IDENTITY');
@@ -43,6 +44,8 @@ export async function loadJoinEngineFactory({ modulePath, bridge, nativeGate,
     nativeRuntime: Object.freeze({
       client: nativeGate.client,
       binding: nativeGate.binding,
+      gateControl: nativeGate.gateControl,
+      awaitGateEvent: nativeGate.awaitGateEvent,
       sessionId,
       role: 'join',
       logger,

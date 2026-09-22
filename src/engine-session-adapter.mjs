@@ -11,8 +11,9 @@ export async function createEngineSessionAdapter({directory,bridge,playerId,comp
     ||![send,disconnect,healthy,controlsReady,now,onCheckpointEvidence].every(f=>typeof f==='function')) throw new TypeError('INVALID_ADAPTER_OPTIONS');
   if(nativeRuntime!==null&&(!nativeRuntime||typeof nativeRuntime.sessionId!=='string'||!/^[A-Za-z0-9_.:-]{1,128}$/.test(nativeRuntime.sessionId)
     ||!['host','participant'].includes(nativeRuntime.role)||typeof nativeRuntime.client?.requireCapability!=='function'
-    ||typeof nativeRuntime.client?.bindSession!=='function'||typeof nativeRuntime.client?.control!=='function'
+    ||typeof nativeRuntime.client?.bindSession!=='function'||typeof nativeRuntime.client?.close!=='function'
     ||typeof nativeRuntime.client?.on!=='function'||typeof nativeRuntime.client?.off!=='function'
+    ||typeof nativeRuntime.gateControl!=='function'||typeof nativeRuntime.awaitGateEvent!=='function'
     ||typeof nativeRuntime.logger!=='function')) throw new TypeError('INVALID_NATIVE_RUNTIME_ADAPTER_OPTIONS');
   if(!['production','local_diagnostic'].includes(checkpointEvidenceScope))throw new TypeError('INVALID_CHECKPOINT_EVIDENCE_SCOPE');
   let checkpointEvidence=null;
@@ -20,18 +21,42 @@ export async function createEngineSessionAdapter({directory,bridge,playerId,comp
     requireCompleteCheckpointCoverage:checkpointEvidenceScope==='production',onCheckpointEvidence:evidence=>{
       checkpointEvidence=structuredClone(evidence);onCheckpointEvidence(structuredClone(evidence));
     }});
-  let participant,lease,closed=false,lastCounter=-1,polling=null,closing=null,nativeHaltIssued=false;
+  let participant,lease,closed=false,lastCounter=-1,polling=null,closing=null,nativeHaltPromise=null;
+  // This adapter has not issued a native hold, so the only legal fail-stop
+  // coordinate for a freshly bound production gate is generation zero.  A
+  // failed terminal request is never retried at another coordinate.
+  const nativeHaltEpoch='1';
   const stopRenewal=()=>lease?.stop();
-  // Native IPC is a session fence only. Its debugger/qualification receipts do
-  // not describe TF3 world state, ownership, command execution, or release.
+  // Binding receipts remain transport-only.  A typed terminal_parked event is
+  // separately required before this adapter records an engine halt.
   const nativeHalt=reason=>{
-    if(!nativeRuntime||nativeHaltIssued)return;
-    nativeHaltIssued=true;
-    Promise.resolve(nativeRuntime.client.control('halt')).then(receipt=>{
-      nativeRuntime.logger({level:'info',event:'native_runtime_halt_receipt',reason,
-        accepted:receipt?.status==='accepted',control:receipt?.control??null,gameWorldReceipt:false});
-    }).catch(error=>nativeRuntime.logger({level:'error',event:'native_runtime_halt_unknown',reason,
-      code:error?.message??'UNKNOWN',noRetry:true,gameWorldReceipt:false}));
+    if(!nativeRuntime)return Promise.resolve();
+    if(nativeHaltPromise)return nativeHaltPromise;
+    const command=Object.freeze({control:'halt',epoch:nativeHaltEpoch,generation:'0'});
+    const failStop=error=>{
+      // A closed IPC endpoint is not evidence that TF3 stopped.  It merely
+      // prevents any later control from being mistaken for a retry.
+      nativeRuntime.client.off('disconnect',nativeDisconnected);
+      try {nativeRuntime.client.close();} catch {}
+      nativeRuntime.logger({level:'error',event:'native_runtime_halt_unknown',reason,
+        code:error?.message??'UNKNOWN',control:command.control,epoch:command.epoch,generation:command.generation,
+        noRetry:true,engineHaltConfirmed:false,failStopClientClosed:true,gameWorldReceipt:false});
+    };
+    nativeHaltPromise=(async()=>{
+      try {
+        const receipt=await nativeRuntime.gateControl(command);
+        if(!receipt||receipt.status!=='halt_requested'||receipt.control!==command.control
+          ||receipt.epoch!==command.epoch||receipt.generation!==command.generation
+          ||receipt.haltGeneration!==command.generation)throw new Error('NATIVE_RUNTIME_HALT_RECEIPT_INVALID');
+        const parked=await nativeRuntime.awaitGateEvent(command,{timeoutMs:3000});
+        if(!parked||parked.event!=='terminal_parked'||parked.epoch!==command.epoch
+          ||parked.generation!==command.generation||parked.haltGeneration!==command.generation)throw new Error('NATIVE_RUNTIME_HALT_EVENT_INVALID');
+        nativeRuntime.logger({level:'info',event:'native_runtime_halt_confirmed',reason,
+          control:command.control,epoch:command.epoch,generation:command.generation,
+          engineHaltConfirmed:true,gameWorldReceipt:true});
+      } catch(error) {failStop(error);}
+    })();
+    return nativeHaltPromise;
   };
   const nativeDisconnected=reason=>{
     nativeRuntime?.logger({level:'error',event:'native_runtime_disconnected',reason,gameWorldReceipt:false});
@@ -49,6 +74,9 @@ export async function createEngineSessionAdapter({directory,bridge,playerId,comp
       },send,disconnect:()=>{stopRenewal();nativeHalt(participant?.fault??'PARTICIPANT_DISCONNECTED');disconnect();}});
     if(nativeRuntime){
       nativeRuntime.client.requireCapability('session.bind');
+      nativeRuntime.client.requireCapability('simulation.hold');
+      nativeRuntime.client.requireCapability('engine.halt');
+      nativeRuntime.client.requireCapability('simulation.gate-receipts.v1');
       // This is authenticated controller identity binding, deliberately outside
       // AsyncSessionParticipant.receiveEngine(). The latter accepts only
       // correlated mailbox/world receipts.
@@ -126,10 +154,10 @@ export async function createEngineSessionAdapter({directory,bridge,playerId,comp
     halt(code='EXPLICIT_STOP'){participant.halt(code);},
     close(){
       if(closing)return closing;
-      closed=true;stopRenewal();nativeRuntime?.client.off('disconnect',nativeDisconnected);nativeHalt('ADAPTER_CLOSED');
-      // Teardown is not halt proof. Caller should request halt and keep polling
-      // its receipt before closing when possible; expiry remains the fallback.
-      closing=(async()=>{await polling;await mailbox.close();})();
+      closed=true;stopRenewal();nativeRuntime?.client.off('disconnect',nativeDisconnected);
+      // Teardown awaits the one typed halt attempt.  On an unknown outcome the
+      // native endpoint is closed, but no engine-stop proof is fabricated.
+      closing=(async()=>{await nativeHalt('ADAPTER_CLOSED');await polling;await mailbox.close();})();
       return closing;
     },
   };

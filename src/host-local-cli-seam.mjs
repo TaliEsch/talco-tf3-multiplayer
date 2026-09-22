@@ -18,7 +18,8 @@ export async function loadHostLocalEngineFactory({ modulePath, bridge, nativeGat
   if (!bridge || bridge.connected !== true || bridge.engineObservation?.available !== true
     || typeof bridge.startCoordinationLease !== 'function') throw new Error('HOST_LOCAL_LIVE_ENGINE_OBSERVATION_REQUIRED');
   if (!nativeGate?.ready || !nativeGate.binding || nativeGate.binding.sessionId !== sessionId
-    || nativeGate.binding.role !== 'host' || typeof nativeGate.client?.requireCapability !== 'function') {
+    || nativeGate.binding.role !== 'host' || typeof nativeGate.client?.requireCapability !== 'function'
+    || typeof nativeGate.gateControl !== 'function' || typeof nativeGate.awaitGateEvent !== 'function') {
     throw new Error('HOST_LOCAL_NATIVE_BINDING_REQUIRED');
   }
   if (typeof sessionId !== 'string' || !hash(buildHash) || !hash(modManifestHash)) throw new TypeError('INVALID_HOST_LOCAL_ENGINE_IDENTITY');
@@ -44,6 +45,8 @@ export async function loadHostLocalEngineFactory({ modulePath, bridge, nativeGat
     nativeRuntime: Object.freeze({
       client: nativeGate.client,
       binding: nativeGate.binding,
+      gateControl: nativeGate.gateControl,
+      awaitGateEvent: nativeGate.awaitGateEvent,
       sessionId,
       role: 'host',
       logger,

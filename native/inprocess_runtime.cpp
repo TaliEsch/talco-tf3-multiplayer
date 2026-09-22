@@ -1,16 +1,19 @@
-// Exact-build, in-process transport bootstrap. Loading this DLL alone is not
-// hook qualification. The observer capability is advertised only after its
-// exact-image gate and patch succeed; hold, halt and gameplay remain absent.
+// Exact-build, in-process transport bootstrap. The boundary gate is advertised
+// only after its image/site/mitigation checks and patch succeed. Live evidence
+// qualifies bounded hold, one-update release, halt and detach; gameplay command
+// capture/application remains absent and is never inferred from gate startup.
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 
 #include <array>
+#include <atomic>
 #include <cstdint>
 #include <cwchar>
 #include <string>
 
 #include "inprocess_runtime_api.h"
 #include "inprocess_post_observer.h"
+#include "production_boundary_gate.h"
 #include "probe_api.h"
 #include "runtime_ipc.h"
 
@@ -48,12 +51,141 @@ bool ExactModulePath(HMODULE module, const std::wstring& expected) {
            _wcsicmp(std::wstring(path.data(), length).c_str(), expected.c_str()) == 0;
 }
 
+struct PendingGateOperation {
+    bool active;
+    bool receipt_sent;
+    bool detach_restore_started;
+    tf3runtimeipc::GateRequest request;
+};
+std::array<PendingGateOperation, 4> pending_gate{};
+std::atomic<std::uint64_t> gate_epoch{0};
+
+bool SubmitGate(const tf3runtimeipc::GateRequest& request) noexcept {
+    using tf3runtimeipc::GateControl;
+    const auto prior_epoch = gate_epoch.load();
+    if ((prior_epoch != 0 && prior_epoch != request.epoch) || request.epoch == 0)
+        return false;
+    for (const auto& pending : pending_gate)
+        if (pending.active && (pending.request.correlation_id == request.correlation_id ||
+            pending.request.control == request.control)) return false;
+    const auto snapshot = tf3boundary::Read().gate;
+    inprocess_gate::Result result = inprocess_gate::Result::protocol_error;
+    switch (request.control) {
+        case GateControl::hold:
+            if (snapshot.boundary_generation == UINT64_MAX ||
+                request.generation != snapshot.boundary_generation + 1) return false;
+            result = tf3boundary::RequestHold(); break;
+        case GateControl::release:
+            if (request.generation != snapshot.boundary_generation) return false;
+            result = tf3boundary::RequestRelease(request.generation); break;
+        case GateControl::halt:
+            if (request.generation != snapshot.boundary_generation) return false;
+            result = tf3boundary::RequestHalt(); break;
+        case GateControl::detach:
+            if (request.generation != snapshot.boundary_generation) return false;
+            result = tf3boundary::PrepareDetach(request.generation); break;
+    }
+    if (result != inprocess_gate::Result::accepted) return false;
+    std::size_t index = static_cast<std::size_t>(request.control);
+    pending_gate[index] = {true, false, false, request};
+    if (prior_epoch == 0) gate_epoch.store(request.epoch);
+    return true;
+}
+
+bool PollGate(tf3runtimeipc::GateNotification* notification) noexcept {
+    using namespace tf3runtimeipc;
+    for (auto& pending : pending_gate) {
+        if (!pending.active) continue;
+        const auto snapshot = tf3boundary::Read().gate;
+        const auto control_kind = pending.request.control;
+        bool receipt_ready = false;
+        GateReceipt receipt = GateReceipt::held;
+        switch (control_kind) {
+            case GateControl::hold:
+                receipt = GateReceipt::held;
+                receipt_ready = snapshot.state == inprocess_gate::State::held &&
+                    snapshot.boundary_generation == pending.request.generation;
+                break;
+            case GateControl::release:
+                receipt = GateReceipt::permit_consumed;
+                receipt_ready = snapshot.permit_consumed_generation == pending.request.generation;
+                break;
+            case GateControl::halt:
+                receipt = GateReceipt::halt_requested;
+                receipt_ready = snapshot.halt_requested;
+                break;
+            case GateControl::detach:
+                receipt = GateReceipt::detach_prepared;
+                receipt_ready = snapshot.state == inprocess_gate::State::detach_prepared ||
+                    snapshot.state == inprocess_gate::State::detach_confirmed ||
+                    snapshot.state == inprocess_gate::State::detach_returning ||
+                    snapshot.state == inprocess_gate::State::detached;
+                break;
+        }
+        if (!pending.receipt_sent && receipt_ready) {
+            pending.receipt_sent = true;
+            *notification = {GateNotificationKind::receipt, pending.request, receipt,
+                             GateEvent::boundary_applied};
+            if (control_kind == GateControl::hold) pending.active = false;
+            return true;
+        }
+        if (!pending.receipt_sent) continue;
+        if (control_kind == GateControl::release &&
+            snapshot.release_applied_generation == pending.request.generation &&
+            snapshot.state == inprocess_gate::State::held &&
+            snapshot.boundary_generation == pending.request.generation + 1) {
+            *notification = {GateNotificationKind::event, pending.request, receipt,
+                             GateEvent::boundary_applied};
+            pending.active = false; return true;
+        }
+        if (control_kind == GateControl::halt &&
+            snapshot.state == inprocess_gate::State::terminal_parked) {
+            *notification = {GateNotificationKind::event, pending.request, receipt,
+                             GateEvent::terminal_parked};
+            pending.active = false; return true;
+        }
+        if (control_kind == GateControl::detach) {
+            if (!pending.detach_restore_started) {
+                pending.detach_restore_started = true;
+                if (tf3boundary::RestoreAndConfirmDetach(pending.request.generation) !=
+                        inprocess_gate::Result::accepted) continue;
+            }
+            const auto detached = tf3boundary::Read();
+            if (detached.gate.state == inprocess_gate::State::detached &&
+                !detached.active && !detached.owns_breakpoint_byte) {
+                *notification = {GateNotificationKind::event, pending.request, receipt,
+                                 GateEvent::detached};
+                pending.active = false; return true;
+            }
+        }
+    }
+    return false;
+}
+
+// Live-qualified on the exact A484... build: detach mode held at update/tick
+// 2978/57266, re-held at 2979/57267 and resumed at 2980/57268. A separate halt
+// run went directly from running generation zero to terminal park at 2979/57267
+// while authenticated IPC remained responsive. These are exact-build boundary
+// controls, not gameplay proof.
+const tf3runtimeipc::GateProvider production_gate_provider{
+    true, true, &SubmitGate, &PollGate};
+
 }  // namespace
 
 tf3runtimeipc::RuntimeObservation ReadObservation() noexcept {
     const auto snapshot = tf3postobserver::ReadSnapshot();
-    return {snapshot.hits, snapshot.owner_thread, snapshot.active,
+    return {snapshot.hits, snapshot.minimum_stack_headroom, snapshot.owner_thread,
+            snapshot.cfg_flags, snapshot.cet_flags, snapshot.cfg_known,
+            snapshot.cet_known, snapshot.active,
             snapshot.cross_thread, snapshot.saturated};
+}
+
+tf3runtimeipc::RuntimeObservation ReadBoundaryObservation() noexcept {
+    const auto snapshot = tf3boundary::Read();
+    return {snapshot.hits, snapshot.minimum_stack_headroom,
+            snapshot.observed_owner_thread, snapshot.cfg_flags, snapshot.cet_flags,
+            snapshot.cfg_known, snapshot.cet_known, snapshot.active,
+            snapshot.cross_thread, false};
 }
 
 extern "C" __declspec(dllexport) DWORD WINAPI Tf3InProcessRuntimeV1(
@@ -106,6 +238,25 @@ extern "C" __declspec(dllexport) DWORD WINAPI Tf3InProcessRuntimeV1(
     }
     if (result.status != TF3_NATIVE_PROBE_STATUS_OBSERVATION_ONLY_MATCH ||
         result.capability_flags != TF3_NATIVE_PROBE_CAPABILITY_NONE) {
+        return TF3_INPROCESS_RUNTIME_UNSUPPORTED_EXECUTABLE;
+    }
+
+    // The live-qualified production gate remains exact-build and fail-closed.
+    // It must not silently fall through to a second owner if activation changes
+    // the instruction or handler state unexpectedly.
+    const auto gate_status = tf3boundary::Start();
+    if (gate_status == tf3boundary::Status::started) {
+        const int server_status = tf3runtimeipc::ServeInProcess(
+            pipe, token, &ReadBoundaryObservation, 0, &production_gate_provider);
+        const auto snapshot = tf3boundary::Read().gate;
+        if (snapshot.state != inprocess_gate::State::detached)
+            (void)tf3boundary::RequestHalt();
+        const auto stop_status = tf3boundary::Stop();
+        return server_status == 0 && stop_status == tf3boundary::Status::stopped
+            ? TF3_INPROCESS_RUNTIME_STOPPED : TF3_INPROCESS_RUNTIME_SERVER_FAILED;
+    }
+    if (gate_status != tf3boundary::Status::disabled_pending_live_qualification) {
+        if (tf3boundary::Read().active) (void)tf3boundary::RequestHalt();
         return TF3_INPROCESS_RUNTIME_UNSUPPORTED_EXECUTABLE;
     }
 

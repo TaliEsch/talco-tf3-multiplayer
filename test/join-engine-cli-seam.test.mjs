@@ -17,6 +17,8 @@ const nativeGate = {
   ready: true,
   binding: { sessionId, role: 'participant' },
   client: { requireCapability() {} },
+  gateControl() {},
+  awaitGateEvent() {},
 };
 const engineSessionDirectory = path.join(path.parse(process.cwd()).root, 'tf3mp_status_1');
 const options = modulePath => ({ modulePath, bridge, nativeGate, sessionId, buildHash,
@@ -29,6 +31,8 @@ test('join engine seam is absent unless an explicit adapter module is selected',
 test('join engine seam rejects non-absolute, stale, wrong-role, and non-live bindings before importing', async () => {
   await assert.rejects(loadJoinEngineFactory(options('relative-provider.mjs')), /ABSOLUTE_PATH_REQUIRED/);
   await assert.rejects(loadJoinEngineFactory({ ...options('C:/provider.mjs'), nativeGate: null }), /NATIVE_BINDING_REQUIRED/);
+  const missingTypedGate={...nativeGate};delete missingTypedGate.gateControl;
+  await assert.rejects(loadJoinEngineFactory({ ...options('C:/provider.mjs'), nativeGate: missingTypedGate }), /NATIVE_BINDING_REQUIRED/);
   await assert.rejects(loadJoinEngineFactory({ ...options('C:/provider.mjs'), nativeGate: { ...nativeGate, binding: { sessionId: 'stale', role: 'join' } } }), /NATIVE_BINDING_REQUIRED/);
   await assert.rejects(loadJoinEngineFactory({ ...options('C:/provider.mjs'), nativeGate: { ...nativeGate, binding: { sessionId, role: 'join' } } }), /NATIVE_BINDING_REQUIRED/);
   await assert.rejects(loadJoinEngineFactory({ ...options('C:/provider.mjs'), bridge: { ...bridge, connected: false } }), /LIVE_ENGINE_OBSERVATION_REQUIRED/);
@@ -41,7 +45,7 @@ test('join engine seam accepts a qualified provider with exact save verification
   const badShape = path.join(root, 'bad-shape-provider.mjs');
   try {
     await writeFile(valid, `export async function createJoinEngineBinding(context) {
-      if (context.nativeRuntime.role !== 'join' || context.requiredSave.sha256 !== '${requiredSave.sha256}' || 'secret' in context || 'credentials' in context) throw new Error('wrong context');
+      if (context.nativeRuntime.role !== 'join' || typeof context.nativeRuntime.gateControl !== 'function' || typeof context.nativeRuntime.awaitGateEvent !== 'function' || context.requiredSave.sha256 !== '${requiredSave.sha256}' || 'secret' in context || 'credentials' in context) throw new Error('wrong context');
       return { createAdapter() { return {}; }, productionQualified: true, verifiedSave: { bytes: 1, sha256: '${requiredSave.sha256}' } };
     }`);
     await writeFile(badSave, `export function createJoinEngineBinding() {

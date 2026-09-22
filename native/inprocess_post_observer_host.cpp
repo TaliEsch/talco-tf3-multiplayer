@@ -137,11 +137,16 @@ int wmain(int argc, wchar_t** argv) {
     for (unsigned i = 0; i < 100; ++i) Require(OwnedPostExecute(0, 10) == 10, "repeated actual trap execution");
     auto observed = snapshot();
     Require(observed.hits == 1000 && observed.owner_thread == GetCurrentThreadId() &&
-        observed.active && !observed.cross_thread, "owner observation and hit count");
+        observed.minimum_stack_headroom > 0 && observed.cfg_known && observed.cet_known &&
+        observed.active && !observed.cross_thread,
+        "owner observation, stack headroom and hit count");
+    const auto owner_stack_headroom = observed.minimum_stack_headroom;
     std::thread other([] { Require(OwnedPostExecute(0, 1) == 1, "cross thread actual trap"); });
     other.join();
     observed = snapshot();
-    Require(observed.cross_thread && observed.hits == 1000, "cross thread latch excludes foreign count");
+    Require(observed.cross_thread && observed.hits == 1000 &&
+        observed.minimum_stack_headroom == owner_stack_headroom,
+        "cross thread latch excludes foreign count and stack sample");
     // Release the host's sole LoadLibrary reference while armed. Pinning must
     // keep the VEH code alive; actual traps must continue safely after release.
     Require(FreeLibrary(library) != FALSE, "release host library reference");

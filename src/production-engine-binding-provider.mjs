@@ -1,4 +1,5 @@
 import { createEngineSessionAdapter } from './engine-session-adapter.mjs';
+import { NATIVE_RUNTIME_CAPABILITIES } from './native-runtime-client.mjs';
 
 const hash = value => typeof value === 'string' && /^[0-9a-f]{64}$/.test(value);
 const ident = value => typeof value === 'string' && /^[A-Za-z0-9_.:-]{1,128}$/.test(value);
@@ -32,12 +33,24 @@ function contextFor(context, expectedRole) {
     || runtime.binding.role !== adapterRole || typeof runtime.logger !== 'function') {
     throw new Error('ENGINE_BINDING_PROVIDER_NATIVE_BINDING_INCOMPLETE');
   }
+  // Do not let a provider's own `productionQualified` return value elevate a
+  // passive observer/IPC transport into production admission. These checks are
+  // repeated here because providers can be called directly, outside the CLI
+  // Host/Join gate.
+  if(runtime.client.handshake?.productionQualified!==true)throw new Error('ENGINE_BINDING_PROVIDER_NATIVE_GATE_UNQUALIFIED');
+  try {
+    runtime.client.requireCapability(NATIVE_RUNTIME_CAPABILITIES.simulationHold);
+    runtime.client.requireCapability(NATIVE_RUNTIME_CAPABILITIES.engineHalt);
+    runtime.client.requireCapability(NATIVE_RUNTIME_CAPABILITIES.gateReceipts);
+  } catch(error) {throw new Error(`ENGINE_BINDING_PROVIDER_NATIVE_GATE_INCOMPLETE:${error?.message??'UNKNOWN'}`);}
+  if(typeof runtime.gateControl!=='function'||typeof runtime.awaitGateEvent!=='function')throw new Error('ENGINE_BINDING_PROVIDER_TYPED_GATE_REQUIRED');
   return Object.freeze({
     bridge: context.bridge,
     directory: context.engineSessionDirectory,
     nativeRuntime: Object.freeze({
       client: runtime.client, binding: runtime.binding, sessionId: context.sessionId,
-      role: adapterRole, logger: runtime.logger,
+      role: adapterRole, logger: runtime.logger, gateControl: runtime.gateControl,
+      awaitGateEvent: runtime.awaitGateEvent,
     }),
     verifiedSave: Object.freeze({ bytes: context.verifiedSave.bytes, sha256: context.verifiedSave.sha256 }),
   });

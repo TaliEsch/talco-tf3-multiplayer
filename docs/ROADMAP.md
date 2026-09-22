@@ -1,5 +1,54 @@
 # TalCo TF3 multiplayer — current delivery plan
 
+## Active stage-6 path — 22 September 2026
+
+Readiness is approximately **5.3/10**. The stage-5 native-control gate is now
+real rather than prospective: the production-qualified disposable TF3 run held
+the world at update 2978, advanced exactly once to 2979, re-held, detached and
+resumed at 2980 while authenticated IPC remained live. A separate run held and
+terminal-parked directly from running generation zero at update 2979 while
+control traffic remained responsive and the native/bridge clocks stayed fixed.
+Host/Join now requires that exact gate contract, continuously drives each real
+engine adapter, refreshes a native 15-second fail-safe lease, and revokes
+admission on malformed, unmatched, timed-out, silent or disconnected gate
+traffic. Older 4.5/10 and “hold absent” statements below are chronological, not
+current.
+
+The shortest path to 6/10 is now:
+
+1. Complete offline caller and ownership analysis for the TF3 stop/start factory
+   `0x9EEE60` and Add `0x9D3120`, especially the reference-counted output,
+   callback, progress and source-destruction obligations.
+2. Qualify bounded observation of the stock vehicle UI path without suppression:
+   same-thread factory→Add identity, caller RVAs, nesting, output lifetime and
+   detach survival. Do not reuse the quarantined debugger profiles as authority.
+3. Implement suppression only after an owned fixture proves every cleanup and
+   callback obligation. Reserve capture capacity before suppression; uncertainty
+   or overflow must sticky-halt rather than execute locally or promise replay.
+4. Publish a pointer-free semantic intent through native IPC only after confirmed
+   suppression. Host and client origins use the same coordinator admission and
+   order. Resolve vehicle/company identity locally on each instance and recheck
+   ownership at execution.
+5. Under the real update hold, consume a one-use authorization, apply once, and
+   require callback plus observed state/update/finance postconditions. Duplicate,
+   late or unknown results halt without retry.
+6. Demonstrate that cycle on two actual TF3 processes from one authenticated
+   transferred save, then run the no-input six-domain checkpoint baseline before
+   expanding the supported action set.
+
+After 6/10, stage 7 completes the road loop and separate-company economy; stage
+8 integrates divergence recovery/checkpoint reload; stage 9 performs sustained
+multi-instance/LAN/Internet release qualification; stage 10 is the verified,
+packaged, documented four-player release. Rail, shipping, aviation and other
+families remain explicit unfinished scope until implemented.
+
+Current clean verification is **905 discovered, 875 passed, 0 failed and 30
+skipped** in 53.724 seconds. A deliberate legacy debugger-fixture run separately exposed five
+teardown failures and is recorded in the handoff; the production in-process gate
+does not use that path. There is no implementation blocker. Cross-machine,
+four-player and port-forwarded Internet acceptance still requires suitable
+external machines/network access later.
+
 ## Correlated-boundary critical path — 22 September 2026
 
 The live post-site observer is now correlated with the public bridge clock in a

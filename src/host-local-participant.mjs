@@ -10,30 +10,53 @@ const FORWARDED = new Set([
 ]);
 
 export function connectHostLocalParticipant({ host, displayName, engineBinding,
-  createAdapter, onMessage = () => {}, verifiedSave = null } = {}) {
+  createAdapter, onMessage = () => {}, verifiedSave = null, pollIntervalMs = 25 } = {}) {
   if (!host || typeof host.connectLocalTransport !== 'function' || typeof host.registerLocalParticipant !== 'function'
     || typeof displayName !== 'string' || !displayName.length || typeof createAdapter !== 'function'
     || !engineBinding || (typeof engineBinding !== 'object' && typeof engineBinding !== 'function')
-    || typeof onMessage !== 'function') throw new TypeError('INVALID_HOST_LOCAL_PARTICIPANT_OPTIONS');
+    || typeof onMessage !== 'function' || !Number.isSafeInteger(pollIntervalMs)
+    || pollIntervalMs < 10 || pollIntervalMs > 1000) throw new TypeError('INVALID_HOST_LOCAL_PARTICIPANT_OPTIONS');
   if (verifiedSave !== null && (!verifiedSave || !Number.isSafeInteger(verifiedSave.bytes) || verifiedSave.bytes < 0
     || typeof verifiedSave.sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(verifiedSave.sha256))) throw new TypeError('INVALID_VERIFIED_SAVE');
 
-  let connection, adapter = null, detach = null, closed = false, attaching = null;
+  let connection, adapter = null, detach = null, closed = false, attaching = null, closing = null;
+  let pollTimer = null, pollInFlight = null;
+  const stopPolling = () => {
+    if (pollTimer !== null) clearTimeout(pollTimer);
+    pollTimer = null;
+  };
+  const schedulePoll = () => {
+    if (closed || !adapter || pollTimer !== null || pollInFlight) return;
+    pollTimer = setTimeout(() => {
+      pollTimer = null;
+      if (closed || !adapter || pollInFlight) return;
+      pollInFlight = Promise.resolve().then(() => adapter.poll()).catch(() => void close()).finally(() => {
+        pollInFlight = null;
+        schedulePoll();
+      });
+    }, pollIntervalMs);
+    pollTimer.unref?.();
+  };
   const attachment = {
     attached: false,
     receive(kind, payload) {
       if (!adapter) { void close(); return; }
-      try { adapter.receive(kind, payload); } catch { void close(); }
+      try { if (adapter.receive(kind, payload) === false) void close(); } catch { void close(); }
     },
   };
   const close = async () => {
-    if (closed) return;
+    if (closing) return closing;
     closed = true;
+    stopPolling();
     // Keep the pending registration until the authenticated socket close is
     // observed by the host.  Removing it first would leave a brief interval in
     // which a still-admitted local player could evade the coordination gate.
-    try { connection?.socket.destroy(); } catch { /* transport closure is best effort */ }
-    try { await adapter?.close?.(); } catch { /* failed adapter teardown cannot retain authority */ }
+    closing = (async () => {
+      try { connection?.socket.destroy(); } catch { /* transport closure is best effort */ }
+      try { await pollInFlight; } catch { /* rejected poll already closes transport */ }
+      try { await adapter?.close(); } catch { /* failed adapter teardown cannot retain authority */ }
+    })();
+    return closing;
   };
   const deliver = (message, context) => {
     if (message.kind === 'admitted' && !attaching) {
@@ -52,11 +75,10 @@ export function connectHostLocalParticipant({ host, displayName, engineBinding,
       }))).then(async result => {
         // A factory may resolve after transport teardown. It still owns a real
         // engine resource, so close that result instead of abandoning it.
-        if (closed) {
-          try { await result?.close?.(); } catch { /* authority is already gone */ }
-          return;
+        if (!result || typeof result.receive !== 'function' || typeof result.poll !== 'function' || typeof result.close !== 'function') {
+          throw new TypeError('INVALID_HOST_LOCAL_ENGINE_ADAPTER');
         }
-        if (!result || typeof result.receive !== 'function') throw new TypeError('INVALID_HOST_LOCAL_ENGINE_ADAPTER');
+        if (closed) { await result.close(); return; }
         adapter = result;
         attachment.attached = true;
         // The host owns the authoritative save.  If a required save exists,
@@ -68,6 +90,7 @@ export function connectHostLocalParticipant({ host, displayName, engineBinding,
           }
           connection.send('save_ready', verifiedSave);
         }
+        schedulePoll();
       }).catch(() => void close());
       // Internal admission registration is deliberately complete before an
       // observer can call beginCoordination from its admitted callback.
