@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "description": "Experimental encrypted direct-connect lockstep foundation for Transport Fever 3",
-  "license": "MIT",
+  "license": "PolyForm-Noncommercial-1.0.0",
   "devDependencies": {
     "fengari": "0.1.5"
   },

@@ -219,3 +219,13 @@ validation, ordering, scheduling and local revalidation path.
 
 Do not report two-player or four-player support until the manual evidence bundles
 defined in `docs/` exist and pass.
+
+## Licence
+
+Original project code is available under the
+[PolyForm Noncommercial License 1.0.0](LICENSE). Noncommercial forks,
+modifications, and redistribution are permitted provided the licence and its
+required TaliEsch attribution notice are retained. Commercial use, including
+sale, requires a separate licence from the copyright holder. Third-party
+components remain under their respective terms in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
