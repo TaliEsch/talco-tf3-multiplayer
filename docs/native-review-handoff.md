@@ -1,5 +1,128 @@
 # Native-integration review handoff — 21 September 2026
 
+## Correlated live boundary and owned control — 22 September 2026
+
+The full-readiness goal remains active. A corrected disposable-world run now
+correlates the in-process post-site observer with the existing game-produced
+bridge clock. Over 245 accepted samples at displayed speed 1, native hits moved
+from 5 to 133 while bridge `tickCount` moved from 57134 to 57262 and
+`updateCount` from 2846 to 2974: all three deltas were exactly 128. The observer
+remained on thread 27704 with no cross-thread flag. One transient bridge sample
+was rejected and explicitly reported; the checker ignored unavailable data and
+required monotonic accepted endpoints. This is single-game evidence that the
+chosen post site corresponds one-for-one with those public updates in this run.
+It does not yet prove the relationship at every speed/batch path or qualify the
+site as a mutation-free command boundary.
+
+The first attempt at this correlation failed and is not counted: world loading
+consumed the sampling deadline, leaving zero time for post-load comparison. The
+checker now uses separate world-observation and correlation deadlines, refreshes
+the native ping at the first accepted bridge sample, prints endpoint/delta
+evidence on success, and performs authenticated shutdown on assertion failure.
+Its process field is named `launchPid`, because Steam can replace the process
+that performed the initial launch. The successful run used launch PID 29596;
+the sole running game process was PID 34036 when cleanup began.
+
+The runtime restored its owned instruction on authenticated shutdown. PID 34036
+was then stopped, and `Unstage-NativeLoader.ps1` removed only the three
+manifest/hash-matched files plus session/manifest. No TF3 process remains; the
+five owned staging paths are absent; executable SHA-256 remains
+`a4843accd706b9c476c645860e2b68f6488c9b89f33ef97efe00cffb74a47be5` and
+stock `alut.dll` remains
+`814c615139b129c14897382fd30df164e5461d82b5329985907f0ef6b7a5ed19`.
+
+An isolated ordinary-execution controller now implements the intended
+always-held state machine: acknowledged hold, exactly one advance to the next
+boundary, sticky halt/disconnect and bounded stop. Its authenticated owned IPC
+adapter stays responsive during a slow in-flight iteration, rejects duplicate,
+out-of-order, stale-epoch, malformed and partial traffic, and reports a consumed
+permit timeout as `UNKNOWN_ITERATION_OUTCOME` without retry. It exposes
+`protocolHalted`, `simulationThreadHeld`, `fixtureWorkerStopped` and
+`engineHalted` separately; `engineHalted` and `productionQualified` remain
+false. Review also closed the lost-wake, pre-ack release, halt/stop promotion and
+overlapping-release races: a hold is published only after its acknowledgement,
+release ownership is single-flight, and a consumed timed-out permit remains
+unknown rather than becoming retryable. This is implementation of the
+control/transport prerequisite, verified only against an owned worker—not a TF3
+hook.
+
+The ABI review rejected waiting in VEH and rejected an ordinary `PROC FRAME`
+continuation entered by changing RIP. Windows' real unwinder reads the
+interrupted function's local stack value as the conventional function's return
+address, and the conventional allocation misaligns its helper call. The live
+machine reports CFG enabled and CET user shadow stacks enabled. The negative
+assessment therefore reports `qualified:false`, `activationPermitted:false`
+and `holdImplemented:false`; no unsafe redirect was executed.
+
+A separate owned cold-fragment fixture now establishes a viable alternative on
+this machine without weakening protections. Its VEH changes only RIP; ordinary
+gate execution blocks outside VEH, preserves all 15 GPRs, RSP, flags and all
+2,432 enabled XSAVE bytes in eight arithmetic/flag cases, and resumes the real
+caller. Windows unwound all 58 actual gate instruction PCs correctly, and a
+ninth entry propagated a native exception to that caller. CFG, CET shadow stacks
+and CET context-IP validation remained enabled; the gate is explicitly present
+in the image's EHCONT table. A direct final jump failed unwind qualification and
+was replaced by complementary flag-preserving conditional branches. This is a
+positive owned-process ABI result, not TF3 activation. See
+`docs/owned-cold-continuation-evidence.md`.
+
+A second owned fixture now qualifies the required cross-image shape without a
+`rel32` assumption. An EXE trap redirects into a separately loaded DLL gate;
+ordinary DLL execution waits outside VEH, restores the complete enabled state,
+then a second exact trap transfers to an EXE continuation. The images were
+beyond relative-branch range, both destinations were present in exact EHCONT
+tables, CFG/CET/context-IP validation stayed enabled, all eight cases preserved
+GPRs, flags and 2,432 XSTATE bytes, and Windows unwound all 56/56 actual gate
+instruction PCs. Busy teardown was refused, post-join cleanup succeeded, an
+inert pinned handler preserved state, and a ninth native exception reached the
+EXE caller. The fixture explicitly reports `tf3Qualified:false`,
+`productionLifecycleQualified:false` and `activationPermitted:false`.
+Production still needs a terminal park that cannot fall back into TF3 after
+halt/disconnect, one immutable generation/owner record, live mitigation and
+stack-headroom checks, and safe explicit resume/detach. See
+`docs/owned-cross-continuation-evidence.md`.
+
+Independent hash-pinned parsing also removes one real-Step uncertainty. The nine
+runtime ranges covering `[0x1593B0,0x159622)` are either primary flags 0 or
+`CHAININFO` only; none has an exception/unwind language handler or scope table.
+Their complete post-site chain exactly matches the cold fixture's body frame:
+RSP is entry minus `0x58`, the real return is `+0x58`, XMM6 is `+0x20`, and the
+saved nonvolatiles occupy `+0x30..+0x70`. The 626-byte Step range hashes to
+`579c4f55b3be35d2826321901410c27503c16f7445b9c18358a51b68f27c9768`.
+That flattened metadata is valid only at the qualified post state, not at the
+zero-iteration or arbitrary Step paths. Static PE inspection also finds no TF3
+EXE EHCONT table or CET declaration; the eventual DLL gate must carry and verify
+its own metadata, and live process mitigation policy still requires observation.
+
+The focused TF2 baseline trace now follows reversible vehicle `VREV` from its
+native factory through `CommandList::Add` suppression, semantic serialization,
+logical-key resolution and replay. It confirms that native command pointers are
+only immediate local correlation tokens. TF3 will retain host-authoritative
+order and stronger execution-time ownership/postcondition checks; it will not
+copy TF2's peer-assigned timestamps, fail-open admission, late execution or
+financial repair fallbacks. No TF2 source was copied in this batch; any future
+adaptation of its persistent logical-key registry must retain silver2127's MIT
+notice.
+
+Current evidence tiers: implemented/isolated includes the control state machine,
+owned authenticated adapter, negative conventional-frame assessment and
+positive same-/cross-image owned continuation fixtures; single-game
+verified includes transparent load, exact observer, the 128/128/128 correlation,
+authenticated teardown and hash-clean cleanup. Two-instance, cross-machine,
+four-player and Internet verification remain unperformed. Readiness stays
+approximately **4.5/10**: the boundary is now correlated, but actual in-process
+hold, production Host/Join binding, stock command interception and two-instance
+execution are still required before 5/10.
+
+Current verification for this batch is 878 discovered, 848 passed, 0 failed
+and 30 explicitly skipped in the unrestricted suite. The focused native/control
+set passed 20/20. The control, IPC, negative continuation, same-image cold and
+cross-image builds all passed MSVC `/W4 /WX` and their owned smoke tests. The
+existing production post observer, runtime, native IPC and reversible WinHTTP
+proxy were also rebuilt successfully with their applicable smoke tests. The 30
+skips are environment-gated native executable suites and are not counted as
+passes. No new live TF3 activation occurred in this batch.
+
 ## In-process post-iteration observation — 22 September 2026
 
 The full-readiness goal remains active. Commit `95d79c8` crosses the first real

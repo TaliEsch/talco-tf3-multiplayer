@@ -15,6 +15,43 @@ Reference inspected: `C:\Users\olihf\Downloads\Temp\TF2 Mp\tpf2-multiplayer`, ex
 | Checkpoints, resynchronization and recovery | TF2 `resync.lua` coordinates hold/save/transfer/load/compare/fresh epoch; `net.lua` keeps history relative to save watermark; `native/src/native_io.cpp` and `netpunch/sync_snapshot.py` transfer/reload saves. `docs/RESYNC.md` records bounded evidence and limitations. | TF3 `src/save-transfer.mjs`, `coordinator-checkpoint.mjs`, `held-snapshot.mjs`, `async-session-participant.mjs`; `8333ae3`/`110d405` add live schema-v2 checkpoint coverage and host-local authority plumbing. | Authenticated save transfer and coordinator barriers have implementation/tests. A real local production-gated hold captured all six public domains and released at update 3052. This is single-game evidence, not cross-instance agreement or automatic recovery. | Host/Join recovery still needs native hold, verified save/load on each game including host, old-epoch fencing, restored identity/company map, producer-backed comparison and coordinated release. Unknown outcome must halt, never retry. | Integrate the verified local checkpoint path into native hold and Host/Join recovery; exercise mismatch, participant loss, native exception and unknown execution receipt across multiple processes. |
 | Gameplay command families and known limitations | TF2 docs/REPLICATION.md gives actual source-backed coverage: strict/cancel-and-replay roads/rail/builds/stops/terrain/assets and some vehicles/lines; polling/replay for others; explicit refusal/fail-open cases. native/src/slice/*.inl, inject.lua, roads.lua, cons.lua, vehicles.lua, lines.lua, stops.lua, terrain.lua implement families. docs/KNOWN_ISSUES.md retains unsupported or unverified gaps. | TF3 current content has road/stop capture/replay and probes, station/depot/service/vehicle test modules, but no general supported-action policy shown in source/docs; Host/Join native action integration is absent. | Road/stop focused source/model tests and probe workflows exist; see test/road-stop-*, test/native-road-stop-*, test/phase2-*. These do not constitute an integrated supported gameplay set. | Define and enforce the complete enabled action allowlist. For product road loop implement road construction, depot/stops, vehicle buy/assign/start-stop/sale, line create/edit/remove; native UI must not allow unreplicated mutations. Track rail/shipping/aviation/terraform and all other omitted actions as explicitly unsupported until implemented. | Gameplay-domain owner: build one full road loop over verified generic boundary/identity/economy path; host and clients use same admission. Add family-by-family native UI gate based on live session support. Do not disable solo-game actions. Expand beyond road only after full loop tests on two game processes. |
 
+## Focused TF2 reversible-vehicle trace — 22 September 2026
+
+The concrete TF2 `VREV` path was traced through source, rather than inferred
+from the architecture documents. `native/src/slice_hook.cpp:186` identifies the
+Reverse factory; `native/src/slice/capture.inl:267` captures the local vehicle
+ID and publishes `VREV`; `native/src/slice/add_hook.inl:365` correlates the
+immediate command pointer and suppresses the matching `CommandList::Add`;
+`native/src/deferrelay_slice.asm` returns the suppressed result; and
+`mod/mp_lockstep_1/res/scripts/mp/inject.lua:1270`, `mp/net.lua:477,522`,
+`lockstep.lua:652,1110` and `mp/vehicles.lua:689,760,829` serialize, order,
+deduplicate, resolve and replay it. The native command object is never retained
+for the network; only semantic values cross the boundary. The factory output
+pointer is an immediate correlation token, and caller cleanup of the suppressed
+Add output handle is a separate lifetime obligation.
+
+This trace also identifies policies that must **not** be copied. TF2 origins
+assign their own timestamp/sequence and peers order by timestamp/origin/sequence;
+TalCo retains host-authoritative order for host and participant actions. TF2
+publishes `ARMED` before suppression is proved, uses a single global pending
+pointer, does not recheck vehicle ownership immediately before `VREV`, has no
+independent state/balance postcondition for it, executes late remote commands,
+and uses financial repair/ownership-transfer fallbacks for some purchases.
+TalCo must publish capture only after confirmed suppression, bind it to the
+authenticated company, recheck local ownership at execution, apply the desired
+stopped state once, and halt on late or unknown outcomes without balance repair.
+
+The strongest reusable design is TF2's persistent logical vehicle registry in
+`mp/vehicles.lua:79,92,99,131,142,1129`: entities present in the common save
+receive save-scoped keys; newly purchased vehicles receive origin/sequence keys
+bound from the local result entity; the high-water state survives reload. Any
+adaptation will use the TalCo checkpoint identity, host epoch and host sequence,
+and will retain the TF2 MIT copyright/permission notice. No source was copied in
+this batch. The immediate TF3 qualification target remains factory candidate
+`0x9EEE60` through admission candidate `0x9D3120`, including output-handle and
+callback ownership; those RVAs/layouts are TF3 evidence and are not derived from
+the TF2 ABI.
+
 ## Reuse and licence decision
 
 The TF2 reference root LICENSE is MIT, copyright 2026 silver2127. There is no code copied or adapted into this matrix or TF3. Most tempting pieces are coupled to TF2's game-script API, Lua state, binary interface, build 35924, file IPC, entity model and save semantics; use them as implementation evidence, not as drop-in components. Plausible future adaptation after interface review includes pure algorithms (sequence-gap tracking, command-history watermark/pruning, canonical ordering, Park–Miller PRNG, deterministic sorting) and transport-independent state-machine ideas. Reuse only after confirming the source file's licence and separating game-independent code; preserve the original copyright/license notice in source/distribution and include the MIT licence text and attribution in third-party notices. Do not copy TF2 addresses, signatures, layouts, calling conventions, hooks, Lua game calls, codecs, DLL loader/proxy, or protocol as though they were compatible.

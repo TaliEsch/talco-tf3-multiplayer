@@ -1,5 +1,45 @@
 # TalCo TF3 multiplayer — current delivery plan
 
+## Correlated-boundary critical path — 22 September 2026
+
+The live post-site observer is now correlated with the public bridge clock in a
+real disposable world: 128 native hits accompanied exactly 128 tick and 128
+update increments at speed 1, on one owner thread. The generic always-held
+controller and its authenticated owned-process adapter also pass exact-release,
+responsive-traffic, disconnect, timeout/unknown-outcome, duplicate/order, epoch
+and malformed-frame cases. Neither is connected to TF3 yet.
+
+The immediate critical path is narrower and evidence-led:
+
+1. The owned cross-image prerequisite now passes beyond `rel32` range with
+   exact DLL/EXE EHCONT destinations, 8/8 complete-state hold/resume cases,
+   56/56 actual-PC unwinds, native-exception propagation and bounded teardown
+   behavior while CFG/CET remain enabled. Before live activation, implement the
+   production terminal park, immutable owner/generation publication, stack
+   headroom and live mitigation gates, and explicit resume/detach lifecycle.
+   Keep VEH bounded to classify/emulate/publish/redirect.
+2. Connect that lifecycle to the exact TF3 post site and prove live hold,
+   single advance, sticky disconnect halt and explicit
+   resume/detach in the disposable game while IPC and GUI traffic remain live.
+   Extend the 1:1 boundary correlation across batch edges and supported speeds,
+   and continue distinguishing protocol halt, held simulation thread and proven
+   engine halt.
+3. Bind that qualified adapter to retained Host/Join, then run two local TF3
+   instances from one authenticated save at matching updates and compare the six
+   public checkpoint domains. Hidden RNG remains an explicit blind spot.
+4. Qualify TF3 vehicle factory `0x9EEE60` through admission `0x9D3120`, including
+   command/output-handle lifetime and callback obligations. Publish only after
+   confirmed suppression; send semantic desired state through existing
+   host-authoritative order; resolve local identity, recheck ownership and apply
+   once with callback plus state/finance postconditions.
+5. Continue through the full road loop and checkpoint reload/recovery before
+   cross-machine, four-player LAN and port-forwarded Internet acceptance.
+
+The conventional arbitrary-RIP `PROC FRAME` route is explicitly rejected by a
+real unwinder test and remains disabled. This is engineering work, not an
+external blocker. Readiness stays **4.5/10** until actual TF3 hold and the first
+two-instance authoritative action pass.
+
 ## Current critical path — 22 September 2026
 
 Commit `95d79c8` now provides the shortest genuine path from Steam launch into a
@@ -36,8 +76,12 @@ The implementation order is now:
    native-exception and rejoin recovery. Only after that run cross-machine,
    four-player LAN and port-forwarded Internet acceptance.
 
-Current verification is 858 discovered, 828 passed, 0 failed and 30 explicitly
-skipped in the unrestricted suite. All four native builds pass MSVC `/W4 /WX`.
+Current verification is 878 discovered, 848 passed, 0 failed and 30 explicitly
+skipped in the unrestricted suite. The focused new native/control set passes
+20/20. The control, control-IPC, negative continuation, same-image cold and
+cross-image native builds pass MSVC `/W4 /WX` and their applicable smoke tests.
+The existing production post-observer, runtime, native IPC and reversible
+WinHTTP proxy builds also pass at this milestone.
 Single-game in-process observation is verified; two-instance/cross-machine/
 four-player/Internet remain unperformed. There is no external blocker to the
 next control investigation. Readiness is approximately 4.5/10: observation is

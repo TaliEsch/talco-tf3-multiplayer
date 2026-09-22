@@ -1,5 +1,61 @@
 # Completion audit against the build prompt
 
+## Correlated-boundary continuation audit — 22 September 2026
+
+The objective remains active and incomplete. The current batch adds three
+concrete prerequisites without relabeling them as multiplayer:
+
+- A real disposable TF3 run correlated native post-site hits 5→133 with bridge
+  ticks 57134→57262 and bridge updates 2846→2974 at speed 1. Each delta was 128,
+  the owner remained thread 27704 and no cross-thread fault appeared. This
+  upgrades the observer from an uncorrelated real hit to one bounded live
+  one-for-one comparison; it is not yet a universal clock or safe hold site.
+- An owned ordinary-execution state machine and authenticated IPC adapter now
+  hold, release exactly one boundary, remain responsive during a slow advance,
+  latch disconnect/halt, reject duplicate/out-of-order/stale/malformed traffic
+  and preserve an unknown outcome after a consumed release timeout. They keep
+  `protocolHalted`, `simulationThreadHeld` and `engineHalted` distinct and never
+  claim either production qualification or TF3 engine halt.
+- Windows' real unwinder proves a conventional arbitrary-RIP `PROC FRAME` gate
+  invalid: it consumes interrupted local stack data as a return and misaligns
+  the helper call. An owned cold-fragment alternative now passes eight actual
+  VEH→ordinary wait→resume cases with all GPR/RSP/flags and all 2,432 enabled
+  XSAVE bytes preserved, 58/58 actual instruction-PC unwinds, native exception
+  propagation to the real caller and independent controller progress. CFG, CET
+  shadow stacks and context-IP validation remained enabled and the gate has
+  exact EHCONT metadata. A separate EXE/DLL fixture then passed the cross-image
+  shape beyond `rel32` range: 8/8 state-preserving hold/resume cases, 56/56
+  actual-PC unwinds, exact EHCONT targets, native-exception propagation, busy
+  teardown rejection and inert pinned-handler cleanup with CFG/CET enabled.
+  Both fixtures still report TF3 activation and production lifecycle false.
+
+Hash-pinned exception-directory parsing confirms the real Step post frame has
+the same saved-register/return layout and no EH/UH language handler or scope
+table across its nine chained runtime records. This supports the cold-fragment
+unwind model at `0x159581` specifically. Cross-image transfer is now qualified
+only in an owned fixture; runtime mitigation policy, live stack headroom,
+immutable owner/generation publication, terminal parking and TF3 teardown remain
+production work.
+
+The successful run shut the observer down authentically, stopped only the sole
+disposable TF3 process and removed the staged loader. All five owned paths are
+absent, no TF3 process remains, and the executable/stock `alut.dll` hashes remain
+unchanged. A preceding run that exhausted its shared load/sample deadline
+failed and is not evidence; the checker now uses separate deadlines and
+failure-path authenticated shutdown.
+
+TF2 `VREV` was traced through actual source. Its semantic capture/suppress/
+logical-key/replay separation is useful, while peer-assigned ordering, early
+`ARMED`, a global pending pointer, late execution and financial repair are not
+acceptable for TalCo. No TF2 code was copied. Production still lacks the safe
+TF3 continuation gate, Host/Join binding, stock action suppression, two-instance
+apply/comparison and checkpoint recovery. The unrestricted suite now discovers
+878 tests: 848 passed, 0 failed and 30 were explicitly skipped; the focused new
+native/control set passed 20/20 and all five new native build/smoke paths passed
+MSVC `/W4 /WX`. The existing production observer, in-process runtime, native
+IPC and reversible WinHTTP proxy also rebuilt successfully with applicable
+smoke tests. Readiness therefore remains **4.5/10**.
+
 ## Continuation audit — 22 September 2026
 
 The full multiplayer objective is active and incomplete. Commit `95d79c8`
