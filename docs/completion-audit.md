@@ -1,5 +1,16 @@
 # Completion audit against the build prompt
 
+## Running owner proof — 23 September 2026
+
+**Single-game verified:** the read-only targeted owner request for entity
+66005/company 3141 was issued at running TF3 update 3140, answered by the
+engine at 3142 and observed at 3143. The bounded proof window is model tested;
+paused lookup remains exact, and `executeHeld` still rechecks owner at the
+scheduled update. No native loader, host action, second instance or synchronized
+postcondition was exercised. TF3 exited without saving and the disposable save
+SHA-256 stayed `CCBF4BEB740E53323E06D20890FD029C8E174D3E85EFB06801A8B4275C762FB5`.
+**Stage 6:** open.
+
 ## Targeted owner proof at host admission — 23 September 2026
 
 **Implemented and model tested:** a targeted read-only engine receipt binds

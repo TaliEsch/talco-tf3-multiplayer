@@ -4,6 +4,7 @@ import path from "node:path";
 import { parseFlatDataFile, requirePlainDirectory } from "./userdata-ipc.mjs";
 import { createVehicleTest } from "./vehicle-test.mjs";
 import { EngineObservationMonitor } from "./engine-observation.mjs";
+import {ownerProofClockCurrent} from './vehicle-owner-proof.mjs';
 import { parseCompanyReceipt } from "./company-probe.mjs";
 import { parseFinanceReceipt } from "./finance-probe.mjs";
 import { fundingRequest, parseFundingReceipt } from "./phase2-funding.mjs";
@@ -609,29 +610,37 @@ export async function startGameBridge({ directory, logger = () => {}, intervalMs
             throw new Error('VEHICLE_DISCOVERY_BUSY');
           const update=observation.sample.updateCount;
           const tick=observation.sample.tickCount;
+          const paused=observation.sample.speedup===0;
           const requestId=++requestSequence;
           await publish(directory,'vehicle_discovery_request.lua',{
             schemaVersion:1,kind:'vehicle_discovery_request',nonce,requestId,company,entity});
-          return {requestId,update,tick};
+          return {requestId,update,tick,paused};
         });
         pending=start.catch(()=>{});
         const context=await start;
         const deadline=Date.now()+timeoutMs;
         while(!stopped&&Date.now()<deadline) {
           const observation=observations.status;
-          if(!connected||!observation.available||observation.sample.updateCount!==context.update)
+          if(!connected||!observation.available
+            ||(observation.sample.speedup===0)!==context.paused
+            ||observation.sample.updateCount<context.update
+            ||context.paused&&observation.sample.updateCount!==context.update)
             throw new Error('VEHICLE_OWNER_CONTEXT_LOST');
           try {
             const receipt=parseVehicleDiscoveryReceipt(await readBounded(directory,'vehicle_discovery_receipt.lua'),{
               nonce,requestId:context.requestId,company});
-            if(receipt.updateCount!==context.update||receipt.tickCount<context.tick)
+            if(receipt.updateCount<context.update||receipt.tickCount<context.tick)
               throw new Error('VEHICLE_OWNER_CLOCK_MISMATCH');
             if(receipt.outcome!=='found'||receipt.entity!==entity)
               throw new Error('VEHICLE_OWNER_NOT_CONFIRMED');
             const latest=observations.status;
-            if(stopped||!connected||!latest.available||latest.sample.updateCount!==context.update)
+            if(stopped||!connected||!latest.available
+              ||(latest.sample.speedup===0)!==context.paused
+              ||!ownerProofClockCurrent({issuedUpdate:context.update,
+                receiptUpdate:receipt.updateCount,hostUpdate:latest.sample.updateCount,
+                paused:context.paused}))
               throw new Error('VEHICLE_OWNER_CONTEXT_LOST');
-            return receipt;
+            return Object.freeze({...receipt,issuedUpdate:context.update,paused:context.paused});
           } catch(error) {
             if(['VEHICLE_OWNER_CLOCK_MISMATCH','VEHICLE_OWNER_NOT_CONFIRMED','VEHICLE_OWNER_CONTEXT_LOST'].includes(error.message))throw error;
             // Ignore old, incomplete and malformed receipts until the deadline.

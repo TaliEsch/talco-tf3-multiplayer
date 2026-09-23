@@ -1,5 +1,20 @@
 # TalCo TF3 multiplayer — current delivery plan
 
+## Running-world owner receipt window — 23 September 2026
+
+The targeted owner receipt now tolerates bounded update advance while TF3 is
+running. It remains nonce/request/company/entity bound, must be produced after
+the request, and may be at most 32 updates behind host admission; a paused
+world still requires exact update equality. Engine `executeHeld` independently
+rechecks ownership at application. In one ordinary TF3 instance using the
+disposable two-company save, entity 66005/company 3141 returned a running
+receipt: request update 3140, engine receipt 3142, observed update 3143. No
+native loader or multiplayer action was used. TF3 exited without saving; the
+save SHA-256 remained
+`CCBF4BEB740E53323E06D20890FD029C8E174D3E85EFB06801A8B4275C762FB5`.
+The native cancellation-to-host-ordering path and multi-instance application
+remain outstanding. Stage 6 remains open.
+
 ## Targeted engine ownership at host admission — 23 September 2026
 
 The GUI bridge and engine script now answer a read-only lookup for a specified

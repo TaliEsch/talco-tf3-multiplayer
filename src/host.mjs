@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { DEFAULT_BIND, DEFAULT_PORT, HELLO_TIMEOUT_MS, MAX_OUTBOUND_BYTES_PER_PEER, MAX_PENDING_CONNECTIONS, MAX_REQUESTS_PER_SECOND, MAX_SESSION_MESSAGES, MAX_STRING_LENGTH } from "./constants.mjs";
 import { FrameDecoder, decodeFrame, encodeFrame, makeBody } from "./protocol.mjs";
 import { HostAuthority, ProtocolError } from "./lockstep.mjs";
+import {ownerProofClockCurrent} from './vehicle-owner-proof.mjs';
 import { SessionCoordinator } from "./session-coordinator.mjs";
 import { connectClient } from "./client.mjs";
 
@@ -148,7 +149,8 @@ export function startHost({ secret, sessionId = randomUUID(), bind = DEFAULT_BIN
                 // One sampled update drives authority acceptance and proposal.
                 const hostUpdate=getUpdateCount();
                 if(verifiedOwner!==undefined){
-                  if(verifiedOwner.updateCount!==hostUpdate)
+                  if(!ownerProofClockCurrent({issuedUpdate:verifiedOwner.issuedUpdate,
+                    receiptUpdate:verifiedOwner.updateCount,hostUpdate,paused:verifiedOwner.paused}))
                     throw new ProtocolError('OWNERSHIP_UNAVAILABLE','engine owner receipt is stale');
                   verifiedOwner=verifiedOwner.company;
                 }
