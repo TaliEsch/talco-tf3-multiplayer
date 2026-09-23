@@ -36,12 +36,33 @@ export async function cancelOneLocalStop({nativeGate,bridge,entity,company,logge
   logger({level:'info',event:'local_cancel_stop_armed',entity,company,
     expectedInvocation:arm.expectedInvocation,ttlMs:5000,gameplayVerified:false});
   const deadline=Date.now()+7000;
+  const reportTerminal=(ping,state,code)=>{
+    let action;
+    try{action=client.passiveVehicleActionObservation(ping);}catch{}
+    const counterNames=['factoryHits','admissionHits','correlatedHits',
+      'callbackHits','sendReturnHits','marshalerReturnHits','postSendBodyCorrelatedHits',
+      'droppedCandidates'];
+    const counterDeltas=action&&Object.fromEntries(counterNames.map(key=>
+      [key,String(BigInt(action[key])-BigInt(baseline[key]))]));
+    logger({level:'warn',event:'local_cancel_stop_terminal_diagnostic',code,entity,company,
+      armState:state?.state??null,expectedInvocation:arm.expectedInvocation,
+      claimedInvocation:state?.claimedInvocation??null,claimedEntity:state?.claimedEntity??null,
+      ...(action?{counterDeltas,latestEntity:action.latestEntity,latestStopped:action.latestStopped,
+        latestValid:action.latestValid,latestCallbackValid:action.latestCallbackValid,
+        latestPostSendBodyValid:action.latestPostSendBodyValid,
+        latestCorrelatedAdmissionInvocation:action.latestCorrelatedAdmissionInvocation,
+        latestSendReturnInvocation:action.latestSendReturnInvocation,
+        latestPostSendBodyInvocation:action.latestPostSendBodyInvocation}:{}),gameplayVerified:false});
+  };
   while(Date.now()<deadline){
     if(nativeGate.ready!==true||!bridge.connected||!bridge.engineObservation?.available)
       throw new Error('LOCAL_CANCEL_CONTEXT_LOST');
     const ping=await client.control('ping');
     const state=client.vehicleCancelArmObservation(ping);
-    if(['expired','revoked','failed'].includes(state.state))throw new Error('LOCAL_CANCEL_ARM_TERMINAL');
+    if(['expired','revoked','failed'].includes(state.state)){
+      reportTerminal(ping,state,'LOCAL_CANCEL_ARM_TERMINAL');
+      throw new Error('LOCAL_CANCEL_ARM_TERMINAL');
+    }
     if(state.state==='completed'){
       const action=client.passiveVehicleActionObservation(ping);
       const proof=confirmCancelledStop({arm,state,baseline,action,entity});
@@ -54,5 +75,6 @@ export async function cancelOneLocalStop({nativeGate,bridge,entity,company,logge
     }
     await delay(pollMs);
   }
+  try{reportTerminal(await client.control('ping'),null,'LOCAL_CANCEL_COMPLETION_TIMEOUT');}catch{}
   throw new Error('LOCAL_CANCEL_COMPLETION_TIMEOUT');
 }

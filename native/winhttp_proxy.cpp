@@ -12,6 +12,7 @@
 #include <string>
 
 #include "inprocess_runtime_api.h"
+#include "inprocess_start_trace.h"
 #include "native_session_handoff.h"
 
 // An opt-in application-local forwarding proxy.  It exports precisely the 14
@@ -237,6 +238,7 @@ bool TryConsumeSession(RuntimeWorkerRequest* output) {
 DWORD WINAPI RuntimeWorker(void* parameter) {
     auto* request = static_cast<RuntimeWorkerRequest*>(parameter);
     const HMODULE worker_reference = request->worker_reference;
+    TraceNativeStart(L"-proxy-start.txt", "worker-entered");
     std::wstring proxy_path;
     std::array<wchar_t, 32768> buffer{};
     const DWORD length = GetModuleFileNameW(g_proxy_module, buffer.data(),
@@ -250,15 +252,21 @@ DWORD WINAPI RuntimeWorker(void* parameter) {
             HMODULE runtime = LoadLibraryExW(proxy_path.c_str(), nullptr,
                 LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32);
             if (runtime != nullptr) {
+                TraceNativeStart(L"-proxy-load.txt", "runtime-loaded");
                 const auto start = reinterpret_cast<Tf3InProcessRuntimeFunctionV1>(
                     GetProcAddress(runtime, "Tf3InProcessRuntimeV1"));
                 if (start != nullptr) {
                     const Tf3InProcessRuntimeRequestV1 runtime_request{
                         sizeof(Tf3InProcessRuntimeRequestV1), TF3_INPROCESS_RUNTIME_ABI_VERSION,
                         request->pipe_name.c_str(), request->session_token.c_str()};
-                    (void)start(&runtime_request);
+                    const auto result = start(&runtime_request);
+                    TraceNativeStart(L"-proxy-result.txt", "runtime-returned", result);
+                } else {
+                    TraceNativeStart(L"-proxy-result.txt", "entry-missing", GetLastError());
                 }
                 FreeLibrary(runtime);
+            } else {
+                TraceNativeStart(L"-proxy-load.txt", "runtime-load-failed", GetLastError());
             }
         }
     }

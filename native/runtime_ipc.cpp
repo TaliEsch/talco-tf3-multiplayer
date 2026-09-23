@@ -254,7 +254,10 @@ int ServeMode(const std::wstring& name, const std::string& token, bool inProcess
   if (!ValidPipeName(name) || !ValidToken(token)) return 9;
   HANDLE pipe=CreateOwnerPipe(name,inProcess); if(pipe==INVALID_HANDLE_VALUE) return 10;
   bool connected=false;
-  const ULONGLONG connectDeadline=GetTickCount64()+30000;
+  // TF3 can spend longer than thirty seconds reaching the main menu after
+  // the early WinHTTP forwarder starts this worker. Keep the one-shot,
+  // authenticated endpoint available through that bounded startup interval.
+  const ULONGLONG connectDeadline=GetTickCount64()+(inProcess?180000:30000);
   do {
     connected=ConnectNamedPipe(pipe,nullptr)!=FALSE || GetLastError()==ERROR_PIPE_CONNECTED;
     if(connected||!inProcess)break;

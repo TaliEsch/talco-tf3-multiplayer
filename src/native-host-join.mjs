@@ -45,6 +45,8 @@ export async function openNativeHostJoinGate({options,sessionId,role,logger=()=>
   try{client=await clientFactory(credentials);}
   catch(error){throw new Error(`NATIVE_RUNTIME_CONNECT_FAILED:${error?.message??'UNKNOWN'}`);}
   try{
+    if(Number.isInteger(client.handshake?.observerStartStatus))
+      throw new Error(`NATIVE_RUNTIME_GATE_START_STATUS_${client.handshake.observerStartStatus}`);
     for(const capability of COORDINATED_NATIVE_CAPABILITIES)client.requireCapability(capability);
     // The controller deliberately has no "join" role: every non-host game
     // process is an authenticated participant on the native IPC wire.

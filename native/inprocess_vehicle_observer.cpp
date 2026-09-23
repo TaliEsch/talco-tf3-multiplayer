@@ -12,22 +12,22 @@
 namespace tf3vehicleobserver {
 namespace {
 
-constexpr DWORD kFactoryRva = 0x9ef112;
-constexpr DWORD kFactoryPostRva = 0x9ef188;
-constexpr DWORD kAdmissionRva = 0xe2ad1c;
-constexpr DWORD kCallbackTailRva = 0xe3e7f4;
-constexpr DWORD kCallbackContinuationRva = 0xe2a3c0;
-constexpr DWORD kSendReturnRva = 0xe2ad22;
-constexpr DWORD kMarshalerReturnRva = 0xe119f7;
-constexpr DWORD kPostSendBodyRva = 0xe1bb28;
+constexpr DWORD kFactoryRva = 0x9ef122;
+constexpr DWORD kFactoryPostRva = 0x9ef198;
+constexpr DWORD kAdmissionRva = 0xe2ad4c;
+constexpr DWORD kCallbackTailRva = 0xe3e824;
+constexpr DWORD kCallbackContinuationRva = 0xe2a3f0;
+constexpr DWORD kSendReturnRva = 0xe2ad52;
+constexpr DWORD kMarshalerReturnRva = 0xe11a27;
+constexpr DWORD kPostSendBodyRva = 0xe1bb58;
 constexpr DWORD kCallbackVtableRva = 0x373fa90;
-constexpr DWORD kCallbackInvokeRva = 0xe3e7f0;
+constexpr DWORD kCallbackInvokeRva = 0xe3e820;
 constexpr std::array<unsigned char, 3> kFactoryBytes{0x41, 0x8b, 0xd8}; // mov ebx,r8d
 constexpr std::array<unsigned char, 1> kFactoryPostBytes{0x90}; // nop after constructed output
 constexpr std::array<unsigned char, 3> kAdmissionBytes{0x48, 0x8b, 0xd3}; // mov rdx,rbx
 constexpr std::array<unsigned char, 5> kCallbackTailBytes{0xe9, 0xc7, 0xbb, 0xfe, 0xff};
 constexpr std::array<unsigned char, 1> kNormalReturnBytes{0x90};
-constexpr std::array<unsigned char, 9> kSendReturnWindow{0x90, 0x48, 0x8b, 0xcb, 0xe8, 0xc5, 0x4c, 0xba, 0xff};
+constexpr std::array<unsigned char, 9> kSendReturnWindow{0x90, 0x48, 0x8b, 0xcb, 0xe8, 0x95, 0x4c, 0xba, 0xff};
 constexpr std::array<unsigned char, 9> kMarshalerReturnWindow{0x90, 0x48, 0x8b, 0x94, 0x24, 0xb0, 0x00, 0x00, 0x00};
 constexpr std::array<unsigned char, 6> kPostSendBodyWindow{0xe8, 0x38, 0xf0, 0x00, 0x00, 0x90};
 constexpr std::uintptr_t kMaximumUserPointer = 0x00007fffffffffffULL;
@@ -326,8 +326,8 @@ void InvalidateSendFrame(const CONTEXT* context, DWORD thread) noexcept {
 }
 
 std::uintptr_t SafeReadCallerStack(const CONTEXT* context) noexcept {
-    // e26870 pushes 7 qwords and subtracts 140h: entry RSP=S+178h;
-    // RET restores the e177d0 caller RSP to S+180h. Only this direct caller
+    // e2ab90 pushes 7 qwords and subtracts 140h: entry RSP=S+178h;
+    // RET restores the e1bb53 caller RSP to S+180h. Only this direct caller
     // has the observed cleanup continuation. Read its live return slot now.
     const auto stack = static_cast<std::uintptr_t>(context->Rsp);
     if (stack < 0x10000 || stack > kMaximumUserPointer - 0x180) return 0;
@@ -399,8 +399,8 @@ bool SafeReadMarshalerEntry(std::uintptr_t pack, std::uintptr_t* entry) noexcept
 }
 
 void RecordMarshalerReturn(const CONTEXT* context) noexcept {
-    // e0d630 preserves the incoming pack in nonvolatile RBX. [pack+8] is
-    // its caller's live entry, as used at e0d676 before CALL d8a820.
+    // The marshaler preserves the incoming pack in nonvolatile RBX. [pack+8]
+    // is its caller's live entry at this qualified return boundary.
     std::uintptr_t entry = 0, storage = 0;
     std::int32_t entity = 0;
     std::uint8_t stopped = 0, result = 0;
@@ -419,7 +419,7 @@ void RecordMarshalerReturn(const CONTEXT* context) noexcept {
 }
 
 void RecordPostSendBody(const CONTEXT* context) noexcept {
-    // e1bb28 is the NOP immediately following e1bb23 CALL e2ab60. Reaching
+    // e1bb58 is the NOP immediately following e1bb53 CALL e2ab90. Reaching
     // it proves the whole send body, including its native cleanup, returned
     // normally; no entry, callback, or progress pointer is retained here.
     const DWORD thread = GetCurrentThreadId();
@@ -509,11 +509,11 @@ bool SafeReadCheckedCallback(const CONTEXT* context, std::uintptr_t* implementat
 #endif
         const auto target = *reinterpret_cast<const std::uintptr_t*>(original_table + 0x10);
         const bool allowed_adapter =
-            (original_table == base + 0x367cc00 && target == base + 0x1201a0) ||
-            (original_table == base + 0x367cb20 && target == base + 0x1201a0) ||
-            (original_table == base + 0x36cab88 && target == base + 0x6ab640) ||
-            (original_table == base + 0x3788880 && target == base + 0x27c86e0) ||
-            (original_table == base + 0x367cc38 && target == base + 0x120410);
+            (original_table == base + 0x367cc00 && target == base + 0x1201b0) ||
+            (original_table == base + 0x367cb20 && target == base + 0x1201b0) ||
+            (original_table == base + 0x36cab88 && target == base + 0x6ab630) ||
+            (original_table == base + 0x3788880 && target == base + 0x27c8810) ||
+            (original_table == base + 0x367cc38 && target == base + 0x120420);
         if (!allowed_adapter || table != base + kCallbackVtableRva ||
             *reinterpret_cast<const std::uintptr_t*>(table + 0x10) != base + kCallbackInvokeRva) return false;
         *implementation = original;

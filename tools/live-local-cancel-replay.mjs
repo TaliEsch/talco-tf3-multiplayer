@@ -17,6 +17,9 @@ assert.equal(process.platform,'win32','WINDOWS_REQUIRED');
 assert.ok(path.isAbsolute(save??'')&&existsSync(save),'DISPOSABLE_SAVE_REQUIRED');
 assert.ok(path.isAbsolute(bridgeDirectory??'')&&path.basename(bridgeDirectory)==='tf3mp_status_1',
   'BRIDGE_DIRECTORY_REQUIRED');
+assert.equal(path.resolve(bridgeDirectory).toLowerCase(),
+  path.join(path.dirname(path.dirname(save)),'tf3mp_status_1').toLowerCase(),
+  'BRIDGE_MUST_MATCH_SAVE_USERDATA_ROOT');
 const exe=requestedExe??'E:\\Steam\\steamapps\\common\\Transport Fever 3\\TransportFever3.exe';
 const handoff=fileURLToPath(new URL('../dist/native-loader/TF3NativeSessionHandoff.exe',import.meta.url));
 const cli=fileURLToPath(new URL('../src/cli.mjs',import.meta.url));

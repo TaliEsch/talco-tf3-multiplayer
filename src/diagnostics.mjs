@@ -11,6 +11,20 @@ export function diagnosticLogger(stream = process.stdout) {
         && record.issues.split("_").length <= 24
         && record.issues.split("_").every(token => /^[A-Za-z][A-Za-z0-9]{0,95}$/.test(token))) safe.issues = record.issues;
     }
+    if (record.event === "local_cancel_stop_terminal_diagnostic") {
+      const counterNames = ["factoryHits", "admissionHits", "correlatedHits", "callbackHits",
+        "sendReturnHits", "marshalerReturnHits", "postSendBodyCorrelatedHits", "droppedCandidates"];
+      if (record.counterDeltas && typeof record.counterDeltas === "object"
+        && counterNames.every(name => /^\d{1,20}$/.test(record.counterDeltas[name] ?? "")))
+        safe.counterDeltas = Object.fromEntries(counterNames.map(name => [name, record.counterDeltas[name]]));
+      for (const name of ["entity", "company", "expectedInvocation", "claimedInvocation",
+        "claimedEntity", "latestEntity", "latestStopped", "latestValid", "latestCallbackValid",
+        "latestPostSendBodyValid", "latestCorrelatedAdmissionInvocation",
+        "latestSendReturnInvocation", "latestPostSendBodyInvocation"])
+        if (Number.isSafeInteger(record[name])) safe[name] = record[name];
+      if (["disabled", "armed", "claimed", "completed", "expired", "revoked", "failed"].includes(record.armState))
+        safe.armState = record.armState;
+    }
     allowed.add("validation");
     allowed.add("recommended");
     allowed.add("gameplayVerified");

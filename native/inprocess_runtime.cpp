@@ -12,6 +12,7 @@
 #include <string>
 
 #include "inprocess_runtime_api.h"
+#include "inprocess_start_trace.h"
 #include "inprocess_post_observer.h"
 #include "inprocess_vehicle_observer.h"
 #include "production_boundary_gate.h"
@@ -263,6 +264,7 @@ tf3runtimeipc::PassiveVehicleActionObservation ReadPassiveVehicleObservation() n
 
 extern "C" __declspec(dllexport) DWORD WINAPI Tf3InProcessRuntimeV1(
     const Tf3InProcessRuntimeRequestV1* request) {
+    TraceNativeStart(L"-runtime-enter.txt", "runtime-entered");
     if (request == nullptr || request->struct_size != sizeof(*request) ||
         request->abi_version != TF3_INPROCESS_RUNTIME_ABI_VERSION) {
         return TF3_INPROCESS_RUNTIME_INVALID_REQUEST;
@@ -305,6 +307,8 @@ extern "C" __declspec(dllexport) DWORD WINAPI Tf3InProcessRuntimeV1(
                                                TF3_NATIVE_PROBE_ABI_VERSION};
     const Tf3NativeProbeResult result = probe_function(&probe_request);
     FreeLibrary(probe);
+    TraceNativeStart(L"-runtime-probe.txt", "probe-result",
+        static_cast<unsigned>(result.status), result.capability_flags);
     if (result.struct_size != sizeof(result) ||
         result.abi_version != TF3_NATIVE_PROBE_ABI_VERSION) {
         return TF3_INPROCESS_RUNTIME_PROBE_ABI_FAILED;
@@ -323,6 +327,8 @@ extern "C" __declspec(dllexport) DWORD WINAPI Tf3InProcessRuntimeV1(
     // boundary. Its sites are disjoint from the production gate.
     const auto vehicle_status = tf3vehicleobserver::Start();
     const auto gate_status = tf3boundary::Start();
+    TraceNativeStart(L"-runtime-gate.txt", "vehicle-gate",
+        static_cast<unsigned>(vehicle_status), static_cast<unsigned>(gate_status));
     if (gate_status == tf3boundary::Status::started) {
         // The observer is diagnostic-only: it captures the exact vehicle
         // factory arguments and the common scripting submission boundary. It
@@ -335,6 +341,8 @@ extern "C" __declspec(dllexport) DWORD WINAPI Tf3InProcessRuntimeV1(
         const int server_status = tf3runtimeipc::ServeInProcess(
             pipe, token, &ReadBoundaryObservation, 0, &production_gate_provider,
             TF3_RUNTIME_IPC_INPROCESS_GATE_LEASE_MS, vehicle_provider, cancel_provider);
+        TraceNativeStart(L"-runtime-server.txt", "server-returned",
+            static_cast<unsigned>(server_status));
         const auto vehicle_stop = tf3vehicleobserver::Stop();
         const auto snapshot = tf3boundary::Read().gate;
         if (snapshot.state != inprocess_gate::State::detached)
@@ -357,6 +365,13 @@ extern "C" __declspec(dllexport) DWORD WINAPI Tf3InProcessRuntimeV1(
     }
     if (gate_status != tf3boundary::Status::disabled_pending_live_qualification) {
         if (tf3boundary::Read().active) (void)tf3boundary::RequestHalt();
+        // Report the exact failed gate state over the authenticated diagnostic
+        // transport. No observer, gate provider or gameplay capability is
+        // exposed; a Host/Join client must reject this session.
+        const int diagnostic_status = tf3runtimeipc::ServeInProcess(pipe, token, nullptr,
+            100u + static_cast<std::uint32_t>(gate_status));
+        TraceNativeStart(L"-runtime-server.txt", "diagnostic-returned",
+            static_cast<unsigned>(diagnostic_status));
         return TF3_INPROCESS_RUNTIME_UNSUPPORTED_EXECUTABLE;
     }
 

@@ -33,6 +33,15 @@ test('native Host/Join gate fails closed before admission for a missing required
   assert.equal(client.closed,true);
 });
 
+test('native Host/Join reports an authenticated failed gate start without admission',async()=>{
+  const client=new FakeClient(['transport.health','session.bind']);
+  client.handshake={engineObserver:false,productionQualified:false,observerStartStatus:104};
+  await assert.rejects(openNativeHostJoinGate({options,role:'host',sessionId:SESSION,
+    clientFactory:async()=>client}),/NATIVE_RUNTIME_GATE_START_STATUS_104/);
+  assert.equal(client.bound,null);
+  assert.equal(client.closed,true);
+});
+
 test('debugger qualification is never treated as production admission',async()=>{
   const client=new FakeClient(COORDINATED_NATIVE_CAPABILITIES,{productionQualified:false});
   await assert.rejects(openNativeHostJoinGate({options,role:'host',sessionId:SESSION,clientFactory:async()=>client}),/NOT_PRODUCTION_QUALIFIED/);

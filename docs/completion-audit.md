@@ -1,5 +1,9 @@
 # Completion audit against the build prompt
 
+## Build-40392 single-game Stop attempt — 23 September 2026
+
+**Observed in TF3:** the exact-hash loader and production Host native gate connected, and the live bridge issued an owner/prestate receipt for moving Road Vehicle 1 (entity 66005, host company 3141). Two fresh disposable-save trials clicked Stop 284 ms and 319 ms after the native arm. Both arms expired; the vehicle continued moving. The second trial's native counter deltas were zero at all eight observed sites, including command factory and admission. No cancellation receipt, host sequence, held replay receipt, or stopped postcondition exists. The helper halted rather than retrying. The disposable save hash remained unchanged; the loader was removed. This is one-game failure evidence, not a Stage 6 pass or multi-instance evidence. The next critical action is to identify and qualify the actual build-40392 Stop command path, then repeat the ordered Stop integration test once.
+
 ## Latest Stage 6 attempt — 23 September 2026
 
 **Single-game result:** an earlier run on executable hash `297ef05b...` reached

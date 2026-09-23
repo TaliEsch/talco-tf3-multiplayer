@@ -2,6 +2,19 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { diagnosticLogger } from "../src/diagnostics.mjs";
 
+test("local cancel terminal diagnostic keeps bounded counters without raw evidence", () => {
+  const records=[];
+  const log=diagnosticLogger({write:text=>records.push(JSON.parse(text))});
+  const names=["factoryHits", "admissionHits", "correlatedHits", "callbackHits",
+    "sendReturnHits", "marshalerReturnHits", "postSendBodyCorrelatedHits", "droppedCandidates"];
+  log({event:"local_cancel_stop_terminal_diagnostic",armState:"expired",expectedInvocation:42,
+    counterDeltas:Object.fromEntries(names.map(name=>[name,"1"])),secret:"private"});
+  assert.equal(records[0].armState,"expired");
+  assert.equal(records[0].expectedInvocation,42);
+  assert.equal(records[0].counterDeltas.factoryHits,"1");
+  assert.equal(records[0].secret,undefined);
+});
+
 test("replay workflow retains bounded launcher artifact identities without secrets", () => {
   const records=[];
   const log=diagnosticLogger({write:text=>records.push(JSON.parse(text))});
