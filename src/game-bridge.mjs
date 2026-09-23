@@ -120,6 +120,7 @@ export async function startGameBridge({ directory, logger = () => {}, intervalMs
   let probe = null, requestSequence = 0;
   let vehicleTest = null;
   let vehicleDiscoveryBusy = false;
+  let singleStopPermitBusy = false;
   let pauseTest = null;
   let controlLease = null;
   let snapshotProbe = null;
@@ -547,6 +548,38 @@ export async function startGameBridge({ directory, logger = () => {}, intervalMs
     get connected() { return connected; },
     get clock() { return { ...clock }; },
     get engineObservation() { return { ...observations.status, available: connected && observations.status.available }; },
+    async openSingleStopPermit({entity,invocation,timeoutMs=1700}={}) {
+      if(singleStopPermitBusy)throw new Error('SINGLE_STOP_PERMIT_ALREADY_USED');
+      if(!Number.isSafeInteger(entity)||entity<1||entity>2147483647
+        ||typeof invocation!=='string'||!(/^[1-9][0-9]*$/).test(invocation)
+        ||!Number.isSafeInteger(timeoutMs)||timeoutMs<100||timeoutMs>2500)
+        throw new TypeError('INVALID_SINGLE_STOP_PERMIT');
+      if(stopped||!connected||!observations.status.available||controlLease?.phase!=='locked'
+        ||!coordinationLease?.active)throw new Error('SINGLE_STOP_CONTROL_LEASE_REQUIRED');
+      singleStopPermitBusy=true;
+      const deadlineUnix=Math.floor(Date.now()/1000)+4;
+      await unlink(path.join(directory,'stop_permit_receipt.lua')).catch(()=>{});
+      await publish(directory,'stop_permit_request.lua',{
+        schemaVersion:1,kind:'stop_permit_request',nonce,entity,invocation,deadlineUnix});
+      const deadline=Date.now()+timeoutMs;
+      while(Date.now()<deadline){
+        if(stopped||!connected||!observations.status.available||controlLease?.phase!=='locked'
+          ||!coordinationLease?.active)throw new Error('SINGLE_STOP_CONTROL_LEASE_LOST');
+        try{
+          const receipt=parseFlatDataFile(await readBounded(directory,'stop_permit_receipt.lua'));
+          if(Object.keys(receipt).sort().join(',')==='entity,invocation,kind,nonce,ready,schemaVersion'
+            &&receipt.schemaVersion===1&&receipt.kind==='stop_permit_receipt'
+            &&receipt.nonce===nonce&&receipt.entity===entity&&receipt.invocation===invocation
+            &&receipt.ready===1&&Date.now()/1000<=deadlineUnix)return {deadlineUnix};
+        }catch(error){if(!['ENOENT','EBUSY'].includes(error.code))throw error;}
+        await delay(50);
+      }
+      throw new Error('SINGLE_STOP_PERMIT_TIMEOUT');
+    },
+    async closeSingleStopPermit() {
+      await unlink(path.join(directory,'stop_permit_request.lua')).catch(()=>{});
+      await unlink(path.join(directory,'stop_permit_receipt.lua')).catch(()=>{});
+    },
     async discoverOwnedVehicle({timeoutMs=15000}={}) {
       if(vehicleDiscoveryBusy)throw new Error('VEHICLE_DISCOVERY_BUSY');
       if(!Number.isSafeInteger(timeoutMs)||timeoutMs<100||timeoutMs>30000)throw new TypeError('INVALID_VEHICLE_DISCOVERY_TIMEOUT');
@@ -1110,6 +1143,8 @@ export async function startGameBridge({ directory, logger = () => {}, intervalMs
       if (vehicleTest) await vehicleTest.close();
       for (const name of ["vehicle_intent.lua", "vehicle_command.lua", "vehicle_receipt.lua"]) await unlink(path.join(directory, name)).catch(() => {});
       await unlink(path.join(directory, 'vehicle_discovery_request.lua')).catch(() => {});
+      await unlink(path.join(directory, 'stop_permit_request.lua')).catch(() => {});
+      await unlink(path.join(directory, 'stop_permit_receipt.lua')).catch(() => {});
       await unlink(path.join(directory, "bridge.lua")).catch(() => {});
       await unlink(path.join(directory, "ack.lua")).catch(() => {});
       await unlink(path.join(directory, "engine_request.lua")).catch(() => {});

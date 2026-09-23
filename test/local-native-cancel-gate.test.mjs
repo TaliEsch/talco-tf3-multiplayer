@@ -23,15 +23,18 @@ const completed={state:'completed',expectedInvocation:'1',claimedInvocation:'1',
   callbackResultZero:true,sendReturn:true,postSendBody:true};
 
 function fixture({afterFlag=0,nativeAction=action}={}){
-  let pings=0,inspections=0,arms=0;
+  let pings=0,inspections=0,arms=0,permits=0,closes=0;
   const client={requireCapability:()=>{},control:async()=>({index:++pings}),
     vehicleCancelArmObservation:ping=>ping.index===1?{state:'disabled'}:completed,
     passiveVehicleActionObservation:ping=>ping.index===1?baseline:nativeAction,
     armVehicleCancel:async()=>{arms++;return {expectedInvocation:'1'};}};
   const nativeGate={ready:true,client};
   const bridge={connected:true,engineObservation:{available:true,sample:{speedup:1}},
-    inspectVehicleOwner:async()=>({stopFlag:++inspections===2?afterFlag:0})};
-  return {nativeGate,bridge,get arms(){return arms;},get inspections(){return inspections;}};
+    inspectVehicleOwner:async()=>({stopFlag:++inspections===2?afterFlag:0}),
+    openSingleStopPermit:async({entity,invocation})=>{assert.equal(entity,42);assert.equal(invocation,'1');permits++;return {deadlineUnix:1};},
+    closeSingleStopPermit:async()=>{closes++;}};
+  return {nativeGate,bridge,get arms(){return arms;},get inspections(){return inspections;},
+    get permits(){return permits;},get closes(){return closes;}};
 }
 
 test('one-game cancellation requires exact native proof and unchanged Stop flag',async()=>{
@@ -39,6 +42,7 @@ test('one-game cancellation requires exact native proof and unchanged Stop flag'
   const proof=await cancelOneLocalStop({...f,entity:42,company:7,logger:e=>events.push(e)});
   assert.equal(proof.invocation,'1');
   assert.equal(f.arms,1);assert.equal(f.inspections,2);
+  assert.equal(f.permits,1);assert.equal(f.closes,1);
   assert.deepEqual(events.map(e=>e.event),['local_cancel_stop_owner_prestate',
     'local_cancel_stop_armed','local_cancel_stop_confirmed']);
 });
@@ -49,5 +53,6 @@ test('one-game cancellation rejects native ambiguity and changed game state',asy
     await assert.rejects(cancelOneLocalStop({...f,entity:42,company:7}),
       /NOT_EXACTLY_ONCE|POSTSTATE_CHANGED/);
     assert.equal(f.arms,1);
+    assert.equal(f.closes,1);
   }
 });

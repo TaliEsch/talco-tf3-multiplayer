@@ -58,7 +58,9 @@ test('review rejects missing callback-time guard and command dispatch in replace
     await cp(new URL('../mod', import.meta.url), root, { recursive: true });
     const file = path.join(root, 'content', 'tf3mp_native_controls.script.tl');
     const original = await readFile(file, 'utf8');
-    for (const marker of ['if not blocked then onClick() end', 'if not blocked or owner ~= nonce then return false end']) {
+    for (const marker of ['if not blocked then onClick() end',
+      'if blocked and permitted and isStop then',
+      'replacementApi.ReplaceRecipe(vehicle_window, GuardedVehicle)']) {
       await writeFile(file, original.replace(marker, ''));
       await assert.rejects(validateReviewPackage(root), /native-control guard/);
     }

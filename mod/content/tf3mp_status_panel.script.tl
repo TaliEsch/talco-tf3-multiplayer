@@ -892,6 +892,52 @@ local function exchangeSpeedControls() : nil
   return nil
 end
 
+local stopPermitSeen = ""
+local stopPermitReceiptSent = false
+local function exchangeSingleStopPermit() : nil
+  if not controlOwned or controlSent ~= "acquire:acquired" or missedAcks > 10
+    or not userdataExists("stop_permit_request") then
+    native_controls.revokeSingleStop(bridgeNonce)
+    stopPermitSeen = ""
+    stopPermitReceiptSent = false
+    return nil
+  end
+  local request = app.loadUserdata("tf3mp_status_1", "stop_permit_request")
+  if request.schemaVersion ~= 1 or request.kind ~= "stop_permit_request"
+    or request.nonce ~= bridgeNonce or type(request.entity) ~= "number"
+    or request.entity < 1 or request.entity > 2147483647 or request.entity % 1 ~= 0
+    or type(request.invocation) ~= "string" or not string.match(request.invocation, "^[1-9][0-9]*$")
+    or type(request.deadlineUnix) ~= "number" or request.deadlineUnix % 1 ~= 0
+    or request.deadlineUnix <= os.time() or request.deadlineUnix > os.time() + 4 then
+    native_controls.revokeSingleStop(bridgeNonce)
+    stopPermitSeen = ""
+    return nil
+  end
+  local key = request.entity .. ":" .. request.invocation
+  if stopPermitSeen ~= key then
+    native_controls.revokeSingleStop(bridgeNonce)
+    stopPermitSeen = key
+    stopPermitReceiptSent = false
+    if not native_controls.armSingleStop(bridgeNonce, request.entity, request.invocation, request.deadlineUnix) then return nil end
+  end
+  if not stopPermitReceiptSent and native_controls.pollSingleStopReady(bridgeNonce, request.entity, request.invocation) then
+    app.saveUserdata("tf3mp_status_1", "stop_permit_receipt", {
+      schemaVersion = 1, kind = "stop_permit_receipt", nonce = bridgeNonce,
+      entity = request.entity, invocation = request.invocation, ready = 1,
+    })
+    stopPermitReceiptSent = true
+  end
+  local diagnostic = native_controls.stopDiagnostic()
+  app.saveUserdata("tf3mp_status_1", "stop_permit_diagnostic", {
+    schemaVersion = 1, kind = "stop_permit_diagnostic", nonce = bridgeNonce,
+    entity = request.entity, invocation = request.invocation,
+    click = diagnostic.click, ready = diagnostic.ready, used = diagnostic.used,
+    everUsed = diagnostic.everUsed, windows = diagnostic.windows,
+    deadlineUnix = diagnostic.deadlineUnix, sampleUnix = os.time(),
+  })
+  return nil
+end
+
 local function dispatchVehicleAtUpdate() : nil
   if pendingVehicleDelivery.nonce == nil then return nil end
   local request = pendingVehicleDelivery
@@ -1853,6 +1899,12 @@ local Tf3MpStatusPanel = react.RegisterPluginRecipe(game_bar_widgets.GameBarInfo
         pcall(restoreSpeedControls)
         bridgeFailed = true
         bridgeStatus:set("speed control test failed / stop helper")
+      end
+      local permitOk = pcall(exchangeSingleStopPermit)
+      if not permitOk then
+        pcall(native_controls.revokeSingleStop, bridgeNonce)
+        bridgeFailed = true
+        bridgeStatus:set("Stop permit failed / stop helper")
       end
     end
   end)

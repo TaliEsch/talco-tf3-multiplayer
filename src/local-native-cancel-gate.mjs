@@ -9,7 +9,8 @@ export async function cancelOneLocalStop({nativeGate,bridge,entity,company,logge
   if(nativeGate?.ready!==true||!bridge?.connected||!bridge.engineObservation?.available
     ||!Number.isSafeInteger(entity)||entity<1||!Number.isSafeInteger(company)||company<1
     ||typeof logger!=='function'||!Number.isSafeInteger(pollMs)||pollMs<25||pollMs>500
-    ||typeof client?.armVehicleCancel!=='function'||typeof client?.control!=='function')
+    ||typeof client?.armVehicleCancel!=='function'||typeof client?.control!=='function'
+    ||typeof bridge?.openSingleStopPermit!=='function'||typeof bridge?.closeSingleStopPermit!=='function')
     throw new Error('LOCAL_CANCEL_CONTEXT_UNAVAILABLE');
   for(const capability of ['vehicle.cancel-arm.v1','diagnostic.vehicle-cancel-arm.v1',
     'diagnostic.passive-vehicle-action.v1'])client.requireCapability(capability);
@@ -33,8 +34,11 @@ export async function cancelOneLocalStop({nativeGate,bridge,entity,company,logge
   const baseline=client.passiveVehicleActionObservation(initialPing);
   if(!baseline.active||baseline.saturated)throw new Error('LOCAL_CANCEL_OBSERVER_UNAVAILABLE');
   const arm=await client.armVehicleCancel({entity,stopped:1,ttlMs:5000});
+  try {
+  const permit=await bridge.openSingleStopPermit({entity,invocation:arm.expectedInvocation});
   logger({level:'info',event:'local_cancel_stop_armed',entity,company,
-    expectedInvocation:arm.expectedInvocation,ttlMs:5000,gameplayVerified:false});
+    expectedInvocation:arm.expectedInvocation,ttlMs:5000,permitDeadlineUnix:permit.deadlineUnix,
+    gameplayVerified:false});
   const deadline=Date.now()+7000;
   const reportTerminal=(ping,state,code)=>{
     let action;
@@ -77,4 +81,5 @@ export async function cancelOneLocalStop({nativeGate,bridge,entity,company,logge
   }
   try{reportTerminal(await client.control('ping'),null,'LOCAL_CANCEL_COMPLETION_TIMEOUT');}catch{}
   throw new Error('LOCAL_CANCEL_COMPLETION_TIMEOUT');
+  } finally { await bridge.closeSingleStopPermit(); }
 }
