@@ -439,6 +439,7 @@ if (command === 'prepare-join') {
   for (const required of ["session", "name", "mod-hash"]) if (!opt[required]) throw new Error(`join requires --${required}`);
   const nativeMode=resolveNativeHostJoinMode(opt);
   if(!nativeMode.diagnosticOnly&&(!opt['save-dir']||!opt['bridge-dir']))throw new Error('join production mode requires --save-dir and --bridge-dir');
+  if(!nativeMode.diagnosticOnly&&!opt['prepared-save'])throw new Error('join production mode requires --prepared-save from prepare-join before TF3 launch');
   if(opt['prepared-save']&&!opt['save-dir'])throw new Error('prepared Join save requires --save-dir');
   const buildHash = await readGameBuild(opt.exe ?? "E:\\Steam\\steamapps\\common\\Transport Fever 3\\TransportFever3.exe");
   log({ level: describeBuild(buildHash).recommended ? "info" : "warn", event: "game_hash", ...describeBuild(buildHash) });

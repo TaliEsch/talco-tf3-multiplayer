@@ -53,3 +53,11 @@ test('prepare-join CLI downloads authenticated Host save and creates a one-use s
     await new Promise(resolve=>server.server.close(resolve));
   }
 });
+
+test('production Join rejects a missing prepared save before contacting TF3 or Host', async () => {
+  await assert.rejects(execFileAsync(process.execPath,['src/cli.mjs','join','--session','prepare.test',
+    '--name','Join','--mod-hash','a'.repeat(64),'--save-dir','C:\\unused\\save',
+    '--bridge-dir','C:\\unused\\tf3mp_status_1','--native-pipe','unused','--native-token','unused'],
+  {cwd:path.resolve(import.meta.dirname,'..'),env:{...process.env,TF3MP_SESSION_SECRET:'x'.repeat(32)},timeout:10000}),
+  /requires --prepared-save/);
+});

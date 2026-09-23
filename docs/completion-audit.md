@@ -5,7 +5,7 @@
 The Join CLI now offers `prepare-join`: it downloads the authenticated Host
 save into the Join save directory, checks its identity, and creates an exclusive
 disposable copy and one-use startup-load request before TF3 starts. Production
-Join can use `--prepared-save` and verifies that direct, regular file against
+Join requires `--prepared-save` and verifies that direct, regular file against
 the Host's admitted bytes/hash before sending `save_ready`. The two-instance
 plan lists this preparation step. A local encrypted save-server → CLI →
 startup-request integration test passed, as did the focused Join/bootstrap
