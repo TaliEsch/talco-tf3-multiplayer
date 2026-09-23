@@ -1,5 +1,65 @@
 # TalCo TF3 multiplayer — current delivery plan
 
+## Current stage-6 gate — 23 September 2026
+
+Still below **6/10**. Two normal-return observation sites are implemented and
+owned-tested, but the first six-site live run never reached an action-ready
+state after a second world load in one process: public tick/update advanced
+3,422 with no native observer-hit increase. Diagnose whether the observer's
+first-thread-only counter saw a new world thread; then run a fresh single-load
+trial and qualify normal send/marshaler returns. Only after that should one
+bounded vehicle Stop be suppressed, host-ordered and applied once through the
+retained coordinator and game-side executor. Neither a passive receipt nor
+the previous gate pass meets stage 6. See `native-review-handoff.md` for the
+failed run and exact safety cleanup.
+
+Integration builds passed. The final elevated full suite found **912 tests:
+906 passed, 5 failed, 1 skipped**; the five out-of-process native debugger
+teardown failures remain open. The full multiplayer goal is paused at the
+user's request, not complete.
+
+## Live callback and speed-qualified gate — 23 September 2026
+
+Readiness is approximately **5.9/10**, not stage 6 or the requested stage 8.
+The exact-build native observer now sees one stock road-vehicle Stop action
+through factory → scripting admission → correlated native callback wrapper,
+with one copied pointer-free receipt (entity 102852, stopped 1, entry result 0,
+callback result 1). The callback wrapper is not proof the Lua/UI completion ran.
+The first bridge-connected gate check failed its public-clock assertion at 4x;
+the native release/re-hold had occurred, but the checker assumed an unqualified
+one-boundary-to-one-update mapping at that speed. The checker now requires
+normal speed. A separate speed-1 gate-only run passed one native release,
+one public tick/update, re-hold, detach and resume. The failed trial's
+shutdown intentionally fail-stopped its game; it did not qualify normal
+teardown. TalCo was confirmed active for both disposable loads and the
+original save hash stayed unchanged.
+
+A repeat stock road-vehicle stop at observed speed 1 confirmed an empty
+admission progress pair and the admission/callback thread (37136), but its
+combined gate check exposed a further issue: native boundary hits stayed
+fixed while the public update count advanced once during hold (1037707 →
+1037708). The checker failed closed, and the disposable game was exited
+without saving. The checker had counted repeated reads of one stale game-side
+sample as separate stable observations. It now requires fresh producer
+counters and exactly one public tick/update per speed-1 release. A further
+disposable gate-only run passed this stricter criterion: held tick/update
+1207524/1037489, re-held 1207525/1037490, native hits 260 → 261, detached
+and resumed 1207527/1037492. The earlier failure remains in the audit; it
+does not alone establish a world mutation after hold. General synchronized
+simulation and the action-containing hold sequence remain unqualified.
+
+Next: keep the callback route passive while qualifying the send continuation, Lua marshaler
+return, and exceptional cleanup. Only then attempt one-use cancellation.
+Capture a semantic intent *after confirmed suppression*, feed both host and
+client actions through the retained coordinator, apply once at the native
+boundary with correlated postconditions, and compare two real instances at
+matched updates. Expand from that slice to the complete separate-company road
+loop, checkpoint recovery and LAN/Internet/four-player acceptance. Model tests,
+the callback receipt and the speed-1 gate are necessary but do not satisfy
+stage 6 alone. Current full suite: **911 discovered, 905 passed, 5 failed,
+1 skipped**; the five are older out-of-process debugger fixture teardown
+failures. No multiplayer gameplay family is yet enabled.
+
 ## Read-only admission qualification — 22 September 2026
 
 Readiness is about **5.8/10**, still below stage 6. A second disposable TF3

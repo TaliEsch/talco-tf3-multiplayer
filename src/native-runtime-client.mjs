@@ -24,20 +24,44 @@ const uint64Text=value=>typeof value==='string'&&/^(?:0|[1-9][0-9]{0,19})$/.test
 // uint64_t safely. This validates the complete pointer-free snapshot before a
 // coordinator can treat it as diagnostic evidence.
 export const validatePassiveVehicleActionObservation=receipt=>{
-  const keys=['passiveVehicleFactoryHits','passiveVehicleAdmissionHits','passiveVehicleCorrelatedHits','passiveVehicleDroppedCandidates','passiveVehicleThread','passiveVehicleLatestEntity','passiveVehicleLatestStopped','passiveVehicleLatestValid','passiveVehicleLatestEntryResultZero','passiveVehicleLatestCallbackShapeMatches','passiveVehicleActive','passiveVehicleCrossThread','passiveVehicleSaturated'];
+  const keys=['passiveVehicleFactoryHits','passiveVehicleAdmissionHits','passiveVehicleCorrelatedHits','passiveVehicleDroppedCandidates','passiveVehicleThread','passiveVehicleLatestEntity','passiveVehicleLatestStopped','passiveVehicleLatestValid','passiveVehicleLatestEntryResultZero','passiveVehicleLatestCallbackShapeMatches','passiveVehicleActive','passiveVehicleCrossThread','passiveVehicleSaturated','passiveVehicleCallbackHits','passiveVehicleCallbackThread','passiveVehicleLatestCallbackEntity','passiveVehicleLatestCallbackStopped','passiveVehicleLatestCallbackResult','passiveVehicleLatestCallbackValid','passiveVehicleLatestCallbackMatchesAdmissionStorage','passiveVehicleLatestAdmissionProgressKnown','passiveVehicleLatestAdmissionProgressEmpty','passiveVehicleLatestCorrelatedAdmissionThread','passiveVehicleSendReturnHits','passiveVehicleSendReturnThread','passiveVehicleLatestSendReturnMatchesAdmissionStorage','passiveVehicleMarshalerReturnHits','passiveVehicleMarshalerReturnThread','passiveVehicleLatestMarshalerEntity','passiveVehicleLatestMarshalerStopped','passiveVehicleLatestMarshalerResult','passiveVehicleLatestMarshalerValid','passiveVehicleLatestMarshalerMatchesAdmissionStorage','passiveVehicleLatestMarshalerMatchesCallbackStorage'];
   if(!receipt||typeof receipt!=='object'||Array.isArray(receipt)||keys.some(key=>!Object.hasOwn(receipt,key))
     ||Object.keys(receipt).some(key=>key.startsWith('passiveVehicle')&&!keys.includes(key))
-    ||!uint64Text(receipt.passiveVehicleFactoryHits)||!uint64Text(receipt.passiveVehicleAdmissionHits)||!uint64Text(receipt.passiveVehicleCorrelatedHits)||!uint64Text(receipt.passiveVehicleDroppedCandidates)
+    ||!uint64Text(receipt.passiveVehicleFactoryHits)||!uint64Text(receipt.passiveVehicleAdmissionHits)||!uint64Text(receipt.passiveVehicleCorrelatedHits)||!uint64Text(receipt.passiveVehicleDroppedCandidates)||!uint64Text(receipt.passiveVehicleCallbackHits)||!uint64Text(receipt.passiveVehicleSendReturnHits)||!uint64Text(receipt.passiveVehicleMarshalerReturnHits)
     ||!Number.isInteger(receipt.passiveVehicleThread)||receipt.passiveVehicleThread<0||receipt.passiveVehicleThread>0xffffffff
     ||!Number.isInteger(receipt.passiveVehicleLatestEntity)||receipt.passiveVehicleLatestEntity< -2147483648||receipt.passiveVehicleLatestEntity>2147483647
     ||![0,1].includes(receipt.passiveVehicleLatestStopped)
-    ||['passiveVehicleLatestValid','passiveVehicleLatestEntryResultZero','passiveVehicleLatestCallbackShapeMatches','passiveVehicleActive','passiveVehicleCrossThread','passiveVehicleSaturated'].some(key=>typeof receipt[key]!=='boolean'))throw new TypeError('INVALID_PASSIVE_VEHICLE_ACTION_OBSERVATION');
-  if(!receipt.passiveVehicleActive||(!receipt.passiveVehicleLatestValid&&receipt.passiveVehicleLatestEntity!==0))throw new TypeError('INVALID_PASSIVE_VEHICLE_ACTION_OBSERVATION');
+    ||!Number.isInteger(receipt.passiveVehicleCallbackThread)||receipt.passiveVehicleCallbackThread<0||receipt.passiveVehicleCallbackThread>0xffffffff
+    ||!Number.isInteger(receipt.passiveVehicleLatestCallbackEntity)||receipt.passiveVehicleLatestCallbackEntity< -2147483648||receipt.passiveVehicleLatestCallbackEntity>2147483647
+    ||![0,1].includes(receipt.passiveVehicleLatestCallbackStopped)
+    ||!Number.isInteger(receipt.passiveVehicleLatestCallbackResult)||receipt.passiveVehicleLatestCallbackResult<0||receipt.passiveVehicleLatestCallbackResult>0xff
+    ||!Number.isInteger(receipt.passiveVehicleLatestCorrelatedAdmissionThread)||receipt.passiveVehicleLatestCorrelatedAdmissionThread<0||receipt.passiveVehicleLatestCorrelatedAdmissionThread>0xffffffff
+    ||!Number.isInteger(receipt.passiveVehicleSendReturnThread)||receipt.passiveVehicleSendReturnThread<0||receipt.passiveVehicleSendReturnThread>0xffffffff
+    ||!Number.isInteger(receipt.passiveVehicleMarshalerReturnThread)||receipt.passiveVehicleMarshalerReturnThread<0||receipt.passiveVehicleMarshalerReturnThread>0xffffffff
+    ||!Number.isInteger(receipt.passiveVehicleLatestMarshalerEntity)||receipt.passiveVehicleLatestMarshalerEntity< -2147483648||receipt.passiveVehicleLatestMarshalerEntity>2147483647
+    ||![0,1].includes(receipt.passiveVehicleLatestMarshalerStopped)
+    ||!Number.isInteger(receipt.passiveVehicleLatestMarshalerResult)||receipt.passiveVehicleLatestMarshalerResult<0||receipt.passiveVehicleLatestMarshalerResult>0xff
+    ||['passiveVehicleLatestValid','passiveVehicleLatestEntryResultZero','passiveVehicleLatestCallbackShapeMatches','passiveVehicleActive','passiveVehicleCrossThread','passiveVehicleSaturated','passiveVehicleLatestCallbackValid','passiveVehicleLatestCallbackMatchesAdmissionStorage','passiveVehicleLatestAdmissionProgressKnown','passiveVehicleLatestAdmissionProgressEmpty','passiveVehicleLatestSendReturnMatchesAdmissionStorage','passiveVehicleLatestMarshalerValid','passiveVehicleLatestMarshalerMatchesAdmissionStorage','passiveVehicleLatestMarshalerMatchesCallbackStorage'].some(key=>typeof receipt[key]!=='boolean'))throw new TypeError('INVALID_PASSIVE_VEHICLE_ACTION_OBSERVATION');
+  if(!receipt.passiveVehicleActive||(!receipt.passiveVehicleLatestValid&&receipt.passiveVehicleLatestEntity!==0)||(!receipt.passiveVehicleLatestCallbackValid&&(receipt.passiveVehicleLatestCallbackEntity!==0||receipt.passiveVehicleLatestCallbackStopped!==0||receipt.passiveVehicleLatestCallbackResult!==0||receipt.passiveVehicleLatestCallbackMatchesAdmissionStorage))||(!receipt.passiveVehicleLatestAdmissionProgressKnown&&receipt.passiveVehicleLatestAdmissionProgressEmpty)||(!receipt.passiveVehicleLatestMarshalerValid&&(receipt.passiveVehicleLatestMarshalerEntity!==0||receipt.passiveVehicleLatestMarshalerStopped!==0||receipt.passiveVehicleLatestMarshalerResult!==0||receipt.passiveVehicleLatestMarshalerMatchesAdmissionStorage||receipt.passiveVehicleLatestMarshalerMatchesCallbackStorage)))throw new TypeError('INVALID_PASSIVE_VEHICLE_ACTION_OBSERVATION');
   return Object.freeze({factoryHits:receipt.passiveVehicleFactoryHits,admissionHits:receipt.passiveVehicleAdmissionHits,correlatedHits:receipt.passiveVehicleCorrelatedHits,droppedCandidates:receipt.passiveVehicleDroppedCandidates,
     ownerThread:receipt.passiveVehicleThread,latestEntity:receipt.passiveVehicleLatestEntity,latestStopped:receipt.passiveVehicleLatestStopped,
     latestValid:receipt.passiveVehicleLatestValid,latestEntryResultZero:receipt.passiveVehicleLatestEntryResultZero,
     latestCallbackShapeMatches:receipt.passiveVehicleLatestCallbackShapeMatches,
-    active:receipt.passiveVehicleActive,crossThread:receipt.passiveVehicleCrossThread,saturated:receipt.passiveVehicleSaturated});
+    active:receipt.passiveVehicleActive,crossThread:receipt.passiveVehicleCrossThread,saturated:receipt.passiveVehicleSaturated,
+    callbackHits:receipt.passiveVehicleCallbackHits,callbackThread:receipt.passiveVehicleCallbackThread,
+    latestCallbackEntity:receipt.passiveVehicleLatestCallbackEntity,latestCallbackStopped:receipt.passiveVehicleLatestCallbackStopped,
+    latestCallbackResult:receipt.passiveVehicleLatestCallbackResult,latestCallbackValid:receipt.passiveVehicleLatestCallbackValid,
+    latestCallbackMatchesAdmissionStorage:receipt.passiveVehicleLatestCallbackMatchesAdmissionStorage,
+    latestAdmissionProgressKnown:receipt.passiveVehicleLatestAdmissionProgressKnown,
+    latestAdmissionProgressEmpty:receipt.passiveVehicleLatestAdmissionProgressEmpty,
+    latestCorrelatedAdmissionThread:receipt.passiveVehicleLatestCorrelatedAdmissionThread,
+    sendReturnHits:receipt.passiveVehicleSendReturnHits,sendReturnThread:receipt.passiveVehicleSendReturnThread,
+    latestSendReturnMatchesAdmissionStorage:receipt.passiveVehicleLatestSendReturnMatchesAdmissionStorage,
+    marshalerReturnHits:receipt.passiveVehicleMarshalerReturnHits,marshalerReturnThread:receipt.passiveVehicleMarshalerReturnThread,
+    latestMarshalerEntity:receipt.passiveVehicleLatestMarshalerEntity,latestMarshalerStopped:receipt.passiveVehicleLatestMarshalerStopped,
+    latestMarshalerResult:receipt.passiveVehicleLatestMarshalerResult,latestMarshalerValid:receipt.passiveVehicleLatestMarshalerValid,
+    latestMarshalerMatchesAdmissionStorage:receipt.passiveVehicleLatestMarshalerMatchesAdmissionStorage,
+    latestMarshalerMatchesCallbackStorage:receipt.passiveVehicleLatestMarshalerMatchesCallbackStorage});
 };
 const gateControls=Object.freeze({
   hold:NATIVE_RUNTIME_CAPABILITIES.simulationHold,

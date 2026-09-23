@@ -1,4 +1,199 @@
-# Native-integration review handoff — 22 September 2026
+# Native-integration review handoff — 23 September 2026
+
+## Six-site completion instrumentation and failed reload trial — 23 September 2026
+
+The exact-build passive observer now includes the normal send continuation
+`0xe26a32` and marshaler return `0xe0d707`, in addition to the four previously
+qualified sites. These append-only, pointer-free counters and storage-identity
+facts are wired through authenticated native IPC and the JavaScript client.
+Owned native smoke exercised both new traps, moved-from entries, mismatched
+storage, stale frames and concurrent restoration. Native builds and focused
+IPC/checker tests passed. This is **not** native command suppression, replay or
+stage-6 multiplayer.
+
+The first six-site live checker run did **not** reach its action-ready boundary.
+The disposable save was inadvertently loaded once without TalCo active, then
+reloaded in the same TF3 process with TalCo active. During the latter world,
+game-side tick/update advanced by 3,422 while the native observer hit delta
+was zero. The checker failed `OBSERVER_CORRELATION_HITS_INSUFFICIENT`; no
+vehicle action was clicked. `inprocess_post_observer.cpp` only increments its
+hit count on the first observed owner thread; later threads set
+`observationCrossThread` without incrementing. A world-reload/thread-change is
+a plausible explanation, **not yet a confirmed root cause**. The checker now
+fails explicitly if cross-thread activity appears during correlation. A fresh
+single-load run, followed by a qualified world/session-epoch rebind design if
+needed, remains work. The game quit UI did not complete after checker exit;
+the exact verified disposable TF3 process (PID 19308) was terminated without
+saving. All three staged loader files were hash-verified and removed. The
+previous four-site combined live pass below remains valid, but the two new
+return sites have **no live qualification**. No stage-6 claim is made.
+
+Final integration verification: `Build-NativeRuntime.ps1`,
+`Build-InProcessVehicleObserver.ps1`, `Build-NativeIpc.ps1` and
+`Build-InProcessRuntime.ps1` succeeded; the elevated full `npm run check`
+discovered **912 tests: 906 passed, 5 failed, 1 skipped**. The five failures
+are three legacy native-controller out-of-process debugger teardown tests and
+two native-observer action-trace/stress teardown tests. The suite is not green.
+An initial restricted run stalled in child-process fixtures and was stopped;
+an elevated run before rebuilding `Build-NativeRuntime.ps1` also reported
+stale-controller binary assertions, which the rebuild removed. The final
+five are the named remaining failures, not a claimed pass. `git diff --check`
+passed; no new live six-site proof or second-game comparison was obtained.
+The current branch is `main`; an authenticated pre-push query confirmed
+`TaliEsch/talco-tf3-multiplayer` remains **PRIVATE**, default branch `main`.
+This batch reused no TF2 source; if any MIT-licensed TF2 implementation is
+adapted later, retain its copyright and permission notice. The user-requested
+full goal is paused, not complete. Independent review should focus on the
+six-site trap/restore race, send-frame lifetime and storage ABA, actual
+marshaler completion semantics, world-reload owner-thread rollover, and
+whether the native gate truly halts all mutations under exception paths.
+
+## Fresh combined live gate/action result — 23 September 2026
+
+The stricter fresh-producer-sample checker subsequently passed in a combined
+disposable-save run, correcting the unresolved combined-run assertion below.
+With Road Vehicle 1 stopped once through the stock UI at 1x, factory,
+admission, correlated-admission and callback counters each advanced exactly
+once; zero candidates were dropped. The matched entity was 102852, requested
+stopped value 1, callback result byte 1, admission progress was observed empty,
+and callback/admission storage identities matched. This is passive observation,
+not intercepted or host-ordered execution. The vehicle panel showed
+"Stopping" immediately; no later terminal vehicle-state claim is made.
+
+The authenticated native gate held, released one world boundary and re-held:
+native observation hits 476 to 477, public tick/update 1207740/1037705 to
+1207741/1037706. After detachment, public tick/update reached
+1207745/1037710. This run took 303.904 seconds, exited TF3 normally without
+saving, and the hash-matched diagnostic loader was unstaged. The prior
+`TF3_WORLD_UPDATE_ADVANCED_WHILE_HELD` assertion remains a recorded failed
+checker run; the fresh-sample combined pass supports the stale-sample diagnosis,
+not blanket correctness at other speeds. Original `[R2] SV20.sav` remains
+untouched. The production path still lacks command interception/replay and
+multi-instance comparison, so readiness remains below stage 6.
+
+## Live callback and speed-qualified gate addendum — 23 September 2026
+
+Readiness is approximately **5.9/10**, still below the stage-6
+authoritative-action gate and well below the requested 8/10 target. The full
+multiplayer goal remains active. No gameplay mutation is yet captured,
+suppressed, host-ordered or replayed by the production native path.
+
+The real single-game path this run was: exact-hash, reversible WinHTTP loader
+(`Stage-NativeLoader.ps1`, `native/winhttp_proxy.cpp`) → build-gated in-process
+runtime (`native/inprocess_runtime.cpp`) → passive factory, scripting-admission
+and callback-tail breakpoints (`native/inprocess_vehicle_observer.cpp`) → copied,
+pointer-free diagnostic receipt through authenticated `native/runtime_ipc.cpp`
+and `src/native-runtime-client.mjs` →
+`tools/live-inprocess-loader-check.mjs`. The separate production gate in
+`native/production_boundary_gate.cpp` provided the controlled world-boundary
+hold/release/detach. TalCo was explicitly enabled for the exact disposable
+save; its game-side bridge then published fresh public tick/update and
+company observations. This is a real TF3 observation/control route, but is
+**not** a native command executor connected to Host/Join.
+
+One disposable **Road Vehicle 1 Stop** UI action produced exactly one each of
+factory, admission, correlated and vehicle-shaped callback observations,
+zero dropped candidates, entity **102852**, requested stopped value **1**,
+entry result byte **0**, callback result byte **1**, and matching admission/
+callback command-storage identity. The vehicle panel displayed **Stopping**
+immediately after the click. A repeat disposable run reproduced all four
+one-for-one observations, with `admissionProgressKnown:true` and
+`admissionProgressEmpty:true`; the correlated admission and callback both ran
+on thread **37136**. The legacy `ownerThread` had been overwritten by an
+unrelated observation, demonstrating why the separate admission-thread field
+is needed. The callback-tail site is the exact-build
+`0xe3a504` jump to `0xe260d0`; its first trial exposed frequent unrelated
+callbacks. `RecordCallback` now counts only entries passing bounded vehicle
+payload validation. A separate correlated-admission thread field now prevents
+the legacy last-observed-thread field from being mistaken for admission
+affinity; this field is now owned-tested and observed in one game run. The callback result byte is recorded without assigning success
+semantics; a correlated callback entry does **not** prove Lua/UI completion,
+command suppression, or exactly-once multiplayer execution. The independent
+ABI review specifically rejects activating the owned cancellation fixture in
+TF3 until progress, cleanup, ownership and exception paths are qualified.
+Specifically, `0xe260d0` can skip Lua invocation after weak-state/registry
+checks even when the callback-tail trap fires; the callable branch passes
+through `0xe0d630`, dependency marshaling and a later script-call helper.
+Stock `useStepState` decrements its command counter regardless of success if
+the owner survives, but that completion was not observed here. The next
+passive qualification should record send continuation `0xe26a32`, and marshaler return
+`0xe0d707`, then verify normal UI recovery and teardown. Callback cloning and
+exception cleanup must be decoded before any cancellation activation.
+
+That action trial passed the native exactly-one-boundary release/re-hold check
+but failed `TF3_WORLD_DID_NOT_ADVANCE_AND_REHOLD_AFTER_RELEASE`: the game was
+at saved **4x** speed, whereas the one-boundary ↔ public tick/update relation
+had only been qualified at speed 1. The checker closed while the gate remained
+active, intentionally fail-stopping the game; the exact disposable TF3 process
+was then terminated. Do not report this as a proven hook teardown crash or a
+passing 4x world-clock check. The checker now waits for observed normal speed
+before its world-clock gate test and includes held/native/re-held/public-clock
+diagnostics on failure. A subsequent gate-only disposable run at **1x** passed:
+native hits **443 → 444** for one release, public tick **1207707 → 1207708**,
+update **1037672 → 1037673**, followed by detach and resumed tick/update
+**1207711/1037676**. TF3 then exited normally without saving. Control IPC
+remained authenticated and responsive while held; these runs do not qualify
+2x/4x synchronization or a second game instance.
+
+The subsequent combined callback/action and speed-1 gate run did **not** pass:
+after `hold`, the native boundary hit count stayed fixed, but the public update
+counter advanced **1037707 → 1037708** during the held observation interval.
+The checker failed closed with `TF3_WORLD_UPDATE_ADVANCED_WHILE_HELD`; the UI
+quit path could open but could not finish while the terminal park was active,
+so the exact disposable TF3 process was terminated without saving. This is an
+unresolved native/public-clock relation, not a second gate pass. Investigation
+found a checker defect: its five 100-ms "stable" reads could all be the same
+game-side file sample; TalCo publishes that file only once per 30 UI steps.
+The checker now waits for **new observation counters** across hold/re-hold and
+requires exactly one public tick/update after one native release. A subsequent
+disposable speed-1 gate-only run passed this stricter check: held public
+tick/update **1207524/1037489**, re-held **1207525/1037490**, resumed
+**1207527/1037492**; native hits **260 → 261**. TF3 exited normally without
+saving. The earlier failure remains recorded as a failed assertion, but its
+single late sample is not by itself evidence that the engine mutated after
+hold. This stricter pass still does not establish action-interception safety,
+2x/4x behavior, or multi-instance determinism.
+
+Verification after rebuilding all touched native fixtures: owned vehicle
+observer smoke and in-process runtime builds passed; focused native IPC and
+checker tests passed **28/28** and rebuilt owned-control/checker tests passed
+**19/19**. The full elevated `npm run check` discovered **911**, passed **905**,
+failed **5**, skipped **1** (109.239 s). The five failures are the pre-existing
+out-of-process debugger fixture teardown/survival cases (three controller,
+two observer); they are not treated as green or as evidence against the
+in-process trial. After the fresh-sample checker change, focused native IPC/
+checker tests passed **29/29**; the full suite must be rerun against this final
+checker revision. `git diff --check` passed before that revision. The original `[R2] SV20.sav`
+remained SHA-256 `cbbc1a4642734600e9e9c994a6b0be7e014c20c097b418752642e5157f402f7c`.
+The disposable copy remains available for deliberate follow-up; the three
+hash-matched loader files and handoff were removed from the game directory.
+
+TF2's pinned MIT-licensed baseline was used to check command lifetime,
+capture and callback obligations, but no TF2 source or ABI was copied in this
+batch. Its copyright/permission notice must accompany any future adapted
+source. The native route still supports **zero multiplayer gameplay families**;
+road, depot/stop, vehicle, line and other families remain unfinished despite
+local diagnostics and models. Six public checkpoint domains have an existing
+game-side producer; hidden RNG remains explicitly unavailable and no two-game
+matched-update comparison or checkpoint recovery exists. Next critical
+implementation is to qualify callback/progress cleanup and safe capture-before-
+mutation, then connect a one-use semantic vehicle intent and execution receipt
+to Host/Join. A second real instance, LAN/Internet and four-player checks are
+unperformed acceptance gates, not claimed passes. Independent review should
+focus on the four breakpoint-site trap/restore race, callback storage identity
+and ABA risk, completion semantics, speed-specific world-update relation, and
+fail-stop lifecycle. No external blocker to that engineering work has been
+established.
+
+For one consolidated current launch/acceptance procedure, use the exact-build
+preflight and disposable-save steps in section 9 below; enable
+TalCo in the selected save's Mods tab, stage via `Stage-NativeLoader.ps1`, run
+the gate checker with `--bridge-dir ...\\tf3mp_status_1 --gate-detach`, select
+normal speed when prompted, and unstage only after TF3 exits. Do not attempt
+general Host/Join gameplay acceptance until command suppression/replay and
+two-instance checkpoint comparison are implemented. The current branch is
+`main`; private remote status and this batch's commit are recorded at final
+integration below, not inferred from this live trial.
 
 ## Read-only admission qualification addendum — 22 September 2026
 
@@ -23,6 +218,12 @@ detached/resumed. That stop was normal pass-through execution, not cancelled
 or host ordered. An earlier run with optional mod-bridge correlation failed
 `GAME_BRIDGE_OBSERVATION_UNAVAILABLE` because its bridge data was stale; no
 correlation or multiplayer claim comes from that run.
+
+Follow-up log inspection on 23 September identified the setup cause: the
+game's active-mod list for that exact disposable load contained only Deluxe
+Upgrade and Pre-Order Pack. TalCo was discovered in `staging_area` but was
+**not enabled for the loaded save**. The producer therefore was not exercised.
+The next bridge run must first verify TalCo in the game's active-mod list.
 
 The native observer/runtime builds and smoke tests passed; 29 focused elevated
 tests passed. The first full suite run in the restricted sandbox failed child

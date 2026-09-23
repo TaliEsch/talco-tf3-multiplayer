@@ -24,6 +24,35 @@ test('live vehicle observation starts its action window at the reported world-re
   assert.ok(deadline>windowStartedAt,'action deadline must derive from the ready-boundary timestamp');
   assert.match(vehicleBlock,/worldObservationHits:ping\.observationHits/);
   assert.match(vehicleBlock,/bridgeCorrelation:correlation\.deltas/);
+  assert.match(vehicleBlock,/BigInt\(current\.callbackHits\)<=BigInt\(baseline\.callbackHits\)/);
+  assert.match(vehicleBlock,/BigInt\(current\.callbackHits\),BigInt\(baseline\.callbackHits\)\+1n/);
+  assert.match(vehicleBlock,/current\.latestCallbackMatchesAdmissionStorage,true/);
+  assert.match(vehicleBlock,/current\.latestCallbackEntity,current\.latestEntity/);
+  assert.match(vehicleBlock,/current\.latestCallbackStopped,current\.latestStopped/);
+  assert.match(vehicleBlock,/callbackResult:current\.latestCallbackResult/);
+  assert.match(vehicleBlock,/correlatedAdmissionThread:current\.latestCorrelatedAdmissionThread/);
+  assert.match(vehicleBlock,/current\.latestSendReturnMatchesAdmissionStorage,true/);
+  assert.match(vehicleBlock,/current\.latestMarshalerMatchesAdmissionStorage,true/);
+  assert.match(vehicleBlock,/current\.latestMarshalerMatchesCallbackStorage,true/);
+});
+
+test('completion observation requires action observation before any launch',()=>{
+  const run=spawnSync(process.execPath,[tool,'--observe-vehicle-completion','--gate-detach'],{
+    windowsHide:true,encoding:'utf8',timeout:10_000});
+  assert.ifError(run.error);
+  assert.notEqual(run.status,0);
+  assert.match(run.stderr,/usage: node tools\/live-inprocess-loader-check\.mjs/);
+});
+
+test('live world gate check refuses unqualified accelerated speed and reports clock evidence',async()=>{
+  const source=await readFile(tool,'utf8');
+  const normalSpeed=source.indexOf("event:'tf3-normal-speed-required'");
+  const hold=source.indexOf("const hold={control:'hold'");
+  assert.ok(normalSpeed>=0&&hold>normalSpeed,'normal speed must be established before the hold');
+  assert.match(source,/bridge\.engineObservation\.sample\?\.speedup,1/);
+  assert.match(source,/sample\.counter>previous\.counter/);
+  assert.match(source,/nextFreshWorld\(bridge,heldBridge\.counter,'HELD'\)/);
+  assert.match(source,/TF3_RELEASE_PUBLIC_UPDATE_NOT_EXACTLY_ONE/);
 });
 
 test('live in-process checker rejects unknown options before launching anything',()=>{

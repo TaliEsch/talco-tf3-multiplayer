@@ -34,6 +34,8 @@ namespace tf3runtimeipc {
 struct RuntimeObservation {
   std::uint64_t hits;
   std::uint64_t minimum_stack_headroom;
+  // Legacy observation-owner sample retained for compatibility. A later
+  // callback can update it, so it is not admission affinity evidence.
   std::uint32_t owner_thread;
   std::uint32_t cfg_flags;
   std::uint32_t cet_flags;
@@ -63,6 +65,34 @@ struct PassiveVehicleActionObservation {
   bool active;
   bool cross_thread;
   bool saturated;
+  // Callback receipts are copied scalar diagnostics from the observer-owned
+  // storage.  They are intentionally pointer-free and do not authorize a
+  // callback, replay, or engine command.
+  std::uint64_t callback_hits;
+  std::uint32_t callback_thread;
+  std::int32_t latest_callback_entity;
+  std::uint8_t latest_callback_stopped;
+  std::uint8_t latest_callback_result;
+  bool latest_callback_valid;
+  bool latest_callback_matches_admission_storage;
+  bool latest_admission_progress_known;
+  bool latest_admission_progress_empty;
+  // Copied at the correlated admission boundary; no thread handle/pointer
+  // crosses this transport boundary.
+  std::uint32_t latest_correlated_admission_thread;
+  // Normal native call-return observations, not Lua command success or
+  // permission to suppress or replay a command.
+  std::uint64_t send_return_hits;
+  std::uint32_t send_return_thread;
+  bool latest_send_return_matches_admission_storage;
+  std::uint64_t marshaler_return_hits;
+  std::uint32_t marshaler_return_thread;
+  std::int32_t latest_marshaler_entity;
+  std::uint8_t latest_marshaler_stopped;
+  std::uint8_t latest_marshaler_result;
+  bool latest_marshaler_valid;
+  bool latest_marshaler_matches_admission_storage;
+  bool latest_marshaler_matches_callback_storage;
 };
 using PassiveVehicleActionObservationProvider =
   PassiveVehicleActionObservation (*)() noexcept;

@@ -1,5 +1,82 @@
 # Completion audit against the build prompt
 
+## Six-site qualification increment — 23 September 2026
+
+**Implemented:** passive normal-send and marshaler-return diagnostics, their
+authenticated IPC/client fields, and an optional live-checker assertion for
+one correlated completion. **Isolated/model-tested:** owned trap/restore
+fixture and focused native IPC/checker tests. **Single-game verified:** the
+earlier four-site Road Vehicle 1 Stop and fresh-sample gate pass only; neither
+new return site has live proof. The first six-site game run failed before any
+action-ready boundary: after a world reload in one process, native observer
+hits did not advance while public tick/update advanced 3,422. No vehicle
+action was taken in that run. First-thread-only native hit accounting is a
+specific lifecycle hypothesis to test. The exact disposable process was
+closed without saving and the loader unstaged. **Two-instance, cross-machine,
+four-player and Internet:** unperformed. **Stage 6:** not achieved, because
+there is still no verified local suppression, host ordering and exactly-once
+game application of a real action.
+
+Final integration builds for native runtime, vehicle observer, IPC and
+in-process runtime succeeded. The full elevated regression after rebuilding
+the stale controller fixture discovered **912 tests: 906 pass, 5 fail, 1
+skip**. Failures remain three out-of-process native-controller teardown cases
+and two out-of-process native-observer trace/stress teardown cases; this is
+not a green suite. The original save hash remained unchanged and the staged
+diagnostic loader was removed. No launcher or mod source changed in this batch.
+
+## Single-game native callback and speed-1 gate — 23 September 2026
+
+**Implemented:** four-site exact-build passive native observation through a
+callback wrapper; copied scalar callback/admission identity over authenticated
+IPC; explicit normal-speed guard and failure diagnostics in the live gate
+checker. The active TalCo mod produced fresh public engine observations.
+**Isolated/model-tested:** owned observer smoke, native runtime build, focused
+IPC/checker tests (28/28 and rebuilt 19/19). **Single-game verified:** one
+stock Road Vehicle 1 Stop action gave factory/admission/correlated/callback
+counts 1/1/1/1, entity 102852, stopped 1, callback storage match, entry
+result byte 0 and callback result byte 1. The UI initially showed Stopping.
+The observed callback is before Lua target validation, so completion remains
+unproved. A separate normal-speed gate-only run held, released one native
+boundary and public tick/update, re-held, detached and resumed. **Two-instance,
+cross-machine, four-player and Internet:** not performed. **Multiplayer action
+interception, replay, separate-company economy and recovery:** not implemented.
+
+The first action run's later public-clock assertion failed at saved 4x speed;
+native release/re-hold passed, but one native hit had not been qualified as one
+public update at that speed. Its checker shutdown deliberately fail-stopped the
+still-active gate, so the exact disposable game process was terminated.
+The gate-only 1x rerun passed and TF3 exited normally. Neither result proves
+2x/4x synchronization. The original source save SHA-256 remained
+`cbbc1a4642734600e9e9c994a6b0be7e014c20c097b418752642e5157f402f7c`;
+the staged loader was hash-verified and removed after each run. No original
+save or game binary was overwritten.
+
+A third disposable run confirmed one stock road-vehicle Stop with the same
+one-for-one native observations, an empty admission progress pair and matching
+admission/callback thread 37136. Its subsequent speed-1 hold check failed:
+the public update advanced 1037707 → 1037708 while native boundary hits stayed
+fixed. This remains an open engine-halt correctness finding, not a passing
+trial. The UI quit command stalled with the terminal park active; the exact
+test process was terminated and the loader hash-verified/unstaged.
+
+Follow-up identified that the checker had treated five reads of one periodic
+game-side observation file as five independent stable samples. With fresh
+producer-counter checks and exact +1 public-clock assertions, a subsequent
+speed-1 gate-only disposable run passed: held 1207524/1037489, re-held
+1207525/1037490, native boundary hits 260 → 261, then detached/resumed
+1207527/1037492. This narrows the earlier failure to a checker/sample timing
+problem, but does not prove the combined action/gate path or higher speeds.
+
+After rebuilding the shared-header-dependent native fixtures, full elevated
+`npm run check` reported **911 discovered, 905 passed, 5 failed, 1 skipped**
+(109.239 seconds). The five known out-of-process debugger fixture teardown/
+target-survival failures remain open; the full suite is not green. This is
+approximately **5.9/10** readiness, below stage 6. Next implementation is
+callback/progress/exception qualification, confirmed native suppression, then
+Host/Join ordering, exactly-once application and two-instance checkpoint
+agreement. There is no established external implementation blocker.
+
 ## Second live passive admission trial — 22 September 2026
 
 Implemented: read-only result-byte and callback-shape diagnostics in the
@@ -25,6 +102,10 @@ denied (5) while suspending owned fixture threads; its exact orphaned
 bridge was stale in the first live trial; its checker
 correctly returned `GAME_BRIDGE_OBSERVATION_UNAVAILABLE`. The second
 native-only trial passed; do not infer game-bridge clock correlation from it.
+Follow-up inspection of the game's log found TalCo staged on disk but absent
+from that disposable save's active-mod list (only the two DLC packs were
+active). This explains the stale producer data; it is a setup failure, not a
+failed mod clock. Recheck active mods before repeating bridge correlation.
 TF3 closed normally. The staged loader and exact disposable copy/preview
 were removed after hash checks; original save and preview hashes matched.
 Readiness is approximately **5.8/10**, below the stage-6 authority gate.

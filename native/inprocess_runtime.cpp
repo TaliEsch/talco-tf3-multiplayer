@@ -196,7 +196,21 @@ tf3runtimeipc::PassiveVehicleActionObservation ReadPassiveVehicleObservation() n
             snapshot.latest_entity, snapshot.latest_stopped,
             snapshot.latest_valid, snapshot.latest_entry_result_zero,
             snapshot.latest_callback_shape_matches, snapshot.active,
-            snapshot.cross_thread, snapshot.saturated};
+            snapshot.cross_thread, snapshot.saturated,
+            snapshot.callback_hits, snapshot.callback_thread,
+            snapshot.latest_callback_entity, snapshot.latest_callback_stopped,
+            snapshot.latest_callback_result, snapshot.latest_callback_valid,
+            snapshot.latest_callback_matches_admission_storage,
+            snapshot.latest_admission_progress_known,
+            snapshot.latest_admission_progress_empty,
+            snapshot.latest_correlated_admission_thread,
+            snapshot.send_return_hits, snapshot.send_return_thread,
+            snapshot.latest_send_return_matches_admission_storage,
+            snapshot.marshaler_return_hits, snapshot.marshaler_return_thread,
+            snapshot.latest_marshaler_entity, snapshot.latest_marshaler_stopped,
+            snapshot.latest_marshaler_result, snapshot.latest_marshaler_valid,
+            snapshot.latest_marshaler_matches_admission_storage,
+            snapshot.latest_marshaler_matches_callback_storage};
 }
 
 extern "C" __declspec(dllexport) DWORD WINAPI Tf3InProcessRuntimeV1(

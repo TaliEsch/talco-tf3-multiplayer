@@ -9,9 +9,36 @@ import {startGameBridge} from '../src/game-bridge.mjs';
 import {createLiveControlIdBudget,LIVE_CONTROL_POLL_INTERVAL_MS,LIVE_CONTROL_WAIT_WINDOW_MS,
   LIVE_VEHICLE_ACTION_WAIT_WINDOW_MS} from './live-inprocess-control-budget.mjs';
 
-const usage='usage: node tools/live-inprocess-loader-check.mjs [TF3 exe] [--bridge-dir <absolute tf3mp_status_1 directory>] [--observe-vehicle-action] (--gate-detach|--gate-halt)';
+const usage='usage: node tools/live-inprocess-loader-check.mjs [TF3 exe] [--bridge-dir <absolute tf3mp_status_1 directory>] [--observe-vehicle-action] [--observe-vehicle-completion] (--gate-detach|--gate-halt)';
+// The game-side UI writes an observation only every 30 onStep calls. Reading
+// the same file five times is not five independent confirmations of a halt.
+async function stableFreshWorld(bridge,label,afterWorld=null){
+  const deadline=Date.now()+6000;
+  let previous=null,stable=0;
+  while(Date.now()<deadline){
+    const sample=bridge.engineObservation.available?{...bridge.engineObservation.sample}:null;
+    if(sample&&(!previous||sample.counter>previous.counter)){
+      if(previous&&sample.updateCount===previous.updateCount&&sample.tickCount===previous.tickCount&&
+          (!afterWorld||sample.updateCount>afterWorld.updateCount&&sample.tickCount>afterWorld.tickCount))stable++;
+      else stable=0;
+      previous=sample;
+      if(stable>=2)return sample;
+    }
+    await new Promise(resolve=>setTimeout(resolve,100));
+  }
+  throw new Error(`${label}_PUBLIC_CLOCK_DID_NOT_SETTLE:${JSON.stringify({lastSample:previous})}`);
+}
+async function nextFreshWorld(bridge,afterCounter,label){
+  const deadline=Date.now()+4000;
+  while(Date.now()<deadline){
+    const sample=bridge.engineObservation.available?{...bridge.engineObservation.sample}:null;
+    if(sample&&sample.counter>afterCounter)return sample;
+    await new Promise(resolve=>setTimeout(resolve,100));
+  }
+  throw new Error(`${label}_PUBLIC_OBSERVATION_DID_NOT_REFRESH`);
+}
 const input=process.argv.slice(2);
-let requestedExe=null,bridgeDirectory=null,gateMode=null,observeVehicleAction=false;
+let requestedExe=null,bridgeDirectory=null,gateMode=null,observeVehicleAction=false,observeVehicleCompletion=false;
 for(let index=0;index<input.length;index++){
   const argument=input[index];
   if(argument==='--bridge-dir'){
@@ -24,12 +51,15 @@ for(let index=0;index<input.length;index++){
     assert.equal(gateMode,null,usage);gateMode='halt';
   }else if(argument==='--observe-vehicle-action'){
     assert.equal(observeVehicleAction,false,usage);observeVehicleAction=true;
+  }else if(argument==='--observe-vehicle-completion'){
+    assert.equal(observeVehicleCompletion,false,usage);observeVehicleCompletion=true;
   }else{
     assert.ok(!argument.startsWith('--')&&requestedExe===null,usage);
     requestedExe=argument;
   }
 }
 assert.ok(gateMode!==null,usage);
+assert.ok(!observeVehicleCompletion||observeVehicleAction,usage);
 if(bridgeDirectory!==null)assert.ok(path.isAbsolute(bridgeDirectory)&&path.basename(bridgeDirectory)==='tf3mp_status_1','INVALID_BRIDGE_DIRECTORY');
 const exe=requestedExe??'E:\\Steam\\steamapps\\common\\Transport Fever 3\\TransportFever3.exe';
 const handoff=fileURLToPath(new URL('../dist/native-loader/TF3NativeSessionHandoff.exe',import.meta.url));
@@ -121,6 +151,8 @@ try{
     while(Date.now()<correlationDeadline&&(last.observationHits-first.observationHits<128||last.updateCount-first.updateCount<8)){
       await new Promise(resolve=>setTimeout(resolve,LIVE_CONTROL_POLL_INTERVAL_MS));
       ping=await controlIds.issue(()=>client.control('ping'));
+      assert.equal(ping.observationCrossThread,false,
+        'OBSERVER_OWNER_THREAD_CHANGED_DURING_WORLD_CORRELATION');
       const sample=bridge.engineObservation.sample;
       if(!bridge.engineObservation.available||!sample)continue;
       assert.ok(ping.observationHits>=previous.observationHits,'OBSERVER_COUNTER_REGRESSED');
@@ -144,13 +176,18 @@ try{
     // is available for a start/stop command.
     process.stdout.write(`${JSON.stringify({event:'tf3-passive-vehicle-action-ready',
       factoryHits:baseline.factoryHits,admissionHits:baseline.admissionHits,
-      correlatedHits:baseline.correlatedHits,worldObservationHits:ping.observationHits,
+      correlatedHits:baseline.correlatedHits,callbackHits:baseline.callbackHits,worldObservationHits:ping.observationHits,
       worldObservationThread:ping.observationThread,
       ...(correlation?{bridgeCorrelation:correlation.deltas}:{})})}\n`);
     const vehicleActionWindowStartedAt=Date.now();
     const deadline=vehicleActionWindowStartedAt+LIVE_VEHICLE_ACTION_WAIT_WINDOW_MS;
     let current=baseline;
-    while(BigInt(current.correlatedHits)<=BigInt(baseline.correlatedHits)&&Date.now()<deadline){
+    // The callback receipt is independent passive evidence. One operator
+    // action must produce exactly one new receipt in the copied callback
+    // storage; the checker never invokes or replays that callback.
+    while((BigInt(current.callbackHits)<=BigInt(baseline.callbackHits)||
+        observeVehicleCompletion&&(BigInt(current.sendReturnHits)<=BigInt(baseline.sendReturnHits)||
+          BigInt(current.marshalerReturnHits)<=BigInt(baseline.marshalerReturnHits)))&&Date.now()<deadline){
       await new Promise(resolve=>setTimeout(resolve,LIVE_CONTROL_POLL_INTERVAL_MS));
       ping=await controlIds.issue(()=>client.control('ping'));
       current=client.passiveVehicleActionObservation(ping);
@@ -165,11 +202,39 @@ try{
       `PASSIVE_VEHICLE_SUBMISSION_NOT_OBSERVED:${actionCounters}`);
     assert.ok(BigInt(current.correlatedHits)>BigInt(baseline.correlatedHits),
       `PASSIVE_VEHICLE_ACTION_NOT_CORRELATED:${actionCounters}`);
+    assert.equal(BigInt(current.callbackHits),BigInt(baseline.callbackHits)+1n,
+      `PASSIVE_VEHICLE_CALLBACK_NOT_EXACTLY_ONCE:${actionCounters}`);
     assert.equal(current.latestValid,true,'PASSIVE_VEHICLE_ACTION_NOT_CORRELATED');
     assert.equal(current.latestEntryResultZero,true,
       `PASSIVE_VEHICLE_ENTRY_RESULT_NOT_ZERO:${actionCounters}`);
     assert.equal(current.latestCallbackShapeMatches,true,
       `PASSIVE_VEHICLE_CALLBACK_SHAPE_MISMATCH:${actionCounters}`);
+    assert.equal(current.latestCallbackValid,true,
+      `PASSIVE_VEHICLE_CALLBACK_NOT_OBSERVED:${actionCounters}`);
+    assert.equal(current.latestCallbackMatchesAdmissionStorage,true,
+      `PASSIVE_VEHICLE_CALLBACK_STORAGE_MISMATCH:${actionCounters}`);
+    assert.equal(current.latestCallbackEntity,current.latestEntity,
+      `PASSIVE_VEHICLE_CALLBACK_ENTITY_MISMATCH:${actionCounters}`);
+    assert.equal(current.latestCallbackStopped,current.latestStopped,
+      `PASSIVE_VEHICLE_CALLBACK_STOPPED_MISMATCH:${actionCounters}`);
+    if(observeVehicleCompletion){
+      assert.equal(BigInt(current.sendReturnHits),BigInt(baseline.sendReturnHits)+1n,
+        `PASSIVE_VEHICLE_SEND_RETURN_NOT_EXACTLY_ONCE:${actionCounters}`);
+      assert.equal(BigInt(current.marshalerReturnHits),BigInt(baseline.marshalerReturnHits)+1n,
+        `PASSIVE_VEHICLE_MARSHALER_RETURN_NOT_EXACTLY_ONCE:${actionCounters}`);
+      assert.equal(current.latestSendReturnMatchesAdmissionStorage,true,
+        `PASSIVE_VEHICLE_SEND_RETURN_STORAGE_MISMATCH:${actionCounters}`);
+      assert.equal(current.latestMarshalerValid,true,
+        `PASSIVE_VEHICLE_MARSHALER_RETURN_INVALID:${actionCounters}`);
+      assert.equal(current.latestMarshalerMatchesAdmissionStorage,true,
+        `PASSIVE_VEHICLE_MARSHALER_ADMISSION_STORAGE_MISMATCH:${actionCounters}`);
+      assert.equal(current.latestMarshalerMatchesCallbackStorage,true,
+        `PASSIVE_VEHICLE_MARSHALER_CALLBACK_STORAGE_MISMATCH:${actionCounters}`);
+      assert.equal(current.latestMarshalerEntity,current.latestEntity,
+        `PASSIVE_VEHICLE_MARSHALER_ENTITY_MISMATCH:${actionCounters}`);
+      assert.equal(current.latestMarshalerStopped,current.latestStopped,
+        `PASSIVE_VEHICLE_MARSHALER_STOPPED_MISMATCH:${actionCounters}`);
+    }
     vehicleObservation=current;
     process.stdout.write(`${JSON.stringify({event:'tf3-passive-vehicle-action-observed',
       factoryHits:current.factoryHits,admissionHits:current.admissionHits,
@@ -177,10 +242,46 @@ try{
       droppedCandidates:current.droppedCandidates,ownerThread:current.ownerThread,
       crossThread:current.crossThread,entity:current.latestEntity,
       stopped:current.latestStopped,entryResultZero:current.latestEntryResultZero,
-      callbackShapeMatches:current.latestCallbackShapeMatches})}\n`);
+      callbackHits:current.callbackHits,callbackThread:current.callbackThread,
+      correlatedAdmissionThread:current.latestCorrelatedAdmissionThread,
+      callbackEntity:current.latestCallbackEntity,callbackStopped:current.latestCallbackStopped,
+      callbackResult:current.latestCallbackResult,callbackValid:current.latestCallbackValid,
+      callbackMatchesAdmissionStorage:current.latestCallbackMatchesAdmissionStorage,
+      admissionProgressKnown:current.latestAdmissionProgressKnown,
+      admissionProgressEmpty:current.latestAdmissionProgressEmpty,
+      callbackShapeMatches:current.latestCallbackShapeMatches,
+      ...(observeVehicleCompletion?{sendReturnHits:current.sendReturnHits,
+        sendReturnThread:current.sendReturnThread,
+        sendReturnMatchesAdmissionStorage:current.latestSendReturnMatchesAdmissionStorage,
+        marshalerReturnHits:current.marshalerReturnHits,
+        marshalerReturnThread:current.marshalerReturnThread,
+        marshalerEntity:current.latestMarshalerEntity,
+        marshalerStopped:current.latestMarshalerStopped,
+        marshalerResult:current.latestMarshalerResult,
+        marshalerMatchesAdmissionStorage:current.latestMarshalerMatchesAdmissionStorage,
+        marshalerMatchesCallbackStorage:current.latestMarshalerMatchesCallbackStorage}:{})})}\n`);
   }
   let gateEvidence=null;
   const epoch=String(launchedAt);
+  if(bridge&&gateMode==='detach'){
+    // The one-native-boundary/public-clock relation has only been qualified at
+    // speed 1.  A loaded save may resume at 2x/4x; allow a bounded UI change
+    // while control traffic keeps the native lease alive, but never certify an
+    // unqualified speed as one world update.
+    const normalSpeedDeadline=Date.now()+LIVE_CONTROL_WAIT_WINDOW_MS;
+    let requestedNormalSpeed=false;
+    while(bridge.engineObservation.sample?.speedup!==1&&Date.now()<normalSpeedDeadline){
+      if(!requestedNormalSpeed){
+        process.stdout.write(`${JSON.stringify({event:'tf3-normal-speed-required',
+          observedSpeedup:bridge.engineObservation.sample?.speedup??null})}\n`);
+        requestedNormalSpeed=true;
+      }
+      await new Promise(resolve=>setTimeout(resolve,LIVE_CONTROL_POLL_INTERVAL_MS));
+      ping=await controlIds.issue(()=>client.control('ping'));
+    }
+    assert.equal(bridge.engineObservation.sample?.speedup,1,
+      'TF3_NORMAL_SPEED_NOT_OBSERVED_BEFORE_WORLD_GATE_CHECK');
+  }
   if(gateMode==='halt'){
     // Production adapters fail-stop directly from the initial running
     // generation. Qualify that exact path; held->halt is not a substitute.
@@ -195,24 +296,14 @@ try{
     const terminalParked=await parkedPromise;
     let haltedBridge=null;
     if(bridge){
-      const settleDeadline=Date.now()+3000;
-      let previous=null,stableSamples=0;
-      while(Date.now()<settleDeadline&&stableSamples<5){
-        const sample=bridge.engineObservation.available?{...bridge.engineObservation.sample}:null;
-        if(sample&&previous&&sample.updateCount===previous.updateCount&&sample.tickCount===previous.tickCount)stableSamples++;
-        else stableSamples=0;
-        if(sample)previous=sample;
-        await new Promise(resolve=>setTimeout(resolve,100));
-      }
-      assert.ok(stableSamples>=5&&previous,'GAME_BRIDGE_DID_NOT_SETTLE_AFTER_DIRECT_TERMINAL_PARK');
-      haltedBridge=previous;
+      haltedBridge=await stableFreshWorld(bridge,'DIRECT_TERMINAL_PARK');
     }
     const parkedPing=await controlIds.issue(()=>client.control('ping'));
     await new Promise(resolve=>setTimeout(resolve,750));
     const parkedPingLater=await controlIds.issue(()=>client.control('ping'));
     assert.equal(parkedPingLater.observationHits,parkedPing.observationHits,
       'TF3_BOUNDARY_ADVANCED_AFTER_DIRECT_TERMINAL_PARK');
-    const haltedBridgeLater=bridge?.engineObservation.available?{...bridge.engineObservation.sample}:null;
+    const haltedBridgeLater=bridge?await nextFreshWorld(bridge,haltedBridge.counter,'DIRECT_TERMINAL_PARK'):null;
     if(bridge){
       assert.ok(haltedBridge&&haltedBridgeLater,'GAME_BRIDGE_DIRECT_TERMINAL_PARK_OBSERVATION_UNAVAILABLE');
       assert.equal(haltedBridgeLater.updateCount,haltedBridge.updateCount,
@@ -229,27 +320,22 @@ try{
     assert.equal(held.status,'held');
     let heldBridge=null;
     if(bridge){
-      const settleDeadline=Date.now()+3000;
-      let previous=null,stableSamples=0;
-      while(Date.now()<settleDeadline&&stableSamples<5){
-        const sample=bridge.engineObservation.available?{...bridge.engineObservation.sample}:null;
-        if(sample&&previous&&sample.updateCount===previous.updateCount&&sample.tickCount===previous.tickCount)stableSamples++;
-        else stableSamples=0;
-        if(sample)previous=sample;
-        await new Promise(resolve=>setTimeout(resolve,100));
-      }
-      assert.ok(stableSamples>=5&&previous,'GAME_BRIDGE_DID_NOT_SETTLE_WHILE_HELD');
-      heldBridge=previous;
+      heldBridge=await stableFreshWorld(bridge,'HELD');
     }
     const heldPing=await controlIds.issue(()=>client.control('ping'));
     await new Promise(resolve=>setTimeout(resolve,750));
     const heldPingLater=await controlIds.issue(()=>client.control('ping'));
     assert.equal(heldPingLater.observationHits,heldPing.observationHits,'TF3_BOUNDARY_ADVANCED_WHILE_HELD');
-    const heldBridgeLater=bridge?.engineObservation.available?{...bridge.engineObservation.sample}:null;
+    const heldBridgeLater=bridge?await nextFreshWorld(bridge,heldBridge.counter,'HELD'):null;
     if(bridge){
       assert.ok(heldBridge&&heldBridgeLater,'GAME_BRIDGE_HELD_OBSERVATION_UNAVAILABLE');
-      assert.equal(heldBridgeLater.updateCount,heldBridge.updateCount,'TF3_WORLD_UPDATE_ADVANCED_WHILE_HELD');
-      assert.equal(heldBridgeLater.tickCount,heldBridge.tickCount,'TF3_WORLD_TICK_ADVANCED_WHILE_HELD');
+      const heldDiagnostics=JSON.stringify({heldBridge,heldBridgeLater,
+        nativeHeldHits:heldPing.observationHits,nativeLaterHits:heldPingLater.observationHits,
+        observedSpeedup:heldBridgeLater.speedup});
+      assert.equal(heldBridgeLater.updateCount,heldBridge.updateCount,
+        `TF3_WORLD_UPDATE_ADVANCED_WHILE_HELD:${heldDiagnostics}`);
+      assert.equal(heldBridgeLater.tickCount,heldBridge.tickCount,
+        `TF3_WORLD_TICK_ADVANCED_WHILE_HELD:${heldDiagnostics}`);
     }
     const release={control:'release',epoch,generation:'1'};
     const appliedPromise=new Promise((resolve,reject)=>{
@@ -264,19 +350,11 @@ try{
     assert.equal(reheldPing.observationHits,heldPing.observationHits+1,'TF3_RELEASE_DID_NOT_ADVANCE_EXACTLY_ONE_BOUNDARY');
     let reheldBridge=null;
     if(bridge){
-      const reheldDeadline=Date.now()+3000;
-      let previous=null,stableSamples=0;
-      while(Date.now()<reheldDeadline&&stableSamples<5){
-        const sample=bridge.engineObservation.available?{...bridge.engineObservation.sample}:null;
-        if(sample&&sample.updateCount>heldBridgeLater.updateCount&&sample.tickCount>heldBridgeLater.tickCount){
-          if(previous&&sample.updateCount===previous.updateCount&&sample.tickCount===previous.tickCount)stableSamples++;
-          else stableSamples=0;
-          previous=sample;
-        }
-        await new Promise(resolve=>setTimeout(resolve,100));
-      }
-      assert.ok(stableSamples>=5&&previous,'TF3_WORLD_DID_NOT_ADVANCE_AND_REHOLD_AFTER_RELEASE');
-      reheldBridge=previous;
+      reheldBridge=await stableFreshWorld(bridge,'REHELD_AFTER_RELEASE',heldBridgeLater);
+      assert.equal(reheldBridge.updateCount,heldBridgeLater.updateCount+1,
+        `TF3_RELEASE_PUBLIC_UPDATE_NOT_EXACTLY_ONE:${JSON.stringify({heldBridgeLater,reheldBridge})}`);
+      assert.equal(reheldBridge.tickCount,heldBridgeLater.tickCount+1,
+        `TF3_RELEASE_PUBLIC_TICK_NOT_EXACTLY_ONE:${JSON.stringify({heldBridgeLater,reheldBridge})}`);
     }
     const detach={control:'detach',epoch,generation:'2'};
     const detachedPromise=new Promise((resolve,reject)=>{

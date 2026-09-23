@@ -12,7 +12,9 @@ tf3runtimeipc::RuntimeObservation OwnedObservation() noexcept {
 }
 tf3runtimeipc::PassiveVehicleActionObservation OwnedPassiveVehicleObservation() noexcept {
   // Owned wire fixture: values are copied diagnostics, never object pointers.
-  return {12, 9, 8, 2, 321, 66005, 1, true, true, true, true, false, false};
+  return {12, 9, 8, 2, 321, 66005, 1, true, true, true, true, false, false,
+    8, 321, 66005, 1, 0, true, true, true, false, 321,
+    8, 321, true, 8, 321, 66005, 1, 0, true, true, true};
 }
 // Owned wire-contract fixture only. It models state transitions and delayed
 // notifications without claiming a TF3 engine boundary.
