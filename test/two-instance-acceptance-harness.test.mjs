@@ -22,6 +22,8 @@ test('two-instance plan isolates identities, bridge directories, and host endpoi
   assert.equal(value.expectedSave.sha256, save.sha256);
   assert.ok(value.instances.host.command.includes('c'.repeat(64)));
   assert.ok(value.instances.host.command.includes(path.join(root, 'host', 'checkpoint.sav')));
+  assert.ok(value.instances.join.prepareCommand.includes('prepare-join'));
+  assert.ok(value.instances.join.command.includes('<path-from-prepare-join>'));
   assert.throws(() => plan({ savePort: 38111 }), /DISTINCT_HOST_SAVE_PORTS/);
   assert.throws(() => plan({ joinBridgeDirectory: path.join(root, 'host', 'tf3mp_status_1') }), /SEPARATE_INSTANCE_DIRECTORIES/);
 });

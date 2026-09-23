@@ -1,5 +1,20 @@
 # Completion audit against the build prompt
 
+## Join save-before-launch path — 23 September 2026
+
+The Join CLI now offers `prepare-join`: it downloads the authenticated Host
+save into the Join save directory, checks its identity, and creates an exclusive
+disposable copy and one-use startup-load request before TF3 starts. Production
+Join can use `--prepared-save` and verifies that direct, regular file against
+the Host's admitted bytes/hash before sending `save_ready`. The two-instance
+plan lists this preparation step. A local encrypted save-server → CLI →
+startup-request integration test passed, as did the focused Join/bootstrap
+tests. This verifies file transfer and admission plumbing, **not** that a
+second TF3 process loaded the copy or agreed on a checkpoint. The full suite
+was run and still exited with five previously recorded native controller and
+observer fixture failures; no new Join test failed. The real two-instance
+baseline and action remain open.
+
 ## Corrected ordered Stop and halt check — 23 September 2026
 
 **Single-game pass:** Exact TF3 build 40392 (SHA-256

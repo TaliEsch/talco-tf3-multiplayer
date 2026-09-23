@@ -15,6 +15,12 @@ receipt mirror; two-instance agreement and playable four-player co-op remain
 unverified. The next critical step is a real second TF3 instance with matching
 save/build/mod, then compare a no-input checkpoint and one ordered action.
 The disposable source save is unchanged and the loader is unstaged.
+The Join launch plan now fetches the authenticated Host save before starting
+TF3, creates a one-use disposable startup-load request, and verifies the exact
+prepared file against Host admission before `save_ready`. A local encrypted
+transfer/CLI integration test passed; a Join TF3 load and second-engine
+checkpoint have not been observed. The full suite still exits with the five
+previous native controller/observer fixture failures; the new Join tests pass.
 
 ## Earlier terminal-halt attempts — 23 September 2026
 

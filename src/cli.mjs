@@ -20,6 +20,7 @@ import {beginRoadStopReplayRecording,finishRoadStopReplayRecording,loadRoadStopR
 import {checkRoadStopReplayIdentity} from './road-stop-replay-case.mjs';
 import {openNativeHostJoinGate,resolveNativeHostJoinMode} from './native-host-join.mjs';
 import {prepareDisposableStartupLoad} from './startup-load.mjs';
+import {verifyPreparedJoinSave} from './prepared-join-save.mjs';
 import {connectHostLocalParticipant} from './host-local-participant.mjs';
 import {loadHostLocalEngineFactory} from './host-local-cli-seam.mjs';
 import {liveHostUpdateCount} from './live-host-clock.mjs';
@@ -358,7 +359,16 @@ if (command === "host" || command === "join") createInterface({ input: process.s
   }
 }).on("close", () => { stop(); });
 
-if (command === "hash-game") {
+if (command === 'prepare-join') {
+  if(!sessionSecret||!opt.session||!opt['save-dir']||!opt['bridge-dir'])
+    throw new Error('prepare-join requires session secret, --session, --save-dir and --bridge-dir');
+  const received=await downloadSave({secret:sessionSecret,sessionId:opt.session,host:opt.host,
+    port:opt['save-port']?Number(opt['save-port']):undefined,destinationDir:opt['save-dir']});
+  const prepared=await prepareDisposableStartupLoad({sourceSave:received.path,
+    saveDirectory:opt['save-dir'],bridgeDirectory:opt['bridge-dir']});
+  log({level:'info',event:'join_save_prepared',bytes:prepared.bytes,sha256:prepared.sha256,
+    path:prepared.path,requestPath:prepared.requestPath});
+} else if (command === "hash-game") {
   const path = opt.exe ?? "E:\\Steam\\steamapps\\common\\Transport Fever 3\\TransportFever3.exe";
   const hash = await sha256File(path);
   const compatibility = describeBuild(hash);
@@ -429,6 +439,7 @@ if (command === "hash-game") {
   for (const required of ["session", "name", "mod-hash"]) if (!opt[required]) throw new Error(`join requires --${required}`);
   const nativeMode=resolveNativeHostJoinMode(opt);
   if(!nativeMode.diagnosticOnly&&(!opt['save-dir']||!opt['bridge-dir']))throw new Error('join production mode requires --save-dir and --bridge-dir');
+  if(opt['prepared-save']&&!opt['save-dir'])throw new Error('prepared Join save requires --save-dir');
   const buildHash = await readGameBuild(opt.exe ?? "E:\\Steam\\steamapps\\common\\Transport Fever 3\\TransportFever3.exe");
   log({ level: describeBuild(buildHash).recommended ? "info" : "warn", event: "game_hash", ...describeBuild(buildHash) });
   if(nativeMode.diagnosticOnly)log({level:'warn',event:'diagnostic_transport_only',coordinatedGameplayAdmission:false});
@@ -453,6 +464,12 @@ if (command === "hash-game") {
     modulePath:opt['join-adapter-module']??firstPartyEngineProvider,bridge,nativeGate,
     sessionId:opt.session,buildHash,modManifestHash:opt['mod-hash'],logger:log,
     downloadSave:async requiredSave=>{
+      if(opt['prepared-save']){
+        const verified=await verifyPreparedJoinSave({saveFile:opt['prepared-save'],
+          saveDirectory:opt['save-dir'],expected:requiredSave});
+        log({level:'info',event:'prepared_join_save_verified',bytes:verified.bytes,sha256:verified.sha256});
+        return verified;
+      }
       const result=await downloadSave({secret:sessionSecret,sessionId:opt.session,host:opt.host,
         port:opt['save-port']?Number(opt['save-port']):undefined,destinationDir:opt['save-dir']});
       if(result.bytes!==requiredSave.bytes||result.sha256!==requiredSave.sha256)throw new Error('CONTROL_SAVE_CHANNEL_METADATA_MISMATCH');
