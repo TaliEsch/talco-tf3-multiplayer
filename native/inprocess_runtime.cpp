@@ -171,6 +171,45 @@ bool PollGate(tf3runtimeipc::GateNotification* notification) noexcept {
 const tf3runtimeipc::GateProvider production_gate_provider{
     true, true, &SubmitGate, &PollGate};
 
+bool ArmVehicleCancellation(const tf3runtimeipc::VehicleCancelArmRequest& request,
+                            tf3runtimeipc::VehicleCancelArmReceipt* receipt) noexcept {
+    if (receipt == nullptr || request.stopped != 1) return false;
+    const tf3vehicleobserver::CancellationArmRequest arm{
+        request.entity, request.stopped, request.deadline_ms};
+    if (tf3vehicleobserver::ArmCancellation(arm) != tf3vehicleobserver::Status::started)
+        return false;
+    const auto state = tf3vehicleobserver::ReadCancellationArm();
+    if (state.state != tf3vehicleobserver::CancellationArmState::armed ||
+        state.expected_invocation == 0) return false;
+    receipt->expected_invocation = state.expected_invocation;
+    return true;
+}
+
+tf3runtimeipc::VehicleCancelArmSnapshot ReadVehicleCancellation() noexcept {
+    const auto native = tf3vehicleobserver::ReadCancellationArm();
+    using Native = tf3vehicleobserver::CancellationArmState;
+    using Wire = tf3runtimeipc::VehicleCancelArmState;
+    Wire state = Wire::failed;
+    switch (native.state) {
+        case Native::disabled: state = Wire::disabled; break;
+        case Native::armed: state = Wire::armed; break;
+        case Native::claiming: state = Wire::claiming; break;
+        case Native::claimed: state = Wire::claimed; break;
+        case Native::completed: state = Wire::completed; break;
+        case Native::expired: state = Wire::expired; break;
+        case Native::revoked: state = Wire::revoked; break;
+        case Native::failed: state = Wire::failed; break;
+    }
+    return {state, native.expected_invocation, native.claimed_invocation,
+            native.expected_entity, native.claimed_entity,
+            native.expected_stopped, native.claimed_stopped, native.claimed_thread,
+            native.callback_result_zero, native.send_return, native.post_send_body};
+}
+
+const tf3runtimeipc::VehicleCancelProvider production_vehicle_cancel_provider{
+    &ArmVehicleCancellation, &ReadVehicleCancellation};
+
+
 }  // namespace
 
 tf3runtimeipc::RuntimeObservation ReadObservation() noexcept {
@@ -291,9 +330,11 @@ extern "C" __declspec(dllexport) DWORD WINAPI Tf3InProcessRuntimeV1(
         // authority. Failure to arm leaves the capability absent.
         const auto vehicle_provider = vehicle_status == tf3vehicleobserver::Status::started
             ? &ReadPassiveVehicleObservation : nullptr;
+        const auto cancel_provider = vehicle_status == tf3vehicleobserver::Status::started
+            ? &production_vehicle_cancel_provider : nullptr;
         const int server_status = tf3runtimeipc::ServeInProcess(
             pipe, token, &ReadBoundaryObservation, 0, &production_gate_provider,
-            TF3_RUNTIME_IPC_INPROCESS_GATE_LEASE_MS, vehicle_provider);
+            TF3_RUNTIME_IPC_INPROCESS_GATE_LEASE_MS, vehicle_provider, cancel_provider);
         const auto vehicle_stop = tf3vehicleobserver::Stop();
         const auto snapshot = tf3boundary::Read().gate;
         if (snapshot.state != inprocess_gate::State::detached)

@@ -14,6 +14,13 @@ extern "C" __declspec(dllexport) tf3vehicleobserver::Status TestStop() {
 extern "C" __declspec(dllexport) tf3vehicleobserver::Snapshot TestSnapshot() {
     return tf3vehicleobserver::Read();
 }
+extern "C" __declspec(dllexport) tf3vehicleobserver::Status TestArmCancellation(
+    const tf3vehicleobserver::CancellationArmRequest* request) {
+    return request ? tf3vehicleobserver::ArmCancellation(*request) : tf3vehicleobserver::Status::invalid_site;
+}
+extern "C" __declspec(dllexport) tf3vehicleobserver::CancellationArmSnapshot TestCancellationArmSnapshot() {
+    return tf3vehicleobserver::ReadCancellationArm();
+}
 extern "C" __declspec(dllexport) LONG TestDispatch(EXCEPTION_POINTERS* pointers) {
     return tf3vehicleobserver::DispatchOwnedException(pointers);
 }
@@ -51,6 +58,7 @@ struct Entry {
     std::array<std::uintptr_t, 6> rest{};
 };
 struct CallbackValue { std::array<std::byte, 0x38> prefix{}; void* implementation = nullptr; };
+struct CallbackImplementation { void* vtable = nullptr; };
 }
 
 int wmain(int argc, wchar_t** argv) {
@@ -61,6 +69,8 @@ int wmain(int argc, wchar_t** argv) {
     const auto start = Symbol<tf3vehicleobserver::Status(*)(void*, void*, void*, void*, void*, void*, void*)>(library, "TestStart");
     const auto stop = Symbol<tf3vehicleobserver::Status(*)()>(library, "TestStop");
     const auto snapshot = Symbol<tf3vehicleobserver::Snapshot(*)()>(library, "TestSnapshot");
+    const auto arm_cancellation = Symbol<tf3vehicleobserver::Status(*)(const tf3vehicleobserver::CancellationArmRequest*)>(library, "TestArmCancellation");
+    const auto arm_snapshot = Symbol<tf3vehicleobserver::CancellationArmSnapshot(*)()>(library, "TestCancellationArmSnapshot");
     const auto dispatch = Symbol<LONG(*)(EXCEPTION_POINTERS*)>(library, "TestDispatch");
     using S = tf3vehicleobserver::Status;
 
@@ -108,7 +118,12 @@ int wmain(int argc, wchar_t** argv) {
 
     std::array<unsigned char, 0x9c0> command{};
     Entry entry{};
-    int callback_implementation = 0;
+    std::array<std::uintptr_t, 3> callback_vtable{};
+    callback_vtable[2] = reinterpret_cast<std::uintptr_t>(&OwnedVehicleCallbackExecute);
+    CallbackImplementation callback_implementation{callback_vtable.data()};
+    std::array<std::uintptr_t, 3> submission_vtable{};
+    submission_vtable[2] = reinterpret_cast<std::uintptr_t>(&OwnedVehicleCallbackExecute);
+    CallbackImplementation submission_implementation{submission_vtable.data()};
     CallbackValue callback_value{};
     callback_value.implementation = &callback_implementation;
     std::array<std::uintptr_t, 2> progress_pair{};
@@ -117,10 +132,58 @@ int wmain(int argc, wchar_t** argv) {
     std::memcpy(command.data(), &entity, sizeof(entity));
     command[4] = 1;
     command[0x9b8] = 0x32;
+    Require(arm_snapshot().state == tf3vehicleobserver::CancellationArmState::disabled,
+            "default cancellation arm is disabled");
+    const tf3vehicleobserver::CancellationArmRequest cancellation_request{
+        entity, 1, GetTickCount64() + 1000};
+    Require(arm_cancellation(&cancellation_request) == S::started &&
+            arm_snapshot().state == tf3vehicleobserver::CancellationArmState::armed,
+            "one exact cancellation arm is accepted");
+    Require(arm_cancellation(&cancellation_request) == S::restart_disallowed,
+            "second arm is refused for process lifetime");
     Require(OwnedVehicleFactoryExecute(&entry, nullptr, entity, 1) == static_cast<std::uint32_t>(entity),
             "actual factory trap emulates mov");
-    Require(OwnedVehiclePostSendBodyExecute(&entry, &callback_implementation, &callback_value, &progress_pair) == &entry,
-            "actual post-send-body trap follows normal send-body return");
+    // The owned assembly does not model TF3's vtable load into RAX. Drive the
+    // same trapped boundaries with a bounded synthetic context so the arm's
+    // register substitution and receipt state can be exercised without an
+    // engine pointer or a TF3 launch.
+    using SendFrame = std::array<std::uintptr_t, 0x180 / sizeof(std::uintptr_t) + 1>;
+    SendFrame arm_frame{};
+    arm_frame[0x178 / sizeof(std::uintptr_t)] = reinterpret_cast<std::uintptr_t>(&OwnedVehiclePostSendBodySite);
+    const auto syntheticTrapHere = [&](unsigned char* site, CONTEXT& registers) {
+        EXCEPTION_RECORD trap{};
+        trap.ExceptionCode = EXCEPTION_BREAKPOINT;
+        trap.ExceptionAddress = site;
+        registers.Rip = reinterpret_cast<DWORD64>(site);
+        EXCEPTION_POINTERS pending{&trap, &registers};
+        Require(dispatch(&pending) == EXCEPTION_CONTINUE_EXECUTION, "owned arm continuation dispatch");
+    };
+    CONTEXT arm_admission{};
+    arm_admission.Rbx = reinterpret_cast<DWORD64>(&entry);
+    arm_admission.R8 = reinterpret_cast<DWORD64>(&callback_value);
+    arm_admission.R9 = reinterpret_cast<DWORD64>(&progress_pair);
+    arm_admission.Rcx = reinterpret_cast<DWORD64>(&submission_implementation);
+    arm_admission.Rax = reinterpret_cast<DWORD64>(submission_vtable.data());
+    arm_admission.Rsp = reinterpret_cast<DWORD64>(arm_frame.data());
+    syntheticTrapHere(&OwnedVehicleAdmissionSite, arm_admission);
+    Require(arm_admission.Rdx == reinterpret_cast<DWORD64>(&entry) &&
+            arm_admission.Rcx == reinterpret_cast<DWORD64>(&submission_implementation) &&
+            arm_admission.Rax != reinterpret_cast<DWORD64>(submission_vtable.data()) &&
+            *reinterpret_cast<const std::uintptr_t*>(arm_admission.Rax + 0x10) != 0 &&
+            arm_snapshot().state == tf3vehicleobserver::CancellationArmState::claimed,
+            "claim preserves entry/implementation and redirects only the call table");
+    using FailureCall = void (*)(void*, void*, void*, void*);
+    const auto failure_call = reinterpret_cast<FailureCall>(
+        *reinterpret_cast<const std::uintptr_t*>(arm_admission.Rax + 0x10));
+    failure_call(reinterpret_cast<void*>(arm_admission.Rcx), &entry, &callback_value,
+                 progress_pair.data());
+    syntheticTrapHere(&OwnedVehicleSendReturnSite, arm_admission);
+    CONTEXT arm_post{};
+    arm_post.Rsp = arm_admission.Rsp + 0x180;
+    syntheticTrapHere(&OwnedVehiclePostSendBodySite, arm_post);
+    Require(arm_snapshot().state == tf3vehicleobserver::CancellationArmState::completed &&
+            arm_snapshot().callback_result_zero && arm_snapshot().send_return && arm_snapshot().post_send_body,
+            "claimed arm completes only after callback zero send return and post receipt");
     auto observed = snapshot();
     Require(observed.factory_hits == 1 && observed.admission_hits == 1 &&
             observed.dropped_candidates == 0 && observed.latest_valid &&
@@ -144,7 +207,7 @@ int wmain(int argc, wchar_t** argv) {
             static_cast<void*>(reinterpret_cast<unsigned char*>(&callback_implementation) + 8),
             "actual callback-tail JMP emulates after native ADD");
     observed = snapshot();
-    Require(observed.callback_hits == 1 && observed.callback_thread == GetCurrentThreadId() &&
+    Require(observed.callback_hits == 2 && observed.callback_thread == GetCurrentThreadId() &&
             observed.latest_callback_valid && observed.latest_callback_entity == entity &&
             observed.latest_callback_stopped == 1 && observed.latest_callback_result == 0 &&
             observed.latest_callback_matches_admission_storage,

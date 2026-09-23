@@ -14,6 +14,35 @@ enum class Status : std::uint32_t {
     patch_failed, restore_failed, foreign_patch, restart_disallowed
 };
 
+// This arm is deliberately inert until a separately authenticated runtime path
+// supplies an exact, already-observed invocation.  It contains identifiers and
+// register values only; it never accepts or exposes engine pointers.
+enum class CancellationArmState : std::uint32_t {
+    disabled, armed, claiming, claimed, expired, revoked, failed, completed
+};
+
+struct CancellationArmRequest {
+    std::int32_t expected_entity;
+    std::uint8_t expected_stopped;
+    std::uint64_t deadline_tick;
+};
+
+struct CancellationArmSnapshot {
+    CancellationArmState state;
+    std::uint64_t expected_invocation;
+    std::uint64_t claimed_invocation;
+    std::int32_t expected_entity;
+    std::int32_t claimed_entity;
+    std::uint8_t expected_stopped;
+    std::uint8_t claimed_stopped;
+    std::uint32_t claimed_thread;
+    std::uint64_t claimed_caller_rsp;
+    std::uint64_t deadline_tick;
+    bool callback_result_zero;
+    bool send_return;
+    bool post_send_body;
+};
+
 struct Snapshot {
     std::uint64_t factory_hits;
     std::uint64_t admission_hits;
@@ -73,6 +102,11 @@ struct Snapshot {
 Status Start() noexcept;
 Status Stop() noexcept;
 Snapshot Read() noexcept;
+// A request is accepted at most once in a process lifetime. It atomically
+// reserves the next factory sequence, and must name a stopped vehicle plus a
+// short, future TickCount64 deadline.
+Status ArmCancellation(const CancellationArmRequest& request) noexcept;
+CancellationArmSnapshot ReadCancellationArm() noexcept;
 
 #ifdef TF3_VEHICLE_OBSERVER_OWNED_TEST
 Status StartOwnedFixture(void* factory_site, void* factory_post_site,

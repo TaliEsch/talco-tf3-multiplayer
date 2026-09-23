@@ -16,8 +16,10 @@ test('owned MOV/vtable-call cancellation fixture preserves entry and restores no
     assert.ifError(run.error);
     assert.equal(run.status,0,run.stderr||run.stdout);
     const report=JSON.parse(run.stdout);
-    for(const field of ['fixturePassed','unpatchedIndirectCall','rdxEntryPreserved','rcxAndRaxSubstituted','exactlyOnceCancel','noSubmission',
-      'unchangedActionState','nestedCallback','callbackExceptionUnwound','teardownRestored','sequentialLifecycleOnly']) {
+    for(const field of ['fixturePassed','unpatchedIndirectCall','rdxEntryPreserved','rcxAndRaxSubstituted','oneUseLifecycle',
+      'exactIdentityShapeProgress','unrelatedFailClosed','postClaimMismatchNoRetry','timeoutAndRevoke','competingAndNested',
+      'callbackExceptionUnwound','callbackFalseResult','uiCompletionUnqualified','ownedResourcesDestroyedOnce',
+      'stopRaceRestored','noEnginePointersRetained']) {
       assert.equal(report[field],true,field);
     }
     assert.equal(report.activationPermitted,false);

@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {NativeRuntimeClient,NATIVE_RUNTIME_CAPABILITIES,createRuntimeIpcCredentials,
-  validatePassiveVehicleActionObservation} from '../src/native-runtime-client.mjs';
+  validatePassiveVehicleActionObservation,validateVehicleCancelArmRequest,
+  validateVehicleCancelArmReceipt,validateVehicleCancelArmObservation} from '../src/native-runtime-client.mjs';
 
 test('native runtime client rejects unsafe connection and controls',()=>{
   assert.throws(()=>new NativeRuntimeClient({pipe:'../bad',token:'a'.repeat(64)}),/INVALID/);
@@ -17,6 +18,15 @@ test('native runtime capability contract names execution gates without enabling 
   assert.equal(NATIVE_RUNTIME_CAPABILITIES.vehicleExecute,'vehicle.execute.v1');
   const c=new NativeRuntimeClient({pipe:'safe',token:'a'.repeat(64)});
   assert.throws(()=>c.requireCapability(NATIVE_RUNTIME_CAPABILITIES.vehicleExecute),/CAPABILITY_UNAVAILABLE/);c.close();
+});
+test('vehicle cancellation arm client contract is exact and bounded',()=>{
+  assert.deepEqual(validateVehicleCancelArmRequest({entity:-2147483648,stopped:1,ttlMs:5000}),{entity:-2147483648,stopped:1,ttlMs:5000});
+  assert.deepEqual(validateVehicleCancelArmReceipt({status:'armed',control:'armVehicleCancel',expectedInvocation:'23'}),{status:'armed',control:'armVehicleCancel',expectedInvocation:'23'});
+  for(const request of [{entity:1,stopped:0,ttlMs:1},{entity:1,stopped:1,ttlMs:0},{entity:1,stopped:1,ttlMs:5001},{entity:2147483648,stopped:1,ttlMs:1},{entity:1,stopped:1,ttlMs:1,extra:true}])assert.throws(()=>validateVehicleCancelArmRequest(request),/INVALID_VEHICLE_CANCEL_ARM_REQUEST/);
+  assert.throws(()=>validateVehicleCancelArmReceipt({status:'armed',control:'armVehicleCancel',expectedInvocation:'0'}),/INVALID_VEHICLE_CANCEL_ARM_RECEIPT/);
+  const disabled={vehicleCancelState:'disabled',vehicleCancelExpectedInvocation:'0',vehicleCancelClaimedInvocation:'0',vehicleCancelExpectedEntity:0,vehicleCancelClaimedEntity:0,vehicleCancelExpectedStopped:0,vehicleCancelClaimedStopped:0,vehicleCancelClaimedThread:0,vehicleCancelCallbackResultZero:false,vehicleCancelSendReturn:false,vehicleCancelPostSendBody:false};
+  assert.deepEqual(validateVehicleCancelArmObservation(disabled),{state:'disabled',expectedInvocation:'0',claimedInvocation:'0',expectedEntity:0,claimedEntity:0,expectedStopped:0,claimedStopped:0,claimedThread:0,callbackResultZero:false,sendReturn:false,postSendBody:false});
+  assert.throws(()=>validateVehicleCancelArmObservation({...disabled,vehicleCancelClaimedThread:1}),/INVALID_VEHICLE_CANCEL_ARM_OBSERVATION/);
 });
 test('passive vehicle diagnostics require a complete pointer-free lossless snapshot',()=>{
   const valid={passiveVehicleFactoryHits:'18446744073709551615',passiveVehicleAdmissionHits:'9',

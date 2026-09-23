@@ -1,5 +1,26 @@
 # TalCo TF3 multiplayer — current delivery plan
 
+## One-use vehicle Stop cancellation — 23 September 2026
+
+The native arm now substitutes a distinct read-only failure-completion vtable
+at the original indirect call, after validating the target entity, command,
+thread and callback shape. It is default disabled, expires after at most five
+seconds, and is exposed only through a bounded authenticated host IPC request.
+Owned fixture and native host tests cover one-use claim, mismatches, timeout,
+revocation, callback failure and cleanup.
+
+One fresh disposable-save Road Vehicle 1 Stop was armed and clicked. The native
+arm claimed invocation 1 exactly once for entity 102852/stopped 1; callback
+and marshaler returned 0, followed by send return and one correlated post-send
+receipt. The vehicle panel continued to show the vehicle moving, at 35 km/h
+when checked. The checker also held, released, re-held and detached the native
+gate. An earlier arm expired before any click, with no claim or game mutation.
+TF3 was closed without saving, the staged loader removed, and the original
+save hash remained unchanged. This qualifies one local cancellation and UI
+recovery sample. Stage 6 still needs host ordering, replay and exactly-once
+application across the intended multiplayer path; readiness remains below
+**6/10**.
+
 ## Correlated cleanup qualified once — 23 September 2026
 
 One fresh disposable-save Road Vehicle 1 Stop produced exactly one correlated
@@ -9,10 +30,10 @@ the UI reached Stopped, and the separate native gate held, released, re-held
 and detached. The generic send-body path fired thousands of times, so its raw
 count is diagnostic only. TF3 was closed without saving and the temporary
 loader removed. Owned correlation tests and focused IPC/client/checker tests
-passed. This is a single-game normal-path qualification; stage 6 still needs
-an exception-path assessment, bounded cancellation with UI recovery, host
-ordering and exactly-once application. Same-process world reload remains a
-separate lifecycle issue.
+passed. This was the earlier single-game normal-path qualification. The later
+EH4 assessment and bounded cancellation sample are recorded above. Host
+ordering and exactly-once application remain outstanding. Same-process world
+reload remains a separate lifecycle issue.
 
 ## Seventh-site live finding — 23 September 2026
 

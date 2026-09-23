@@ -109,6 +109,43 @@ struct PassiveVehicleActionObservation {
 using PassiveVehicleActionObservationProvider =
   PassiveVehicleActionObservation (*)() noexcept;
 
+// A one-use cancellation arm is intentionally narrower than a vehicle command:
+// it names the next qualified action and expires at a native-computed deadline.
+// The provider owns the action correlation and consumes the arm at its exact
+// qualified boundary.  The pipe worker never receives an engine pointer.
+struct VehicleCancelArmRequest {
+  std::int32_t entity;
+  std::uint8_t stopped;
+  std::uint64_t deadline_ms;
+  std::uint64_t correlation_id;
+};
+struct VehicleCancelArmReceipt { std::uint64_t expected_invocation; };
+using VehicleCancelArmProvider = bool (*)(const VehicleCancelArmRequest&,
+                                          VehicleCancelArmReceipt*) noexcept;
+enum class VehicleCancelArmState : std::uint8_t {
+  disabled, armed, claiming, claimed, completed, expired, revoked, failed,
+};
+struct VehicleCancelArmSnapshot {
+  VehicleCancelArmState state;
+  std::uint64_t expected_invocation;
+  std::uint64_t claimed_invocation;
+  std::int32_t expected_entity;
+  std::int32_t claimed_entity;
+  std::uint8_t expected_stopped;
+  std::uint8_t claimed_stopped;
+  std::uint32_t claimed_thread;
+  bool callback_result_zero;
+  bool send_return;
+  bool post_send_body;
+};
+using VehicleCancelArmSnapshotProvider = VehicleCancelArmSnapshot (*)() noexcept;
+struct VehicleCancelProvider {
+  VehicleCancelArmProvider arm;
+  // Optional, pointer-free diagnostic snapshot. It reports observed lifecycle
+  // facts only; no acknowledgement from this transport is cancellation proof.
+  VehicleCancelArmSnapshotProvider snapshot;
+};
+
 // A deliberately small bridge from the transport to a qualified native update
 // boundary.  It does not expose a game pointer or permit the pipe worker to
 // wait on the simulation thread. Submit must be bounded and non-blocking;
@@ -165,6 +202,7 @@ int ServeInProcess(const std::wstring& name, const std::string& token,
                    const GateProvider* gate_provider = nullptr,
                    std::uint32_t authenticated_session_lease_ms =
                      TF3_RUNTIME_IPC_INPROCESS_GATE_LEASE_MS,
-                   PassiveVehicleActionObservationProvider passive_vehicle = nullptr);
+                   PassiveVehicleActionObservationProvider passive_vehicle = nullptr,
+                   const VehicleCancelProvider* vehicle_cancel_provider = nullptr);
 
 }  // namespace tf3runtimeipc

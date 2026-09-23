@@ -195,11 +195,62 @@ bool ExtractBinding(const std::string& payload, std::string* session, std::strin
   return *role == "host" || *role == "participant";
 }
 
+bool ParseCanonicalUint32(const std::string& text, std::uint32_t* value) {
+  std::uint64_t parsed = 0;
+  if (!ParseCanonicalUint64(text, &parsed) || parsed > UINT32_MAX) return false;
+  *value = static_cast<std::uint32_t>(parsed); return true;
+}
+bool ParseCanonicalInt32(const std::string& text, std::int32_t* value) {
+  if (text.empty()) return false;
+  if (text[0] != '-') {
+    std::uint32_t parsed = 0;
+    if (!ParseCanonicalUint32(text, &parsed) || parsed > INT32_MAX) return false;
+    *value = static_cast<std::int32_t>(parsed); return true;
+  }
+  const std::string magnitude = text.substr(1);
+  std::uint64_t parsed = 0;
+  if (magnitude.empty() || magnitude[0] == '0' || !ParseCanonicalUint64(magnitude, &parsed) ||
+      parsed > 2147483648ULL) return false;
+  *value = parsed == 2147483648ULL ? INT32_MIN : -static_cast<std::int32_t>(parsed);
+  return true;
+}
+bool ExtractVehicleCancelArmRequest(const std::string& payload,
+                                    std::int32_t* entity, std::uint32_t* ttlMs) {
+  constexpr const char* prefix = "{\"control\":\"armVehicleCancel\",\"entity\":";
+  if (payload.compare(0, std::strlen(prefix), prefix) != 0) return false;
+  const auto entityEnd = payload.find(',', std::strlen(prefix));
+  if (entityEnd == std::string::npos ||
+      payload.compare(entityEnd, 13, ",\"stopped\":1,") != 0) return false;
+  constexpr const char* ttlPrefix = "\"ttlMs\":";
+  const auto ttlBegin = entityEnd + 13;
+  if (payload.compare(ttlBegin, std::strlen(ttlPrefix), ttlPrefix) != 0 || payload.back() != '}') return false;
+  const auto ttlValueBegin = ttlBegin + std::strlen(ttlPrefix);
+  if (ttlValueBegin >= payload.size() - 1) return false;
+  const std::string entityText = payload.substr(std::strlen(prefix), entityEnd - std::strlen(prefix));
+  const std::string ttlText = payload.substr(ttlValueBegin, payload.size() - ttlValueBegin - 1);
+  return ParseCanonicalInt32(entityText, entity) && ParseCanonicalUint32(ttlText, ttlMs) &&
+    *ttlMs >= 1 && *ttlMs <= 5000;
+}
+const char* VehicleCancelStateName(VehicleCancelArmState state) {
+  switch (state) {
+    case VehicleCancelArmState::disabled: return "disabled";
+    case VehicleCancelArmState::armed: return "armed";
+    case VehicleCancelArmState::claiming: return "claiming";
+    case VehicleCancelArmState::claimed: return "claimed";
+    case VehicleCancelArmState::completed: return "completed";
+    case VehicleCancelArmState::expired: return "expired";
+    case VehicleCancelArmState::revoked: return "revoked";
+    case VehicleCancelArmState::failed: return "failed";
+  }
+  return nullptr;
+}
+
 int ServeMode(const std::wstring& name, const std::string& token, bool inProcess,
               RuntimeObservationProvider observer, std::uint32_t observerStartStatus,
               const GateProvider* gateProvider,
               std::uint32_t authenticatedSessionLeaseMs,
-              PassiveVehicleActionObservationProvider passiveVehicle) {
+              PassiveVehicleActionObservationProvider passiveVehicle,
+              const VehicleCancelProvider* vehicleCancelProvider) {
   if (!ValidPipeName(name) || !ValidToken(token)) return 9;
   HANDLE pipe=CreateOwnerPipe(name,inProcess); if(pipe==INVALID_HANDLE_VALUE) return 10;
   bool connected=false;
@@ -218,6 +269,10 @@ int ServeMode(const std::wstring& name, const std::string& token, bool inProcess
   const bool observingPassiveVehicle = passiveVehicle != nullptr && passiveVehicle().active;
   const bool gateAvailable = inProcess && gateProvider != nullptr && gateProvider->qualification_enabled &&
     gateProvider->submit != nullptr && gateProvider->poll_notification != nullptr;
+  const bool vehicleCancelAvailable = inProcess && observingPassiveVehicle &&
+    vehicleCancelProvider != nullptr && vehicleCancelProvider->arm != nullptr;
+  const bool vehicleCancelDiagnosticsAvailable = vehicleCancelAvailable &&
+    vehicleCancelProvider->snapshot != nullptr;
   // A lease is deliberately meaningful only to the in-process qualified gate.
   // Standalone diagnostic transport keeps its historical indefinite session
   // behavior.  The initial hello is authenticated by the one-shot token and
@@ -231,10 +286,14 @@ int ServeMode(const std::wstring& name, const std::string& token, bool inProcess
       ? "{\"capabilities\":[\"transport.health\",\"session.bind\",\"qualification.inprocess.observer\"" +
         std::string(gateAvailable ? ",\"qualification.inprocess.gate\",\"simulation.hold\",\"engine.halt\",\"simulation.gate-receipts.v1\",\"engine.detach\"" : "") +
         std::string(observingPassiveVehicle ? ",\"diagnostic.passive-vehicle-action.v1\"" : "") +
+        std::string(vehicleCancelAvailable ? ",\"vehicle.cancel-arm.v1\"" : "") +
+        std::string(vehicleCancelDiagnosticsAvailable ? ",\"diagnostic.vehicle-cancel-arm.v1\"" : "") +
         "],\"engineObserver\":true,\"productionQualified\":" + std::string(gateProvider && gateProvider->production_qualified ? "true" : "false") + ",\"guiFreezes\":" + std::string(gateProvider && gateProvider->production_qualified ? "true" : "false") + "}"
       : "{\"capabilities\":[\"transport.health\",\"session.bind\"" +
         std::string(gateAvailable ? ",\"qualification.inprocess.gate\",\"simulation.hold\",\"engine.halt\",\"simulation.gate-receipts.v1\",\"engine.detach\"" : "") +
         std::string(observingPassiveVehicle ? ",\"diagnostic.passive-vehicle-action.v1\"" : "") +
+        std::string(vehicleCancelAvailable ? ",\"vehicle.cancel-arm.v1\"" : "") +
+        std::string(vehicleCancelDiagnosticsAvailable ? ",\"diagnostic.vehicle-cancel-arm.v1\"" : "") +
         "],\"engineObserver\":false,\"productionQualified\":" + std::string(gateProvider && gateProvider->production_qualified ? "true" : "false") + ",\"guiFreezes\":false"+
         (observerStartStatus==0?std::string():",\"observerStartStatus\":"+std::to_string(observerStartStatus))+"}")
     : "{\"capabilities\":[\"transport.health\"],\"engineObserver\":false}";
@@ -285,8 +344,11 @@ int ServeMode(const std::wstring& name, const std::string& token, bool inProcess
     const bool binding = inProcess && ExtractBinding(payload, &requestedSession, &requestedRole);
     GateRequest gateRequest{};
     const bool gateControl = gateAvailable && ExtractGateRequest(payload, &gateRequest);
+    std::int32_t vehicleCancelEntity = 0;
+    std::uint32_t vehicleCancelTtlMs = 0;
+    const bool vehicleCancel = ExtractVehicleCancelArmRequest(payload, &vehicleCancelEntity, &vehicleCancelTtlMs);
     const bool safeControl = IsSafeControl(payload, &control);
-    if(!binding&&!gateControl&&!safeControl) {
+    if(!binding&&!gateControl&&!vehicleCancel&&!safeControl) {
       if(!SendFrame(pipe,Tf3RuntimeIpcType::error,h.correlation_id,session,"{\"code\":\"INVALID_CONTROL\"}",inProcess))break;
       continue;
     }
@@ -317,6 +379,41 @@ int ServeMode(const std::wstring& name, const std::string& token, bool inProcess
       }
       continue;
     }
+    if (vehicleCancel) {
+      if (!vehicleCancelAvailable || !passiveVehicle().active) {
+        if (!SendFrame(pipe, Tf3RuntimeIpcType::error, h.correlation_id, session,
+                       "{\"code\":\"VEHICLE_CANCEL_UNAVAILABLE\"}", true)) break;
+        continue;
+      }
+      if (boundSession.empty()) {
+        if (!SendFrame(pipe, Tf3RuntimeIpcType::error, h.correlation_id, session,
+                       "{\"code\":\"SESSION_NOT_BOUND\"}", true)) break;
+        continue;
+      }
+      if (boundRole != "host") {
+        if (!SendFrame(pipe, Tf3RuntimeIpcType::error, h.correlation_id, session,
+                       "{\"code\":\"SESSION_ROLE_FORBIDDEN\"}", true)) break;
+        continue;
+      }
+      const ULONGLONG now = GetTickCount64();
+      if (now > UINT64_MAX - vehicleCancelTtlMs) {
+        if (!SendFrame(pipe, Tf3RuntimeIpcType::error, h.correlation_id, session,
+                       "{\"code\":\"VEHICLE_CANCEL_DEADLINE_INVALID\"}", true)) break;
+        continue;
+      }
+      VehicleCancelArmReceipt armReceipt{};
+      const VehicleCancelArmRequest armRequest{vehicleCancelEntity, 1, now + vehicleCancelTtlMs,
+                                                h.correlation_id};
+      if (!vehicleCancelProvider->arm(armRequest, &armReceipt) || armReceipt.expected_invocation == 0) {
+        if (!SendFrame(pipe, Tf3RuntimeIpcType::error, h.correlation_id, session,
+                       "{\"code\":\"VEHICLE_CANCEL_REJECTED\"}", true)) break;
+        continue;
+      }
+      const std::string receipt = "{\"status\":\"armed\",\"control\":\"armVehicleCancel\",\"expectedInvocation\":\"" +
+        std::to_string(armReceipt.expected_invocation) + "\"}";
+      if (!SendFrame(pipe, Tf3RuntimeIpcType::receipt, h.correlation_id, session, receipt, true)) break;
+      continue;
+    }
     if(control=="hold")held=true; if(control=="release")held=false;
     const std::string state=control=="halt"?"transport_halt_not_engine_halt":(held?"held":"running");
     std::string receipt="{\"status\":\"accepted\",\"control\":\""+control+"\",\"state\":\""+state+"\",\"engineObserver\":"+std::string(observing?"true":"false");
@@ -327,6 +424,22 @@ int ServeMode(const std::wstring& name, const std::string& token, bool inProcess
       receipt+=",\"passiveVehicleSendReturnHits\":\""+std::to_string(action.send_return_hits)+"\",\"passiveVehicleSendReturnThread\":"+std::to_string(action.send_return_thread)+",\"passiveVehicleLatestSendReturnMatchesAdmissionStorage\":"+std::string(action.latest_send_return_matches_admission_storage?"true":"false")+",\"passiveVehicleMarshalerReturnHits\":\""+std::to_string(action.marshaler_return_hits)+"\",\"passiveVehicleMarshalerReturnThread\":"+std::to_string(action.marshaler_return_thread)+",\"passiveVehicleLatestMarshalerEntity\":"+std::to_string(action.latest_marshaler_entity)+",\"passiveVehicleLatestMarshalerStopped\":"+std::to_string(action.latest_marshaler_stopped)+",\"passiveVehicleLatestMarshalerResult\":"+std::to_string(action.latest_marshaler_result)+",\"passiveVehicleLatestMarshalerValid\":"+std::string(action.latest_marshaler_valid?"true":"false")+",\"passiveVehicleLatestMarshalerMatchesAdmissionStorage\":"+std::string(action.latest_marshaler_matches_admission_storage?"true":"false")+",\"passiveVehicleLatestMarshalerMatchesCallbackStorage\":"+std::string(action.latest_marshaler_matches_callback_storage?"true":"false");
       receipt+=",\"passiveVehiclePostSendBodyHits\":\""+std::to_string(action.post_send_body_hits)+"\",\"passiveVehiclePostSendBodyThread\":"+std::to_string(action.post_send_body_thread);
       receipt+=",\"passiveVehiclePostSendBodyCorrelatedHits\":\""+std::to_string(action.post_send_body_correlated_hits)+"\",\"passiveVehicleLatestCorrelatedAdmissionInvocation\":\""+std::to_string(action.latest_correlated_admission_invocation)+"\",\"passiveVehicleLatestSendReturnInvocation\":\""+std::to_string(action.latest_send_return_invocation)+"\",\"passiveVehicleLatestPostSendBodyInvocation\":\""+std::to_string(action.latest_post_send_body_invocation)+"\",\"passiveVehicleLatestPostSendBodyEntity\":"+std::to_string(action.latest_post_send_body_entity)+",\"passiveVehicleLatestPostSendBodyStopped\":"+std::to_string(action.latest_post_send_body_stopped)+",\"passiveVehicleLatestPostSendBodyValid\":"+std::string(action.latest_post_send_body_valid?"true":"false")+",\"passiveVehicleLatestPostSendBodyThread\":"+std::to_string(action.latest_post_send_body_thread);
+    }
+    if (control == "ping" && vehicleCancelDiagnosticsAvailable) {
+      const auto arm = vehicleCancelProvider->snapshot();
+      const char* armStateName = VehicleCancelStateName(arm.state);
+      if (!armStateName || arm.expected_stopped > 1 || arm.claimed_stopped > 1) break;
+      receipt += ",\"vehicleCancelState\":\"" + std::string(armStateName) +
+        "\",\"vehicleCancelExpectedInvocation\":\"" + std::to_string(arm.expected_invocation) +
+        "\",\"vehicleCancelClaimedInvocation\":\"" + std::to_string(arm.claimed_invocation) +
+        "\",\"vehicleCancelExpectedEntity\":" + std::to_string(arm.expected_entity) +
+        ",\"vehicleCancelClaimedEntity\":" + std::to_string(arm.claimed_entity) +
+        ",\"vehicleCancelExpectedStopped\":" + std::to_string(arm.expected_stopped) +
+        ",\"vehicleCancelClaimedStopped\":" + std::to_string(arm.claimed_stopped) +
+        ",\"vehicleCancelClaimedThread\":" + std::to_string(arm.claimed_thread) +
+        ",\"vehicleCancelCallbackResultZero\":" + std::string(arm.callback_result_zero ? "true" : "false") +
+        ",\"vehicleCancelSendReturn\":" + std::string(arm.send_return ? "true" : "false") +
+        ",\"vehicleCancelPostSendBody\":" + std::string(arm.post_send_body ? "true" : "false");
     }
     receipt+="}";
     if(!SendFrame(pipe,Tf3RuntimeIpcType::receipt,h.correlation_id,session,receipt,inProcess))break;
@@ -340,16 +453,17 @@ int ServeMode(const std::wstring& name, const std::string& token, bool inProcess
   }
   DisconnectNamedPipe(pipe); CloseHandle(pipe); return 0;
 }
-int Serve(const std::wstring& name, const std::string& token) { return ServeMode(name, token, false, nullptr, 0, nullptr, 0, nullptr); }
+int Serve(const std::wstring& name, const std::string& token) { return ServeMode(name, token, false, nullptr, 0, nullptr, 0, nullptr, nullptr); }
 int ServeInProcess(const std::wstring& name, const std::string& token,
                    RuntimeObservationProvider observer,
                    std::uint32_t observerStartStatus,
                    const GateProvider* gateProvider,
                    std::uint32_t authenticatedSessionLeaseMs,
-                   PassiveVehicleActionObservationProvider passiveVehicle) {
+                   PassiveVehicleActionObservationProvider passiveVehicle,
+                   const VehicleCancelProvider* vehicleCancelProvider) {
   if (gateProvider != nullptr && gateProvider->qualification_enabled &&
       (authenticatedSessionLeaseMs < 100 || authenticatedSessionLeaseMs > 30000)) return 18;
   return ServeMode(name, token, true, observer, observerStartStatus, gateProvider,
-                   authenticatedSessionLeaseMs, passiveVehicle);
+                   authenticatedSessionLeaseMs, passiveVehicle, vehicleCancelProvider);
 }
 } // namespace tf3runtimeipc

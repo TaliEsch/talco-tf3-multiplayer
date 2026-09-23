@@ -1,5 +1,25 @@
 # Completion audit against the build prompt
 
+## One-use cancellation trial — 23 September 2026
+
+**Implemented and owned-tested:** a default-disabled one-use native arm,
+distinct failure-completion shim and read-only vtable, bounded authenticated
+host IPC request, pointer-free diagnostics, and fail-closed validation of the
+entity, stopped flag, callback and submission adapter. The runtime provider is
+wired only when the passive observer starts. Static EH4 review covers ordinary
+C++ exception cleanup at the original indirect call; asynchronous SEH behavior
+is outside that finding.
+
+**Single-game verified:** one disposable-save Road Vehicle 1 Stop claimed the
+arm once for entity 102852/stopped 1. The callback and Lua marshaler returned
+0, normal send return and one correlated post-send-body receipt followed, and
+the UI still showed the vehicle moving at 35 km/h. The gate held, released,
+re-held and detached. A prior arm timed out before any click and claimed
+nothing. The original save hash stayed unchanged and staged loader was removed.
+This establishes one bounded local cancellation with visible UI recovery.
+**Stage 6:** not achieved; host ordering, replay and multiplayer exactly-once
+application remain unverified.
+
 ## Invocation-correlated seventh-site trial — 23 September 2026
 
 **Implemented:** bounded passive admission-to-post-send-body correlation by

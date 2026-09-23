@@ -31,6 +31,7 @@ function frameReader(socket){
 }
 async function start(){const credentials=createRuntimeIpcCredentials();const child=spawn(host,['--pipe',credentials.pipe,'--token',credentials.token],{windowsHide:true,stdio:'ignore'});for(let attempt=0;attempt<30;attempt++){try{const client=await NativeRuntimeClient.connect({...credentials,timeoutMs:300});return {child,client,credentials};}catch{await sleep(25);}}child.kill();throw new Error('native IPC host did not accept a local client');}
 async function startQualifiedGateFixture({leaseMs}={}){const credentials=createRuntimeIpcCredentials();const args=['--owned-qualified-gate-fixture'];if(leaseMs!==undefined)args.push('--gate-lease-ms',String(leaseMs));args.push('--pipe',credentials.pipe,'--token',credentials.token);const child=spawn(host,args,{windowsHide:true,stdio:'ignore'});for(let attempt=0;attempt<30;attempt++){try{const client=await NativeRuntimeClient.connect({...credentials,timeoutMs:500});return {child,client,credentials};}catch{await sleep(25);}}child.kill();throw new Error('native qualified gate fixture did not accept a local client');}
+async function startVehicleCancelFixture(){const credentials=createRuntimeIpcCredentials();const child=spawn(host,['--owned-vehicle-cancel-fixture','--pipe',credentials.pipe,'--token',credentials.token],{windowsHide:true,stdio:'ignore'});for(let attempt=0;attempt<30;attempt++){try{const client=await NativeRuntimeClient.connect({...credentials,timeoutMs:500});return {child,client,credentials};}catch{await sleep(25);}}child.kill();throw new Error('native vehicle cancellation fixture did not accept a local client');}
 
 test('in-process IPC mode authenticates and persists one session binding without claiming engine control',{skip:!existsSync(host)},async()=>{
   const credentials=createRuntimeIpcCredentials();
@@ -94,6 +95,32 @@ test('authenticated passive vehicle diagnostics expose no native pointers or exe
   assert.ok(Buffer.byteLength(JSON.stringify(ping))<4096);
   await client.control('shutdown');client.close();
   await new Promise(resolve=>child.once('exit',resolve));
+});
+test('vehicle cancellation arm requires authenticated host binding and returns only an arm receipt',{skip:!existsSync(host)},async()=>{
+  const {child,client}=await startVehicleCancelFixture();
+  assert.ok(client.capabilities.includes('vehicle.cancel-arm.v1'));
+  await assert.rejects(client.armVehicleCancel({entity:66005,stopped:1,ttlMs:50}),/SESSION_HOST_REQUIRED/);
+  await client.bindSession({sessionId:'owned.cancel:1',role:'host'});
+  assert.deepEqual(await client.armVehicleCancel({entity:66005,stopped:1,ttlMs:50}),{status:'armed',control:'armVehicleCancel',expectedInvocation:'23'});
+  assert.deepEqual(client.vehicleCancelArmObservation(await client.control('ping')),{state:'armed',expectedInvocation:'23',claimedInvocation:'0',expectedEntity:66005,claimedEntity:0,expectedStopped:1,claimedStopped:0,claimedThread:0,callbackResultZero:false,sendReturn:false,postSendBody:false});
+  await assert.rejects(client.armVehicleCancel({entity:66005,stopped:1,ttlMs:50}),/VEHICLE_CANCEL_REJECTED/);
+  await client.control('shutdown');client.close();await new Promise(resolve=>child.once('exit',resolve));
+});
+test('vehicle cancellation arm raw wire rejects participant, malformed ttl, and replay',{skip:!existsSync(host)},async()=>{
+  const credentials=createRuntimeIpcCredentials();const child=spawn(host,['--owned-vehicle-cancel-fixture','--pipe',credentials.pipe,'--token',credentials.token],{windowsHide:true,stdio:'ignore'});const socket=await rawSocket(credentials.pipe);const readFrame=frameReader(socket);
+  socket.write(wire(1,1,Buffer.alloc(16),{token:credentials.token}));const ack=await readFrame();const session=ack.subarray(20,36);
+  socket.write(wire(3,2,session,{control:'bind',sessionId:'owned.cancel.participant:1',role:'participant'}));await readFrame();
+  socket.write(rawWire(3,3,session,'{"control":"armVehicleCancel","entity":66005,"stopped":1,"ttlMs":50}'));const forbidden=await readFrame();assert.match(forbidden.subarray(36).toString(),/SESSION_ROLE_FORBIDDEN/);
+  socket.write(rawWire(3,4,session,'{"control":"armVehicleCancel","entity":66005,"stopped":1,"ttlMs":050}'));const malformed=await readFrame();assert.match(malformed.subarray(36).toString(),/INVALID_CONTROL/);
+  socket.write(rawWire(3,4,session,'{"control":"armVehicleCancel","entity":66005,"stopped":1,"ttlMs":50}'));const replay=await readFrame();assert.match(replay.subarray(36).toString(),/DUPLICATE_ID/);
+  socket.write(wire(3,5,session,{control:'shutdown'}));await readFrame();socket.destroy();await new Promise(resolve=>child.once('exit',resolve));
+});
+test('vehicle cancellation arm is unavailable when no cancellation provider is injected',{skip:!existsSync(host)},async()=>{
+  const credentials=createRuntimeIpcCredentials();const child=spawn(host,['--in-process-passive-vehicle','--pipe',credentials.pipe,'--token',credentials.token],{windowsHide:true,stdio:'ignore'});const socket=await rawSocket(credentials.pipe);const readFrame=frameReader(socket);
+  socket.write(wire(1,1,Buffer.alloc(16),{token:credentials.token}));const ack=await readFrame();const session=ack.subarray(20,36);assert.doesNotMatch(ack.subarray(36).toString(),/vehicle.cancel-arm/);
+  socket.write(rawWire(3,2,session,'{"control":"armVehicleCancel","entity":66005,"stopped":1,"ttlMs":5001}'));const expiry=await readFrame();assert.match(expiry.subarray(36).toString(),/INVALID_CONTROL/);
+  socket.write(rawWire(3,3,session,'{"control":"armVehicleCancel","entity":66005,"stopped":1,"ttlMs":50}'));const unavailable=await readFrame();assert.match(unavailable.subarray(36).toString(),/VEHICLE_CANCEL_UNAVAILABLE/);
+  socket.write(wire(3,4,session,{control:'shutdown'}));await readFrame();socket.destroy();await new Promise(resolve=>child.once('exit',resolve));
 });
 
 test('owned native IPC host authenticates, preserves control while held, and distinguishes engine halt',{skip:!existsSync(host)},async()=>{

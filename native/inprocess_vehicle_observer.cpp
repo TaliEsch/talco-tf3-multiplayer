@@ -5,6 +5,7 @@
 #include <atomic>
 #include <cstring>
 #include <limits>
+#include <stdexcept>
 
 #include "inprocess_post_observer.h"
 
@@ -69,6 +70,10 @@ struct PendingSlot {
     std::atomic<std::uintptr_t> output_entry{0};
     std::atomic<std::int32_t> entity{0};
     std::atomic<std::uint32_t> stopped{0};
+    // A factory entry records whether a fully-published arm existed at entry.
+    // It prevents an in-flight pre-arm factory from becoming arm-eligible at
+    // its later post-construction sequence assignment.
+    std::atomic<std::uint64_t> arm_generation{0};
 };
 
 struct CandidateSlot {
@@ -81,6 +86,7 @@ struct CandidateSlot {
     std::atomic<std::int32_t> entity{0};
     std::atomic<std::uint32_t> factory_thread{0};
     std::atomic<std::uint32_t> stopped{0};
+    std::atomic<std::uint64_t> arm_generation{0};
 };
 
 std::array<PendingSlot, kPendingSlotCount> pending_slots{};
@@ -130,6 +136,57 @@ struct SendInvocation {
     std::atomic<std::uint64_t> token{0}, payload{0};
 };
 std::array<SendInvocation, kPendingSlotCount> send_invocations{};
+
+// This state is intentionally separate from passive observation. It is never
+// populated from an engine pointer and cannot be reset after its single arm.
+// The only retained address is a private comparison identity while claimed.
+struct CancellationArm {
+    std::atomic<CancellationArmState> state{CancellationArmState::disabled};
+    std::atomic<bool> used{false};
+    std::atomic<std::uint64_t> expected_token{0}, deadline{0}, claimed_token{0};
+    std::atomic<std::uint64_t> generation{0};
+    std::atomic<std::int32_t> expected_entity{0}, claimed_entity{0};
+    std::atomic<std::uint32_t> expected_stopped{0}, claimed_stopped{0}, claimed_thread{0};
+    std::atomic<std::uintptr_t> claimed_storage{0}, claimed_caller_stack{0};
+    std::atomic<bool> callback_result_zero{false}, send_return{false}, post_send_body{false};
+} cancellation_arm;
+std::atomic<std::uint64_t> next_arm_generation{0};
+
+void CompleteCancellationIfQualified() noexcept {
+    if (cancellation_arm.state.load(std::memory_order_acquire) != CancellationArmState::claimed ||
+        saturated.load(std::memory_order_acquire) ||
+        !cancellation_arm.callback_result_zero.load(std::memory_order_acquire) ||
+        !cancellation_arm.send_return.load(std::memory_order_acquire) ||
+        !cancellation_arm.post_send_body.load(std::memory_order_acquire)) return;
+    auto claimed = CancellationArmState::claimed;
+    (void)cancellation_arm.state.compare_exchange_strong(claimed, CancellationArmState::completed,
+                                                          std::memory_order_acq_rel);
+}
+
+void NoteCancellationCallback(std::uintptr_t storage, DWORD thread, std::uint8_t result) noexcept {
+    if (cancellation_arm.state.load(std::memory_order_acquire) != CancellationArmState::claimed ||
+        result != 0 || cancellation_arm.claimed_thread.load(std::memory_order_relaxed) != thread ||
+        cancellation_arm.claimed_storage.load(std::memory_order_relaxed) != storage) return;
+    cancellation_arm.callback_result_zero.store(true, std::memory_order_release);
+    CompleteCancellationIfQualified();
+}
+
+void NoteCancellationSend(std::uint64_t token, DWORD thread) noexcept {
+    if (cancellation_arm.state.load(std::memory_order_acquire) != CancellationArmState::claimed ||
+        cancellation_arm.claimed_token.load(std::memory_order_relaxed) != token ||
+        cancellation_arm.claimed_thread.load(std::memory_order_relaxed) != thread) return;
+    cancellation_arm.send_return.store(true, std::memory_order_release);
+    CompleteCancellationIfQualified();
+}
+
+void NoteCancellationPost(std::uint64_t token, DWORD thread, std::uintptr_t caller_stack) noexcept {
+    if (cancellation_arm.state.load(std::memory_order_acquire) != CancellationArmState::claimed ||
+        cancellation_arm.claimed_token.load(std::memory_order_relaxed) != token ||
+        cancellation_arm.claimed_thread.load(std::memory_order_relaxed) != thread ||
+        cancellation_arm.claimed_caller_stack.load(std::memory_order_relaxed) != caller_stack) return;
+    cancellation_arm.post_send_body.store(true, std::memory_order_release);
+    CompleteCancellationIfQualified();
+}
 
 bool MatchesIdentity(const AdmissionIdentity& identity, std::uintptr_t storage) noexcept {
     if (identity.state.load(std::memory_order_acquire) != 2) return false;
@@ -237,6 +294,7 @@ void RecordCallback(const CONTEXT* context) noexcept {
     // Callback implementations may be cloned by adapters, so the stable
     // correlation is the command-storage identity, never a borrowed pointer.
     const bool matches = valid && MatchesLatestAdmission(storage);
+    if (matches) NoteCancellationCallback(storage, thread, result);
     PublishIdentity(latest_callback_identity, storage);
     const auto packed = static_cast<std::uint64_t>(static_cast<std::uint32_t>(entity)) |
         (static_cast<std::uint64_t>(stopped) << 32) |
@@ -326,6 +384,7 @@ void RecordSendReturn(const CONTEXT* context) noexcept {
         send_return_thread.store(thread, std::memory_order_release);
         latest_send_return_matches_admission_storage.store(MatchesLatestAdmission(storage), std::memory_order_release);
         latest_send_return_invocation.store(token, std::memory_order_release);
+        NoteCancellationSend(token, thread);
         IncrementSaturating(send_return_hits);
         return;
     }
@@ -380,6 +439,7 @@ void RecordPostSendBody(const CONTEXT* context) noexcept {
             continue;
         }
         const auto payload = slot.payload.load(std::memory_order_relaxed);
+        const auto caller_stack = slot.caller_stack.load(std::memory_order_relaxed);
         slot.state.store(0, std::memory_order_release);
         if (saturated.load(std::memory_order_acquire)) return;
         ObserveThread(thread);
@@ -392,6 +452,9 @@ void RecordPostSendBody(const CONTEXT* context) noexcept {
                 post_receipt_payload.store(payload, std::memory_order_seq_cst);
                 post_receipt_thread.store(thread, std::memory_order_seq_cst);
                 post_receipt_version.store(version + 2, std::memory_order_seq_cst);
+                // The receipt is fully published before it can complete an
+                // armed cancellation. A contention miss remains incomplete.
+                NoteCancellationPost(token, thread, caller_stack);
                 return;
             }
             version = post_receipt_version.load(std::memory_order_seq_cst);
@@ -410,11 +473,53 @@ bool SafeReadCallbackShape(const CONTEXT* context) noexcept {
         const auto implementation = *reinterpret_cast<const std::uintptr_t*>(value + 0x38);
         if (implementation < 0x10000 || implementation > kMaximumUserPointer - sizeof(std::uintptr_t)) return false;
         const auto vtable = *reinterpret_cast<const std::uintptr_t*>(implementation);
+#ifdef TF3_VEHICLE_OBSERVER_OWNED_TEST
+        if (vtable >= 0x10000 &&
+            *reinterpret_cast<const std::uintptr_t*>(vtable + 0x10) != 0) return true;
+#endif
         return vtable == base + kCallbackVtableRva &&
             *reinterpret_cast<const std::uintptr_t*>(vtable + 0x10) == base + kCallbackInvokeRva;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return false;
     }
+}
+
+bool SafeReadCheckedCallback(const CONTEXT* context, std::uintptr_t* implementation,
+                             std::uintptr_t* vtable) noexcept {
+    const auto base = image_base.load(std::memory_order_relaxed);
+    const auto value = static_cast<std::uintptr_t>(context->R8);
+    const auto original = static_cast<std::uintptr_t>(context->Rcx);
+    if (base == 0 || value < 0x10000 || value > kMaximumUserPointer - 0x40 ||
+        original < 0x10000 || original > kMaximumUserPointer - sizeof(std::uintptr_t)) return false;
+    __try {
+        const auto impl = *reinterpret_cast<const std::uintptr_t*>(value + 0x38);
+        if (impl < 0x10000 || impl > kMaximumUserPointer - sizeof(std::uintptr_t)) return false;
+        const auto table = *reinterpret_cast<const std::uintptr_t*>(impl);
+        const auto original_table = *reinterpret_cast<const std::uintptr_t*>(original);
+        if (original_table != static_cast<std::uintptr_t>(context->Rax) ||
+            original_table < 0x10000 || original_table > kMaximumUserPointer - 0x18) return false;
+#ifdef TF3_VEHICLE_OBSERVER_OWNED_TEST
+        if (table >= 0x10000 && original_table != table &&
+            *reinterpret_cast<const std::uintptr_t*>(table + 0x10) != 0 &&
+            *reinterpret_cast<const std::uintptr_t*>(original_table + 0x10) != 0) {
+            *implementation = original;
+            *vtable = original_table;
+            return true;
+        }
+#endif
+        const auto target = *reinterpret_cast<const std::uintptr_t*>(original_table + 0x10);
+        const bool allowed_adapter =
+            (original_table == base + 0x3677c00 && target == base + 0x1201c0) ||
+            (original_table == base + 0x3677b20 && target == base + 0x1201c0) ||
+            (original_table == base + 0x36c5c58 && target == base + 0x6ab5f0) ||
+            (original_table == base + 0x3783520 && target == base + 0x27c4330) ||
+            (original_table == base + 0x3677c38 && target == base + 0x120430);
+        if (!allowed_adapter || table != base + kCallbackVtableRva ||
+            *reinterpret_cast<const std::uintptr_t*>(table + 0x10) != base + kCallbackInvokeRva) return false;
+        *implementation = original;
+        *vtable = original_table;
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
 }
 
 bool SafeReadStorage(std::uintptr_t entry, std::uintptr_t* storage) noexcept {
@@ -440,6 +545,63 @@ bool SafeReadProgressEmpty(std::uintptr_t progress, bool* empty) noexcept {
         return false;
     }
 }
+
+bool SafeReadFailureCallback(std::uintptr_t value, std::uintptr_t* implementation,
+                             std::uintptr_t* invoke) noexcept {
+    const auto base = image_base.load(std::memory_order_acquire);
+    if (base == 0 || value < 0x10000 || value > kMaximumUserPointer - 0x40) return false;
+    __try {
+        const auto impl = *reinterpret_cast<const std::uintptr_t*>(value + 0x38);
+        if (impl < 0x10000 || impl > kMaximumUserPointer - sizeof(std::uintptr_t)) return false;
+        const auto table = *reinterpret_cast<const std::uintptr_t*>(impl);
+        if (table < 0x10000 || table > kMaximumUserPointer - 0x18) return false;
+        const auto target = *reinterpret_cast<const std::uintptr_t*>(table + 0x10);
+#ifdef TF3_VEHICLE_OBSERVER_OWNED_TEST
+        if (target == 0) return false;
+#else
+        if (table != base + kCallbackVtableRva || target != base + kCallbackInvokeRva) return false;
+#endif
+        *implementation = impl;
+        *invoke = target;
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+}
+
+// This is reached by the original, unpatched indirect CALL after a claimed
+// admission substitutes only its vtable register. The send body still owns
+// the moved entry, callback and progress cleanup on return or C++ unwind.
+void __declspec(noinline) FailureCompletionShim(void* original_submission, void* entry,
+                                                 void* callback_value, void* progress) {
+    (void)original_submission;
+    std::int32_t entity = 0;
+    std::uint8_t stopped = 0, result = 0;
+    std::uintptr_t storage = 0, callback = 0, invoke = 0;
+    bool progress_empty = false;
+    const bool valid = cancellation_arm.state.load(std::memory_order_acquire) == CancellationArmState::claimed &&
+        cancellation_arm.claimed_thread.load(std::memory_order_acquire) == GetCurrentThreadId() &&
+        SafeReadAction(reinterpret_cast<std::uintptr_t>(entry), &entity, &stopped, &storage, &result) &&
+        result == 0 && stopped == 1 &&
+        storage == cancellation_arm.claimed_storage.load(std::memory_order_acquire) &&
+        entity == cancellation_arm.claimed_entity.load(std::memory_order_acquire) &&
+        SafeReadProgressEmpty(reinterpret_cast<std::uintptr_t>(progress), &progress_empty) && progress_empty &&
+        SafeReadFailureCallback(reinterpret_cast<std::uintptr_t>(callback_value), &callback, &invoke);
+    if (!valid) {
+        auto claimed = CancellationArmState::claimed;
+        (void)cancellation_arm.state.compare_exchange_strong(claimed, CancellationArmState::failed,
+                                                              std::memory_order_acq_rel);
+        throw std::runtime_error("TF3 vehicle failure completion lost its qualified identity");
+    }
+    using Callback = void (__fastcall *)(void*, void*);
+    const auto call = reinterpret_cast<Callback>(invoke);
+    call(reinterpret_cast<void*>(callback), entry);
+}
+
+struct FailureVtable {
+    const void* first;
+    const void* second;
+    decltype(&FailureCompletionShim) invoke;
+};
+const FailureVtable failure_vtable{nullptr, nullptr, &FailureCompletionShim};
 
 void RecordFactory(const CONTEXT* context) noexcept {
     const DWORD thread = GetCurrentThreadId();
@@ -470,10 +632,13 @@ void RecordFactory(const CONTEXT* context) noexcept {
     for (auto& slot : pending_slots) {
         std::uint32_t free = 0;
         if (!slot.state.compare_exchange_strong(free, 1, std::memory_order_acq_rel)) continue;
+        const auto arm_generation = cancellation_arm.state.load(std::memory_order_acquire) == CancellationArmState::armed
+            ? cancellation_arm.generation.load(std::memory_order_acquire) : 0;
         slot.thread.store(thread, std::memory_order_relaxed);
         slot.output_entry.store(output_entry, std::memory_order_relaxed);
         slot.entity.store(static_cast<std::int32_t>(context->R8), std::memory_order_relaxed);
         slot.stopped.store(stopped, std::memory_order_relaxed);
+        slot.arm_generation.store(arm_generation, std::memory_order_relaxed);
         slot.state.store(2, std::memory_order_release);
         return;
     }
@@ -551,11 +716,12 @@ void RecordFactoryPost(const CONTEXT* context) noexcept {
     candidate.entity.store(pending->entity.load(std::memory_order_relaxed), std::memory_order_relaxed);
     candidate.stopped.store(pending->stopped.load(std::memory_order_relaxed), std::memory_order_relaxed);
     candidate.factory_thread.store(thread, std::memory_order_relaxed);
+    candidate.arm_generation.store(pending->arm_generation.load(std::memory_order_relaxed), std::memory_order_relaxed);
     candidate.state.store(2, std::memory_order_release);
     pending->state.store(0, std::memory_order_release);
 }
 
-void RecordAdmission(const CONTEXT* context) noexcept {
+void RecordAdmission(CONTEXT* context) noexcept {
     const DWORD thread = GetCurrentThreadId();
     InvalidateSendFrame(context, thread);
     ObserveThread(thread);
@@ -606,10 +772,17 @@ void RecordAdmission(const CONTEXT* context) noexcept {
     }
     const auto same_payload = matched->entity.load(std::memory_order_relaxed) == entity &&
         matched->stopped.load(std::memory_order_relaxed) == stopped;
+    const auto candidate_arm_generation = matched->arm_generation.load(std::memory_order_relaxed);
     if (matched->factory_thread.load(std::memory_order_relaxed) != thread)
         cross_thread.store(true, std::memory_order_relaxed);
     matched->state.store(0, std::memory_order_release);
     if (!same_payload) {
+        auto pending = CancellationArmState::armed;
+        if (cancellation_arm.state.load(std::memory_order_acquire) == pending &&
+            cancellation_arm.expected_token.load(std::memory_order_relaxed) == selected_sequence) {
+            (void)cancellation_arm.state.compare_exchange_strong(pending, CancellationArmState::failed,
+                                                                  std::memory_order_acq_rel);
+        }
         IncrementSaturating(dropped_candidates);
         return;
     }
@@ -631,6 +804,79 @@ void RecordAdmission(const CONTEXT* context) noexcept {
     latest_correlated_admission_invocation.store(selected_sequence, std::memory_order_release);
     RecordSendInvocation(context, thread, storage, selected_sequence, entity, stopped);
     IncrementSaturating(correlated_hits);
+
+    // The next factory ordinal is single-use. If it reached admission with a
+    // different payload, or a later ordinal arrives first, this request has no
+    // safe target and becomes terminal rather than waiting for a later action.
+    auto armed_state = CancellationArmState::armed;
+    const auto expected_token = cancellation_arm.expected_token.load(std::memory_order_acquire);
+    if (cancellation_arm.state.load(std::memory_order_acquire) == armed_state &&
+        GetTickCount64() >= cancellation_arm.deadline.load(std::memory_order_acquire)) {
+        (void)cancellation_arm.state.compare_exchange_strong(armed_state, CancellationArmState::expired,
+                                                              std::memory_order_acq_rel);
+        return;
+    }
+    if (cancellation_arm.state.load(std::memory_order_acquire) == armed_state &&
+        (selected_sequence > expected_token ||
+         (selected_sequence == expected_token &&
+          (entity != cancellation_arm.expected_entity.load(std::memory_order_relaxed) || stopped != 1 ||
+           candidate_arm_generation != cancellation_arm.generation.load(std::memory_order_relaxed))))) {
+        (void)cancellation_arm.state.compare_exchange_strong(armed_state, CancellationArmState::failed,
+                                                              std::memory_order_acq_rel);
+        return;
+    }
+
+    // The passive record is complete before considering the opt-in arm. A
+    // competing/wrong next factory ordinal can only leave this arm armed; it
+    // never changes an unrelated CALL. The arm claims before either register
+    // is substituted, and only uses checked values already read at admission.
+    const bool is_expected_eligible = selected_sequence == expected_token &&
+        candidate_arm_generation == cancellation_arm.generation.load(std::memory_order_relaxed);
+    if (saturated.load(std::memory_order_acquire) || result != 0 || !callback_shape_matches ||
+        !progress_known || !progress_empty || stopped != 1) {
+        if (is_expected_eligible) {
+            auto pending = CancellationArmState::armed;
+            (void)cancellation_arm.state.compare_exchange_strong(pending, CancellationArmState::failed,
+                                                                  std::memory_order_acq_rel);
+        }
+        return;
+    }
+    const auto caller_stack = SafeReadCallerStack(context);
+    std::uintptr_t implementation = 0, vtable = 0;
+    if (caller_stack == 0 || !SafeReadCheckedCallback(context, &implementation, &vtable)) {
+        if (is_expected_eligible) {
+            auto pending = CancellationArmState::armed;
+            (void)cancellation_arm.state.compare_exchange_strong(pending, CancellationArmState::failed,
+                                                                  std::memory_order_acq_rel);
+        }
+        return;
+    }
+    auto state = CancellationArmState::armed;
+    if (cancellation_arm.state.load(std::memory_order_acquire) != state) return;
+    if (GetTickCount64() >= cancellation_arm.deadline.load(std::memory_order_acquire)) {
+        (void)cancellation_arm.state.compare_exchange_strong(state, CancellationArmState::expired,
+                                                              std::memory_order_acq_rel);
+        return;
+    }
+    if (cancellation_arm.expected_token.load(std::memory_order_relaxed) != selected_sequence ||
+        cancellation_arm.expected_entity.load(std::memory_order_relaxed) != entity ||
+        cancellation_arm.expected_stopped.load(std::memory_order_relaxed) != stopped ||
+        cancellation_arm.generation.load(std::memory_order_relaxed) != candidate_arm_generation) return;
+    if (!cancellation_arm.state.compare_exchange_strong(state, CancellationArmState::claiming,
+                                                         std::memory_order_acq_rel)) return;
+    cancellation_arm.claimed_token.store(selected_sequence, std::memory_order_release);
+    cancellation_arm.claimed_entity.store(entity, std::memory_order_release);
+    cancellation_arm.claimed_stopped.store(stopped, std::memory_order_release);
+    cancellation_arm.claimed_thread.store(thread, std::memory_order_release);
+    cancellation_arm.claimed_storage.store(storage, std::memory_order_release);
+    cancellation_arm.claimed_caller_stack.store(caller_stack, std::memory_order_release);
+    cancellation_arm.state.store(CancellationArmState::claimed, std::memory_order_release);
+    // MOV RDX,RBX was emulated by the caller. Preserve RCX as the original
+    // submission implementation and redirect only the unpatched CALL's table
+    // slot. The shim invokes the validated false-result callback once.
+    (void)implementation;
+    (void)vtable;
+    context->Rax = reinterpret_cast<DWORD64>(&failure_vtable);
 }
 
 LONG CALLBACK OnException(EXCEPTION_POINTERS* pointers) noexcept {
@@ -866,6 +1112,11 @@ Status Start() noexcept {
 Status Stop() noexcept {
     AcquireSRWLockExclusive(&lifecycle_lock);
     active.store(false, std::memory_order_release);
+    auto armed = CancellationArmState::armed;
+    // A pending request becomes terminal at Stop. A claimed request remains
+    // explicitly claimed/unknown; it is never reset or made armable again.
+    (void)cancellation_arm.state.compare_exchange_strong(armed, CancellationArmState::revoked,
+                                                          std::memory_order_acq_rel);
     Status result = attempted ? Status::stopped : Status::never_started;
     for (std::size_t index = sites.size(); index != 0; --index) {
         const auto restored = RestoreSite(sites[index - 1]);
@@ -873,6 +1124,58 @@ Status Stop() noexcept {
     }
     ReleaseSRWLockExclusive(&lifecycle_lock);
     return result;
+}
+
+Status ArmCancellation(const CancellationArmRequest& request) noexcept {
+    constexpr std::uint64_t kMaximumArmLifetimeMs = 5000;
+    const auto now = GetTickCount64();
+    if (request.expected_stopped != 1 || request.deadline_tick <= now ||
+        request.deadline_tick - now > kMaximumArmLifetimeMs ||
+        !active.load(std::memory_order_acquire) || saturated.load(std::memory_order_acquire))
+        return Status::invalid_site;
+    bool unused = false;
+    if (!cancellation_arm.used.compare_exchange_strong(unused, true, std::memory_order_acq_rel))
+        return Status::restart_disallowed;
+    const auto current = next_candidate_sequence.load(std::memory_order_acquire);
+    if (current == (std::numeric_limits<std::uint64_t>::max)()) {
+        cancellation_arm.state.store(CancellationArmState::failed, std::memory_order_release);
+        return Status::invalid_site;
+    }
+    cancellation_arm.expected_token.store(current + 1, std::memory_order_relaxed);
+    const auto generation = next_arm_generation.fetch_add(1, std::memory_order_acq_rel) + 1;
+    if (generation == 0) {
+        cancellation_arm.state.store(CancellationArmState::failed, std::memory_order_release);
+        return Status::invalid_site;
+    }
+    cancellation_arm.generation.store(generation, std::memory_order_relaxed);
+    cancellation_arm.expected_entity.store(request.expected_entity, std::memory_order_relaxed);
+    cancellation_arm.expected_stopped.store(request.expected_stopped, std::memory_order_relaxed);
+    cancellation_arm.deadline.store(request.deadline_tick, std::memory_order_relaxed);
+    cancellation_arm.callback_result_zero.store(false, std::memory_order_relaxed);
+    cancellation_arm.send_return.store(false, std::memory_order_relaxed);
+    cancellation_arm.post_send_body.store(false, std::memory_order_relaxed);
+    cancellation_arm.state.store(CancellationArmState::armed, std::memory_order_release);
+    return Status::started;
+}
+
+CancellationArmSnapshot ReadCancellationArm() noexcept {
+    auto armed = CancellationArmState::armed;
+    if (GetTickCount64() >= cancellation_arm.deadline.load(std::memory_order_acquire))
+        (void)cancellation_arm.state.compare_exchange_strong(armed, CancellationArmState::expired,
+                                                              std::memory_order_acq_rel);
+    return {cancellation_arm.state.load(std::memory_order_acquire),
+            cancellation_arm.expected_token.load(std::memory_order_acquire),
+            cancellation_arm.claimed_token.load(std::memory_order_acquire),
+            cancellation_arm.expected_entity.load(std::memory_order_acquire),
+            cancellation_arm.claimed_entity.load(std::memory_order_acquire),
+            static_cast<std::uint8_t>(cancellation_arm.expected_stopped.load(std::memory_order_acquire)),
+            static_cast<std::uint8_t>(cancellation_arm.claimed_stopped.load(std::memory_order_acquire)),
+            cancellation_arm.claimed_thread.load(std::memory_order_acquire),
+            cancellation_arm.claimed_caller_stack.load(std::memory_order_acquire),
+            cancellation_arm.deadline.load(std::memory_order_acquire),
+            cancellation_arm.callback_result_zero.load(std::memory_order_acquire),
+            cancellation_arm.send_return.load(std::memory_order_acquire),
+            cancellation_arm.post_send_body.load(std::memory_order_acquire)};
 }
 
 Snapshot Read() noexcept {

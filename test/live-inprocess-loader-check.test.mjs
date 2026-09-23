@@ -48,6 +48,14 @@ test('completion observation requires action observation before any launch',()=>
   assert.match(run.stderr,/usage: node tools\/live-inprocess-loader-check\.mjs/);
 });
 
+test('live cancellation requires the full completion and detach experiment before launch',()=>{
+  const run=spawnSync(process.execPath,[tool,'--cancel-vehicle-stop','102852','--gate-halt'],{
+    windowsHide:true,encoding:'utf8',timeout:10_000});
+  assert.ifError(run.error);
+  assert.notEqual(run.status,0);
+  assert.match(run.stderr,/usage: node tools\/live-inprocess-loader-check\.mjs/);
+});
+
 test('live world gate check refuses unqualified accelerated speed and reports clock evidence',async()=>{
   const source=await readFile(tool,'utf8');
   const normalSpeed=source.indexOf("event:'tf3-normal-speed-required'");

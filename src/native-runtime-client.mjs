@@ -18,8 +18,35 @@ export const NATIVE_RUNTIME_CAPABILITIES=Object.freeze({
   passiveVehicleActionDiagnostics:'diagnostic.passive-vehicle-action.v1',
   vehiclePrepare:'vehicle.prepare.v1',
   vehicleExecute:'vehicle.execute.v1',
+  vehicleCancelArm:'vehicle.cancel-arm.v1',
+  vehicleCancelArmDiagnostics:'diagnostic.vehicle-cancel-arm.v1',
 });
 const uint64Text=value=>typeof value==='string'&&/^(?:0|[1-9][0-9]{0,19})$/.test(value)&&BigInt(value)<=0xffffffffffffffffn;
+export const validateVehicleCancelArmRequest=request=>{
+  if(!request||typeof request!=='object'||Array.isArray(request)||Object.keys(request).some(key=>!['entity','stopped','ttlMs'].includes(key))
+    ||!Number.isInteger(request.entity)||request.entity < -2147483648||request.entity > 2147483647
+    ||request.stopped!==1||!Number.isInteger(request.ttlMs)||request.ttlMs<1||request.ttlMs>5000)throw new TypeError('INVALID_VEHICLE_CANCEL_ARM_REQUEST');
+  return Object.freeze({entity:request.entity,stopped:1,ttlMs:request.ttlMs});
+};
+export const validateVehicleCancelArmReceipt=receipt=>{
+  if(!receipt||typeof receipt!=='object'||Array.isArray(receipt)||Object.keys(receipt).some(key=>!['status','control','expectedInvocation'].includes(key))
+    ||receipt.status!=='armed'||receipt.control!=='armVehicleCancel'||!uint64Text(receipt.expectedInvocation)||receipt.expectedInvocation==='0')throw new Error('INVALID_VEHICLE_CANCEL_ARM_RECEIPT');
+  return Object.freeze({status:'armed',control:'armVehicleCancel',expectedInvocation:receipt.expectedInvocation});
+};
+export const validateVehicleCancelArmObservation=receipt=>{
+  const keys=['vehicleCancelState','vehicleCancelExpectedInvocation','vehicleCancelClaimedInvocation','vehicleCancelExpectedEntity','vehicleCancelClaimedEntity','vehicleCancelExpectedStopped','vehicleCancelClaimedStopped','vehicleCancelClaimedThread','vehicleCancelCallbackResultZero','vehicleCancelSendReturn','vehicleCancelPostSendBody'];
+  const states=['disabled','armed','claiming','claimed','completed','expired','revoked','failed'];
+  if(!receipt||typeof receipt!=='object'||Array.isArray(receipt)||keys.some(key=>!Object.hasOwn(receipt,key))
+    ||Object.keys(receipt).some(key=>key.startsWith('vehicleCancel')&&!keys.includes(key))
+    ||!states.includes(receipt.vehicleCancelState)||!uint64Text(receipt.vehicleCancelExpectedInvocation)||!uint64Text(receipt.vehicleCancelClaimedInvocation)
+    ||!Number.isInteger(receipt.vehicleCancelExpectedEntity)||receipt.vehicleCancelExpectedEntity< -2147483648||receipt.vehicleCancelExpectedEntity>2147483647
+    ||!Number.isInteger(receipt.vehicleCancelClaimedEntity)||receipt.vehicleCancelClaimedEntity< -2147483648||receipt.vehicleCancelClaimedEntity>2147483647
+    ||![0,1].includes(receipt.vehicleCancelExpectedStopped)||![0,1].includes(receipt.vehicleCancelClaimedStopped)
+    ||!Number.isInteger(receipt.vehicleCancelClaimedThread)||receipt.vehicleCancelClaimedThread<0||receipt.vehicleCancelClaimedThread>0xffffffff
+    ||['vehicleCancelCallbackResultZero','vehicleCancelSendReturn','vehicleCancelPostSendBody'].some(key=>typeof receipt[key]!=='boolean'))throw new TypeError('INVALID_VEHICLE_CANCEL_ARM_OBSERVATION');
+  if(receipt.vehicleCancelState==='disabled'&&(receipt.vehicleCancelExpectedInvocation!=='0'||receipt.vehicleCancelClaimedInvocation!=='0'||receipt.vehicleCancelExpectedEntity!==0||receipt.vehicleCancelClaimedEntity!==0||receipt.vehicleCancelExpectedStopped!==0||receipt.vehicleCancelClaimedStopped!==0||receipt.vehicleCancelClaimedThread!==0||receipt.vehicleCancelCallbackResultZero||receipt.vehicleCancelSendReturn||receipt.vehicleCancelPostSendBody))throw new TypeError('INVALID_VEHICLE_CANCEL_ARM_OBSERVATION');
+  return Object.freeze({state:receipt.vehicleCancelState,expectedInvocation:receipt.vehicleCancelExpectedInvocation,claimedInvocation:receipt.vehicleCancelClaimedInvocation,expectedEntity:receipt.vehicleCancelExpectedEntity,claimedEntity:receipt.vehicleCancelClaimedEntity,expectedStopped:receipt.vehicleCancelExpectedStopped,claimedStopped:receipt.vehicleCancelClaimedStopped,claimedThread:receipt.vehicleCancelClaimedThread,callbackResultZero:receipt.vehicleCancelCallbackResultZero,sendReturn:receipt.vehicleCancelSendReturn,postSendBody:receipt.vehicleCancelPostSendBody});
+};
 // Native counters must remain decimal strings: JSON Numbers cannot carry a
 // uint64_t safely. This validates the complete pointer-free snapshot before a
 // coordinator can treat it as diagnostic evidence.
@@ -140,6 +167,17 @@ export class NativeRuntimeClient extends EventEmitter {
   #request(type,payload,sessionRequired=true){if(this.#closed)return Promise.reject(new Error('NATIVE_RUNTIME_IPC_CLOSED'));const id=this.#next++;if(id===0n||id>0xffffffffffffffffn)return Promise.reject(new Error('NATIVE_RUNTIME_IPC_ID_EXHAUSTED'));return new Promise((resolve,reject)=>{const timer=setTimeout(()=>{this.#pending.delete(id.toString());this.emit('unknownOutcome',Object.freeze({id,reason:'timeout'}));reject(new Error('NATIVE_RUNTIME_IPC_TIMEOUT'));},this.timeoutMs);this.#pending.set(id.toString(),{resolve,reject,timer});try{this.#socket.write(encode(type,id,sessionRequired?this.#session:Buffer.alloc(16),payload));}catch(error){clearTimeout(timer);this.#pending.delete(id.toString());reject(error);}});}
   async control(control){if(!this.#connected)throw new Error('NATIVE_RUNTIME_IPC_NOT_CONNECTED');if(!['ping','hold','release','halt','shutdown'].includes(control))throw new TypeError('INVALID_NATIVE_RUNTIME_CONTROL');const reply=await this.#request(TYPES.control,{control});if(reply.type===TYPES.error)throw new Error(`NATIVE_RUNTIME_IPC_${reply.payload?.code??'ERROR'}`);if(reply.type!==TYPES.receipt||reply.payload?.status!=='accepted')throw new Error('NATIVE_RUNTIME_IPC_INVALID_RECEIPT');return Object.freeze(reply.payload);}
   passiveVehicleActionObservation(receipt){this.requireCapability(NATIVE_RUNTIME_CAPABILITIES.passiveVehicleActionDiagnostics);return validatePassiveVehicleActionObservation(receipt);}
+  vehicleCancelArmObservation(receipt){this.requireCapability(NATIVE_RUNTIME_CAPABILITIES.vehicleCancelArmDiagnostics);return validateVehicleCancelArmObservation(receipt);}
+  async armVehicleCancel(request){
+    if(!this.#connected)throw new Error('NATIVE_RUNTIME_IPC_NOT_CONNECTED');
+    const command=validateVehicleCancelArmRequest(request);
+    this.requireCapability(NATIVE_RUNTIME_CAPABILITIES.vehicleCancelArm);
+    if(!this.#bound||this.#binding?.role!=='host')throw new Error('NATIVE_RUNTIME_SESSION_HOST_REQUIRED');
+    const reply=await this.#request(TYPES.control,{control:'armVehicleCancel',...command});
+    if(reply.type===TYPES.error)throw new Error(`NATIVE_RUNTIME_IPC_${reply.payload?.code??'ERROR'}`);
+    if(reply.type!==TYPES.receipt)throw new Error('NATIVE_VEHICLE_CANCEL_ARM_RECEIPT_MISSING');
+    return validateVehicleCancelArmReceipt(reply.payload);
+  }
   // V1 currently has no typed gate-control wire contract. This method is
   // intentionally capability-gated so it cannot accidentally downgrade to the
   // diagnostic {control:"hold"} fixture request above.

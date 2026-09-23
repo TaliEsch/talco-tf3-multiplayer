@@ -1,5 +1,52 @@
 # Native-integration review handoff — 23 September 2026
 
+## Activation and bounded live result — 23 September 2026
+
+The one-use arm in `inprocess_vehicle_observer.cpp` now retains the original
+submission implementation in RCX and substitutes only RAX with a pinned,
+read-only vtable whose +0x10 slot targets the DLL failure-completion shim.
+The shim calls the validated original callback with result 0 through the
+original indirect-call continuation. The production provider is connected in
+`inprocess_runtime.cpp` only after the passive observer starts, via an
+authenticated, host-only IPC arm bounded to five seconds. The arm is disabled
+by default and fails closed on entity, stopped flag, generation, adapter,
+callback or progress mismatch.
+
+One fresh disposable-save Road Vehicle 1 Stop was clicked while armed. The
+native snapshot reported `completed`, expected and claimed invocation 1,
+entity 102852, stopped 1, callback result 0, send return and post-send-body
+receipt. The callback, marshaler and post-send receipts matched invocation,
+entity and storage. The UI still showed Road Vehicle 1 moving at 35 km/h after
+the action. The same checker held, released, re-held and detached the gate.
+The first preparation arm expired without a click or claim; the coordinated
+retry yielded this single action. TF3 was closed without saving, loader files
+were removed and the original save hash was unchanged. This is one local
+cancellation sample, not a host-ordering or replay qualification.
+
+## Read-only EH4 qualification for the cancellation candidate — 23 September 2026
+
+The installed executable still hashes to
+`a4843accd706b9c476c645860e2b68f6488c9b89f33ef97efe00cffb74a47be5`.
+Decoding its MSVC EH4 metadata using the installed Microsoft format and
+runtime sources gives send-body `0xe26870` FuncInfo4 at `0x3ae652c`, unwind
+map `0x3ae6535` and IP-to-state map `0x3ae658e`. The header is `/EHs` with no
+local catch map. The admission trap `0xe26a2c` maps to state 7; the following
+original indirect CALL at `0xe26a2f` enters state 12. Thus a candidate must
+return from VEH and execute that original CALL, with a validated substituted
+target. Invoking a callback inside VEH would not preserve the unwind contract.
+
+For an ordinary C++ exception propagated from that CALL, state 12 unwinds the
+fully owned entry through `0x9cf750`, then progress through `0x11ad60`,
+callback through `0x73360`, registry/weak state through `0xe24df0`, and two
+conditional moved-from temporaries. The tag-`0x32` entry variant runs an
+immediate epilogue before its command allocation is freed. Microsoft’s EH4
+runtime advances the scope index before each action. The outer `0xe177d0`
+`std::exception` catch resumes at `0xe178b9`, beyond the post-send site
+`0xe17838`; this ordinary exceptional path cannot create a normal cleanup
+receipt there. These are static facts for the pinned build, not a live
+cancellation result. `/EHs` does not guarantee equivalent behavior for
+asynchronous SEH faults, and false-result Lua/UI recovery remains unverified.
+
 ## Invocation-correlated post-send receipt — 23 September 2026
 
 The observer now records a bounded per-invocation slot at admission with the
@@ -319,10 +366,10 @@ TF3 exited normally; three hash-matched staged loader files and manifest,
 then the exact hash-matched disposable save/preview, were removed. The
 original save/preview remain unchanged. No second instance was run.
 
-Next critical work remains bounded live cancellation with qualified callback
-cleanup, then accepting/ordering/replaying one vehicle intent exactly once
-through Host/Join and checking real postconditions. No external blocker has
-been established for that implementation work.
+The bounded local cancellation and callback cleanup trial is now recorded at
+the top of this handoff. Next critical work is accepting, ordering and
+replaying one vehicle intent exactly once through Host/Join and checking real
+postconditions. No external blocker has been established for that work.
 
 ## Owned cancellation-mechanism addendum — 22 September 2026
 

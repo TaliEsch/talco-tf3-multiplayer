@@ -68,15 +68,35 @@ bool PollOwnedGate(tf3runtimeipc::GateNotification* notification) noexcept {
   *notification = notifications[notificationRead++]; return true;
 }
 const tf3runtimeipc::GateProvider OwnedGateProvider{true, false, &SubmitOwnedGate, &PollOwnedGate};
+std::atomic<bool> vehicleCancelArmed{false};
+bool ArmOwnedVehicleCancel(const tf3runtimeipc::VehicleCancelArmRequest& request,
+                           tf3runtimeipc::VehicleCancelArmReceipt* receipt) noexcept {
+  // Owned fixture accepts one outstanding arm only. It does not touch a game
+  // object or claim a cancellation was consumed; that needs a later observer receipt.
+  if (!receipt || request.stopped != 1 || request.entity != 66005 ||
+      request.correlation_id == 0 || request.deadline_ms <= GetTickCount64() ||
+      vehicleCancelArmed.exchange(true)) return false;
+  receipt->expected_invocation = 23;
+  return true;
+}
+tf3runtimeipc::VehicleCancelArmSnapshot OwnedVehicleCancelSnapshot() noexcept {
+  const bool armed = vehicleCancelArmed.load();
+  return {armed ? tf3runtimeipc::VehicleCancelArmState::armed : tf3runtimeipc::VehicleCancelArmState::disabled,
+    armed ? 23ULL : 0ULL, 0, armed ? 66005 : 0, 0,
+    static_cast<std::uint8_t>(armed ? 1 : 0), 0, 0, false, false, false};
+}
+const tf3runtimeipc::VehicleCancelProvider OwnedVehicleCancelProvider{
+  &ArmOwnedVehicleCancel, &OwnedVehicleCancelSnapshot};
 }
 int wmain(int argc,wchar_t** argv) {
   const bool leaseFixture = argc == 8 && std::wcscmp(argv[1], L"--owned-qualified-gate-fixture") == 0 &&
     std::wcscmp(argv[2], L"--gate-lease-ms") == 0;
   const bool inProcess = (argc == 6 || leaseFixture) && (std::wcscmp(argv[1], L"--in-process") == 0 ||
     std::wcscmp(argv[1], L"--in-process-observer") == 0 || std::wcscmp(argv[1], L"--in-process-passive-vehicle") == 0 ||
-    std::wcscmp(argv[1], L"--owned-qualified-gate-fixture") == 0);
+    std::wcscmp(argv[1], L"--owned-qualified-gate-fixture") == 0 || std::wcscmp(argv[1], L"--owned-vehicle-cancel-fixture") == 0);
   const bool withObserver = inProcess && std::wcscmp(argv[1], L"--in-process-observer") == 0;
   const bool withPassiveVehicle = inProcess && std::wcscmp(argv[1], L"--in-process-passive-vehicle") == 0;
+  const bool withVehicleCancel = inProcess && std::wcscmp(argv[1], L"--owned-vehicle-cancel-fixture") == 0;
   const bool withGate = inProcess && std::wcscmp(argv[1], L"--owned-qualified-gate-fixture") == 0;
   const int first = leaseFixture ? 4 : (inProcess ? 2 : 1);
   if((!inProcess && argc != 5) || std::wcscmp(argv[first],L"--pipe") || std::wcscmp(argv[first + 2],L"--token")){std::wcerr<<L"usage: TF3RuntimeIpcHost [--in-process] --pipe <safe-name> --token <64-lowercase-hex>\n";return 2;}
@@ -94,5 +114,6 @@ int wmain(int argc,wchar_t** argv) {
   return inProcess ? tf3runtimeipc::ServeInProcess(pipe,token,
     withObserver ? &OwnedObservation : nullptr, 0,
     withGate ? &OwnedGateProvider : nullptr, leaseMs,
-    withPassiveVehicle ? &OwnedPassiveVehicleObservation : nullptr) : tf3runtimeipc::Serve(pipe,token);
+    (withPassiveVehicle || withVehicleCancel) ? &OwnedPassiveVehicleObservation : nullptr,
+    withVehicleCancel ? &OwnedVehicleCancelProvider : nullptr) : tf3runtimeipc::Serve(pipe,token);
 }

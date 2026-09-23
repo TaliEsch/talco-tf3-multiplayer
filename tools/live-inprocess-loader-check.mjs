@@ -9,7 +9,7 @@ import {startGameBridge} from '../src/game-bridge.mjs';
 import {createLiveControlIdBudget,LIVE_CONTROL_POLL_INTERVAL_MS,LIVE_CONTROL_WAIT_WINDOW_MS,
   LIVE_VEHICLE_ACTION_WAIT_WINDOW_MS} from './live-inprocess-control-budget.mjs';
 
-const usage='usage: node tools/live-inprocess-loader-check.mjs [TF3 exe] [--bridge-dir <absolute tf3mp_status_1 directory>] [--observe-vehicle-action] [--observe-vehicle-completion] (--gate-detach|--gate-halt)';
+const usage='usage: node tools/live-inprocess-loader-check.mjs [TF3 exe] [--bridge-dir <absolute tf3mp_status_1 directory>] [--observe-vehicle-action] [--observe-vehicle-completion] [--cancel-vehicle-stop <entity>] (--gate-detach|--gate-halt)';
 // The game-side UI writes an observation only every 30 onStep calls. Reading
 // the same file five times is not five independent confirmations of a halt.
 async function stableFreshWorld(bridge,label,afterWorld=null){
@@ -38,7 +38,7 @@ async function nextFreshWorld(bridge,afterCounter,label){
   throw new Error(`${label}_PUBLIC_OBSERVATION_DID_NOT_REFRESH`);
 }
 const input=process.argv.slice(2);
-let requestedExe=null,bridgeDirectory=null,gateMode=null,observeVehicleAction=false,observeVehicleCompletion=false;
+let requestedExe=null,bridgeDirectory=null,gateMode=null,observeVehicleAction=false,observeVehicleCompletion=false,cancelStopEntity=null;
 for(let index=0;index<input.length;index++){
   const argument=input[index];
   if(argument==='--bridge-dir'){
@@ -53,6 +53,12 @@ for(let index=0;index<input.length;index++){
     assert.equal(observeVehicleAction,false,usage);observeVehicleAction=true;
   }else if(argument==='--observe-vehicle-completion'){
     assert.equal(observeVehicleCompletion,false,usage);observeVehicleCompletion=true;
+  }else if(argument==='--cancel-vehicle-stop'){
+    assert.equal(cancelStopEntity,null,usage);
+    const value=input[++index];
+    assert.ok(/^[1-9][0-9]*$/.test(value??''),usage);
+    cancelStopEntity=Number(value);
+    assert.ok(Number.isInteger(cancelStopEntity)&&cancelStopEntity<=2147483647,usage);
   }else{
     assert.ok(!argument.startsWith('--')&&requestedExe===null,usage);
     requestedExe=argument;
@@ -60,6 +66,7 @@ for(let index=0;index<input.length;index++){
 }
 assert.ok(gateMode!==null,usage);
 assert.ok(!observeVehicleCompletion||observeVehicleAction,usage);
+assert.ok(cancelStopEntity===null||observeVehicleCompletion&&gateMode==='detach',usage);
 if(bridgeDirectory!==null)assert.ok(path.isAbsolute(bridgeDirectory)&&path.basename(bridgeDirectory)==='tf3mp_status_1','INVALID_BRIDGE_DIRECTORY');
 const exe=requestedExe??'E:\\Steam\\steamapps\\common\\Transport Fever 3\\TransportFever3.exe';
 const handoff=fileURLToPath(new URL('../dist/native-loader/TF3NativeSessionHandoff.exe',import.meta.url));
@@ -92,7 +99,7 @@ if(!client)throw new Error(`LIVE_INPROCESS_RUNTIME_UNAVAILABLE:${lastError?.mess
 try{
   if(client.handshake.engineObserver!==true)throw new Error(`INPROCESS_OBSERVER_START_FAILED:${client.handshake.observerStartStatus??'UNKNOWN'}`);
   const passiveCapabilities=['transport.health','session.bind','qualification.inprocess.observer'];
-  const gateCapabilities=[...passiveCapabilities,'qualification.inprocess.gate','simulation.hold','engine.halt','simulation.gate-receipts.v1','engine.detach','diagnostic.passive-vehicle-action.v1'];
+  const gateCapabilities=[...passiveCapabilities,'qualification.inprocess.gate','simulation.hold','engine.halt','simulation.gate-receipts.v1','engine.detach','diagnostic.passive-vehicle-action.v1','vehicle.cancel-arm.v1','diagnostic.vehicle-cancel-arm.v1'];
   assert.deepEqual(client.capabilities,gateCapabilities);
   assert.deepEqual(client.handshake,{engineObserver:true,productionQualified:true,guiFreezes:true});
   const sessionId=`loader.check:${launchedAt}`;
@@ -167,9 +174,27 @@ try{
       last:{observationHits:last.observationHits,counter:last.counter,tickCount:last.tickCount,updateCount:last.updateCount,speedup:last.speedup},
       deltas};
   }
-  let vehicleObservation=null;
+  let vehicleObservation=null,cancelEvidence=null;
   if(observeVehicleAction){
     const baseline=client.passiveVehicleActionObservation(ping);
+    if(cancelStopEntity!==null){
+      assert.equal(client.vehicleCancelArmObservation(ping).state,'disabled');
+      process.stdout.write(`${JSON.stringify({event:'tf3-cancel-vehicle-awaiting-arm',entity:cancelStopEntity,
+        instruction:'Select the vehicle and prepare its Stop control, then send ARM on stdin.'})}\n`);
+      let armSignal=false;
+      process.stdin.setEncoding('utf8');
+      process.stdin.on('data',chunk=>{if(chunk.trim()==='ARM')armSignal=true;});
+      const armSignalDeadline=Date.now()+600000;
+      while(!armSignal&&Date.now()<armSignalDeadline){
+        await new Promise(resolve=>setTimeout(resolve,5000));
+        ping=await controlIds.issue(()=>client.control('ping'));
+      }
+      assert.equal(armSignal,true,'TF3_CANCEL_ARM_SIGNAL_TIMEOUT');
+      const arm=await controlIds.issue(()=>client.armVehicleCancel({entity:cancelStopEntity,stopped:1,ttlMs:5000}));
+      cancelEvidence={arm};
+      process.stdout.write(`${JSON.stringify({event:'tf3-cancel-vehicle-armed',entity:cancelStopEntity,
+        expectedInvocation:arm.expectedInvocation,deadlineMs:5000})}\n`);
+    }
     // The interaction allowance begins only after the world observer (and, when
     // configured, bridge correlation) has reached its ready boundary above.
     // Emit that boundary so a live operator knows when the full action window
@@ -194,6 +219,11 @@ try{
       current=client.passiveVehicleActionObservation(ping);
       assert.equal(current.active,true);
       assert.equal(current.saturated,false,'PASSIVE_VEHICLE_ACTION_COUNTER_SATURATED');
+      if(cancelStopEntity!==null){
+        const armState=client.vehicleCancelArmObservation(ping);
+        if(['expired','revoked','failed'].includes(armState.state))
+          throw new Error(`TF3_CANCEL_ARM_TERMINAL:${JSON.stringify(armState)}`);
+      }
     }
     const actionCounters=JSON.stringify({baseline,current,
       elapsedMs:Date.now()-vehicleActionWindowStartedAt});
@@ -249,6 +279,30 @@ try{
         `PASSIVE_VEHICLE_MARSHALER_ENTITY_MISMATCH:${actionCounters}`);
       assert.equal(current.latestMarshalerStopped,current.latestStopped,
         `PASSIVE_VEHICLE_MARSHALER_STOPPED_MISMATCH:${actionCounters}`);
+    }
+    if(cancelStopEntity!==null){
+      assert.equal(current.latestEntity,cancelStopEntity,'CANCEL_VEHICLE_ENTITY_MISMATCH');
+      assert.equal(current.latestStopped,1,'CANCEL_VEHICLE_STOPPED_MISMATCH');
+      assert.equal(current.latestCallbackResult,0,'CANCEL_CALLBACK_RESULT_NOT_FALSE');
+      assert.equal(current.latestMarshalerResult,0,'CANCEL_MARSHALER_RESULT_NOT_FALSE');
+      let armState=client.vehicleCancelArmObservation(ping);
+      const armDeadline=Date.now()+5000;
+      while(armState.state==='claiming'||armState.state==='claimed'||armState.state==='armed'){
+        if(Date.now()>=armDeadline)break;
+        await new Promise(resolve=>setTimeout(resolve,LIVE_CONTROL_POLL_INTERVAL_MS));
+        ping=await controlIds.issue(()=>client.control('ping'));
+        armState=client.vehicleCancelArmObservation(ping);
+      }
+      assert.equal(armState.state,'completed',`CANCEL_NOT_COMPLETED:${JSON.stringify(armState)}`);
+      assert.equal(armState.expectedInvocation,cancelEvidence.arm.expectedInvocation);
+      assert.equal(armState.claimedInvocation,cancelEvidence.arm.expectedInvocation);
+      assert.equal(armState.claimedEntity,cancelStopEntity);
+      assert.equal(armState.claimedStopped,1);
+      assert.equal(armState.callbackResultZero,true);
+      assert.equal(armState.sendReturn,true);
+      assert.equal(armState.postSendBody,true);
+      cancelEvidence.observation=armState;
+      process.stdout.write(`${JSON.stringify({event:'tf3-cancel-vehicle-native-completed',...cancelEvidence})}\n`);
     }
     vehicleObservation=current;
     process.stdout.write(`${JSON.stringify({event:'tf3-passive-vehicle-action-observed',
@@ -421,6 +475,7 @@ try{
       observationCfgKnown:ping.observationCfgKnown,observationCetKnown:ping.observationCetKnown,
       observationActive:ping.observationActive,observationCrossThread:ping.observationCrossThread},
     ...(correlation?{correlation}:{}),...(vehicleObservation?{vehicleObservation}:{}),
+    ...(cancelEvidence?{cancelEvidence}:{}),
     ...(gateEvidence?{gateEvidence}:{}),elapsedMs:Date.now()-launchedAt})}\n`);
 }finally{
   if(!shutdownSent){
