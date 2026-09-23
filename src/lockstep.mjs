@@ -55,7 +55,7 @@ export class HostAuthority {
     this.#players.set(playerId, bound);
     return bound;
   }
-  accept(request, currentUpdate, authenticatedPlayerId) {
+  accept(request, currentUpdate, authenticatedPlayerId, verifiedEntityOwner = undefined) {
     if (!request || typeof request !== "object") throw new ProtocolError("BAD_REQUEST", "request missing");
     const allowedRequestFields = new Set(["clientSequence", "commandType", "messageId", "originPlayerId", "payload", "requestedUpdate", "targetEntity", "targetCompanyEntity"]);
     if (Object.keys(request).some((key) => !allowedRequestFields.has(key))) throw new ProtocolError("BAD_REQUEST", "unknown request field");
@@ -87,7 +87,8 @@ export class HostAuthority {
     }
     if (request.commandType === "vehicle.setRunning") {
       if (!Number.isSafeInteger(request.targetEntity) || request.targetEntity < 0) throw new ProtocolError("BAD_ENTITY", "invalid entity");
-      const actualOwner = this.resolveEntityOwner(request.targetEntity);
+      const actualOwner = verifiedEntityOwner === undefined
+        ? this.resolveEntityOwner(request.targetEntity) : verifiedEntityOwner;
       if (actualOwner === null || actualOwner === undefined) throw new ProtocolError("OWNERSHIP_UNAVAILABLE", "authoritative entity ownership is unavailable");
       if (actualOwner !== player.companyEntity) throw new ProtocolError("NOT_OWNER", "asset belongs to a different company");
       if (typeof request.payload.running !== "boolean" || Object.keys(request.payload).some((key) => key !== "running")) {

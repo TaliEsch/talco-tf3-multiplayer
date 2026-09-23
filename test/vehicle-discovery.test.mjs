@@ -30,4 +30,11 @@ test('vehicle discovery is a bounded read-only owner-filtered bridge request',()
   assert.ok(discoveryDispatch>=0,'vehicle discovery is dispatched');
   assert.ok(discoveryDispatch<dispatch.indexOf('if config.mode == "company_test"'),
     'read-only discovery runs in telemetry mode before mode-specific actions');
+  for(const marker of ['if request.entity ~= nil then event.entity = request.entity end',
+    'if request.entity ~= nil then',
+    'api.engine.getComponent(entity, api.type.ComponentType.PLAYER_OWNED)',
+    'owner.player == request.company'])assert.ok((panel+engine).includes(marker),marker);
+  const target=engine.slice(engine.indexOf('if request.entity ~= nil then',engine.indexOf('name == "tf3mp_discover_vehicle"')),
+    engine.indexOf('elseif api.engine.util.getPlayer() ~= request.company'));
+  assert.doesNotMatch(target,/api\.cmd|sendCommand|makeVehicle|saveGame|setGameSpeed/);
 });

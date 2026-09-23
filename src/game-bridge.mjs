@@ -594,6 +594,56 @@ export async function startGameBridge({ directory, logger = () => {}, intervalMs
         vehicleDiscoveryBusy=false;
       }
     },
+    async inspectVehicleOwner({entity,company,timeoutMs=15000}={}) {
+      if(vehicleDiscoveryBusy)throw new Error('VEHICLE_DISCOVERY_BUSY');
+      if(!Number.isSafeInteger(entity)||entity<1||entity>2147483647
+        ||!Number.isSafeInteger(company)||company<0||company>2147483647
+        ||!Number.isSafeInteger(timeoutMs)||timeoutMs<100||timeoutMs>30000)
+        throw new TypeError('INVALID_VEHICLE_OWNER_INSPECTION');
+      vehicleDiscoveryBusy=true;
+      try {
+        const start=pending.then(async()=>{
+          const observation=observations.status;
+          if(stopped||!connected||!observation.available)throw new Error('FRESH_BRIDGE_OBSERVATION_REQUIRED');
+          if(vehicleTest||companyTestUsed||haltTest||pauseTest||probe)
+            throw new Error('VEHICLE_DISCOVERY_BUSY');
+          const update=observation.sample.updateCount;
+          const tick=observation.sample.tickCount;
+          const requestId=++requestSequence;
+          await publish(directory,'vehicle_discovery_request.lua',{
+            schemaVersion:1,kind:'vehicle_discovery_request',nonce,requestId,company,entity});
+          return {requestId,update,tick};
+        });
+        pending=start.catch(()=>{});
+        const context=await start;
+        const deadline=Date.now()+timeoutMs;
+        while(!stopped&&Date.now()<deadline) {
+          const observation=observations.status;
+          if(!connected||!observation.available||observation.sample.updateCount!==context.update)
+            throw new Error('VEHICLE_OWNER_CONTEXT_LOST');
+          try {
+            const receipt=parseVehicleDiscoveryReceipt(await readBounded(directory,'vehicle_discovery_receipt.lua'),{
+              nonce,requestId:context.requestId,company});
+            if(receipt.updateCount!==context.update||receipt.tickCount<context.tick)
+              throw new Error('VEHICLE_OWNER_CLOCK_MISMATCH');
+            if(receipt.outcome!=='found'||receipt.entity!==entity)
+              throw new Error('VEHICLE_OWNER_NOT_CONFIRMED');
+            const latest=observations.status;
+            if(stopped||!connected||!latest.available||latest.sample.updateCount!==context.update)
+              throw new Error('VEHICLE_OWNER_CONTEXT_LOST');
+            return receipt;
+          } catch(error) {
+            if(['VEHICLE_OWNER_CLOCK_MISMATCH','VEHICLE_OWNER_NOT_CONFIRMED','VEHICLE_OWNER_CONTEXT_LOST'].includes(error.message))throw error;
+            // Ignore old, incomplete and malformed receipts until the deadline.
+          }
+          await delay(100);
+        }
+        throw new Error(stopped?'VEHICLE_OWNER_INSPECTION_CLOSED':'VEHICLE_OWNER_INSPECTION_TIMEOUT');
+      } finally {
+        await unlink(path.join(directory,'vehicle_discovery_request.lua')).catch(()=>{});
+        vehicleDiscoveryBusy=false;
+      }
+    },
     get haltState() { return haltTest?.phase ?? "not_requested"; },
     get coordinationLeaseState() { return coordinationLease?.phase ?? "not_started"; },
     get coordinatorSetup() {

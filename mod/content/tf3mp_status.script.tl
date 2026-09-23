@@ -2050,6 +2050,7 @@ local ret : GameScriptWithGui<Tf3MpState, Tf3MpGuiState> = {
       local nonce = request.nonce as string
       if #nonce ~= 32 or not string.match(nonce, "^[0-9a-f]+$") or not validInteger(request.requestId)
         or request.requestId < 1 or not validInteger(request.company) then return nil end
+      if request.entity ~= nil and (not validInteger(request.entity) or request.entity < 1) then return nil end
       local current = state:get()
       if current == nil or current.schemaVersion == nil then return nil end
       local old = current.vehicleDiscoveryReceipt or {}
@@ -2058,7 +2059,21 @@ local ret : GameScriptWithGui<Tf3MpState, Tf3MpGuiState> = {
       local receipt : table = { schemaVersion = 1, kind = "vehicle_discovery_receipt", nonce = nonce,
         requestId = request.requestId, company = request.company, entity = 0, revision = 0, stopFlag = 0,
         tickCount = clock.tickCount, updateCount = clock.updateCount, outcome = "missing" }
-      if api.engine.util.getPlayer() ~= request.company then
+      if request.entity ~= nil then
+        local entity = request.entity as integer
+        if api.engine.entityExists(entity) then
+          local owner = api.engine.getComponent(entity, api.type.ComponentType.PLAYER_OWNED) as Engine.Component.PlayerOwned
+          local vehicle = api.engine.getComponent(entity, api.type.ComponentType.TRANSPORT_VEHICLE) as Engine.Component.TransportVehicle
+          if owner ~= nil and vehicle ~= nil then
+            if owner.player == request.company then
+              receipt.entity = entity
+              receipt.revision = api.engine.getRevision(entity).num[1]
+              receipt.stopFlag = vehicle.userStopped and 1 or 0
+              receipt.outcome = "found"
+            else receipt.outcome = "not_owner" end
+          end
+        end
+      elseif api.engine.util.getPlayer() ~= request.company then
         receipt.outcome = "not_owner"
       else
         local vehicles = api.engine.getEntitiesWithComponent(api.type.ComponentType.TRANSPORT_VEHICLE)

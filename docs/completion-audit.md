@@ -1,5 +1,21 @@
 # Completion audit against the build prompt
 
+## Targeted owner proof at host admission — 23 September 2026
+
+**Implemented and model tested:** a targeted read-only engine receipt binds
+vehicle entity, company, nonce, request ID and update. The host reserves action
+admission while obtaining that proof, then checks the authenticated company and
+same host update before assigning a sequence. The production Host CLI requires
+the native gate for this path. **Single-game verified:** paused TF3 reported
+vehicle 66005 owned by company 3141 at update 2998 and rejected a query for
+company 55652. The game exited without saving; the disposable save SHA-256
+remained `CCBF4BEB740E53323E06D20890FD029C8E174D3E85EFB06801A8B4275C762FB5`.
+No native loader, host action execution, second instance or synchronized
+postcondition was tested in this run. Focused tests passed 33/33 and mod review
+passed. The full integration run reported 926 cases: 920 passed, 5 failed,
+1 skipped; the five failures were older native controller/observer teardown
+cases. **Stage 6:** open.
+
 ## Live read-only company and vehicle receipts — 23 September 2026
 
 **Single-game verified:** the ordinary TF3 executable loaded the known

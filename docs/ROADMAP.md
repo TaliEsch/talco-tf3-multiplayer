@@ -1,5 +1,24 @@
 # TalCo TF3 multiplayer — current delivery plan
 
+## Targeted engine ownership at host admission — 23 September 2026
+
+The GUI bridge and engine script now answer a read-only lookup for a specified
+vehicle entity and company. The Node bridge requires a nonce-bound receipt at
+the observed update. The host waits for that exact receipt before assigning a
+vehicle command sequence and rejects overtaking requests while inspection is
+pending. The production Host CLI uses this route only when the native gate is
+ready. In one paused TF3 instance, entity 66005 returned `found` for company
+3141 at update 2998; asking for the same entity as company 55652 was rejected.
+The game exited without saving and the disposable save SHA-256 remained
+`CCBF4BEB740E53323E06D20890FD029C8E174D3E85EFB06801A8B4275C762FB5`.
+This was a read-only single-game check, without native loader or action
+execution. Focused admission/bridge tests passed 33/33 and mod review passed.
+The full integration run reported 926 cases: 920 passed, 5 failed, 1 skipped;
+all five failures were older native controller/observer teardown cases. The
+next critical action is to route one natively cancelled vehicle
+intent through host ordering and held execution, then verify its correlated
+engine postcondition. Stage 6 remains open.
+
 ## Paused TF3 ownership receipts — 23 September 2026
 
 The first read-only live probe found a mod dispatch gap: company inspection

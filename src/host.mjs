@@ -6,8 +6,9 @@ import { HostAuthority, ProtocolError } from "./lockstep.mjs";
 import { SessionCoordinator } from "./session-coordinator.mjs";
 import { connectClient } from "./client.mjs";
 
-export function startHost({ secret, sessionId = randomUUID(), bind = DEFAULT_BIND, port = DEFAULT_PORT, buildHash, modManifestHash, requiredSave = null, expiresAt = null, getUpdateCount = () => 0, resolveEntityOwner = () => null, admissionAllowed = () => true, logger = () => {}, legacyModelRelay = false, requireReleaseAck = true }) {
+export function startHost({ secret, sessionId = randomUUID(), bind = DEFAULT_BIND, port = DEFAULT_PORT, buildHash, modManifestHash, requiredSave = null, expiresAt = null, getUpdateCount = () => 0, resolveEntityOwner = () => null, inspectVehicleOwner = null, admissionAllowed = () => true, logger = () => {}, legacyModelRelay = false, requireReleaseAck = true }) {
   if (expiresAt !== null && (!Number.isSafeInteger(expiresAt) || expiresAt <= Date.now())) throw new RangeError("session expiry must be a future Unix timestamp in milliseconds");
+  if(inspectVehicleOwner!==null&&typeof inspectVehicleOwner!=='function')throw new TypeError('INVALID_VEHICLE_OWNER_INSPECTOR');
   const authority = new HostAuthority({ sessionId, buildHash, modManifestHash, resolveEntityOwner });
   const peers = new Set();
   // Entries are created only by connectLocalParticipant below.  A loopback
@@ -18,6 +19,7 @@ export function startHost({ secret, sessionId = randomUUID(), bind = DEFAULT_BIN
   const sessionSeen = new Set();
   let pendingConnections = 0;
   let serverSequence = 0;
+  let actionAdmissionPending = false;
   const send = (socket, kind, payload, playerId = null) => {
     if (socket.destroyed) return false;
     const frame = encodeFrame(secret, makeBody({ kind, sequence: ++serverSequence, sessionId, playerId, payload }));
@@ -109,22 +111,59 @@ export function startHost({ secret, sessionId = randomUUID(), bind = DEFAULT_BIN
             send(socket, "test_echo", { value: body.payload.value }, peer.player.playerId);
           }
           else if (body.kind === "action_request" || body.kind === "speed_request") {
-            try {
-              if (!peer.ready) throw new ProtocolError("SAVE_REQUIRED", "authoritative save must be verified before gameplay requests");
-              // Keep the authority and coordinator on one sampled host update.
-              // A changing or lost observation cannot move the deadline between
-              // acceptance and proposal of this same authenticated request.
-              const hostUpdate=getUpdateCount();
-              if (!legacyModelRelay) coordinator.beforeCommand(hostUpdate);
-              const accepted = authority.accept({ ...body.payload, messageId: body.messageId }, hostUpdate, peer.player.playerId);
-              if (legacyModelRelay) broadcast("command_accepted", { command: accepted });
-              else coordinator.propose(accepted, hostUpdate);
-              logger({ level: "info", event: legacyModelRelay ? "command_accepted" : "command_proposed", playerId: peer.player.playerId, hostSequence: accepted.hostSequence, scheduledUpdate: accepted.scheduledUpdate });
-            } catch (error) {
-              if (!(error instanceof ProtocolError)) throw error;
-              send(socket, "command_rejected", { requestMessageId: body.messageId, code: error.code }, peer.player.playerId);
-              logger({ level: "info", event: "command_rejected", playerId: peer.player.playerId, code: error.code });
+            if(actionAdmissionPending){
+              send(socket,"command_rejected",{requestMessageId:body.messageId,code:'COMMAND_ADMISSION_BUSY'},peer.player.playerId);
+              continue;
             }
+            actionAdmissionPending=true;
+            // Keep one host-wide admission in flight while the engine provides
+            // its target-specific ownership receipt. Control traffic continues
+            // to flow; a second action cannot overtake this one.
+            void (async()=>{
+              try {
+                if (!peer.ready) throw new ProtocolError("SAVE_REQUIRED", "authoritative save must be verified before gameplay requests");
+                let verifiedOwner;
+                if(body.kind==='action_request'&&body.payload?.commandType==='vehicle.setRunning'&&inspectVehicleOwner!==null){
+                  const request=body.payload;
+                  const boundPlayer=authority.players().find(p=>p.playerId===peer.player.playerId);
+                  if(request.originPlayerId!==peer.player.playerId
+                    ||request.targetCompanyEntity!==boundPlayer?.companyEntity
+                    ||!Number.isSafeInteger(request.targetEntity)||request.targetEntity<1)
+                    throw new ProtocolError('NOT_OWNER','vehicle request identity or target is invalid');
+                  if(!request.payload||typeof request.payload!=='object'||Array.isArray(request.payload)
+                    ||typeof request.payload.running!=='boolean'
+                    ||Object.keys(request.payload).some(key=>key!=='running'))
+                    throw new ProtocolError('BAD_RUNNING_STATE','vehicle request payload is invalid');
+                  if(!legacyModelRelay)coordinator.beforeCommand(getUpdateCount());
+                  let proof;
+                  try{proof=await inspectVehicleOwner({targetEntity:request.targetEntity,
+                    targetCompanyEntity:request.targetCompanyEntity});}
+                  catch{throw new ProtocolError('OWNERSHIP_UNAVAILABLE','engine owner inspection did not complete');}
+                  if(socket.destroyed||!authority.players().some(p=>p.playerId===peer.player.playerId)
+                    ||proof?.entity!==request.targetEntity||proof?.company!==request.targetCompanyEntity
+                    ||proof?.outcome!=='found')
+                    throw new ProtocolError('OWNERSHIP_UNAVAILABLE','engine owner receipt is stale or mismatched');
+                  verifiedOwner=proof;
+                }
+                // One sampled update drives authority acceptance and proposal.
+                const hostUpdate=getUpdateCount();
+                if(verifiedOwner!==undefined){
+                  if(verifiedOwner.updateCount!==hostUpdate)
+                    throw new ProtocolError('OWNERSHIP_UNAVAILABLE','engine owner receipt is stale');
+                  verifiedOwner=verifiedOwner.company;
+                }
+                if (!legacyModelRelay) coordinator.beforeCommand(hostUpdate);
+                const accepted = authority.accept({ ...body.payload, messageId: body.messageId }, hostUpdate,
+                  peer.player.playerId,verifiedOwner);
+                if (legacyModelRelay) broadcast("command_accepted", { command: accepted });
+                else coordinator.propose(accepted, hostUpdate);
+                logger({ level: "info", event: legacyModelRelay ? "command_accepted" : "command_proposed", playerId: peer.player.playerId, hostSequence: accepted.hostSequence, scheduledUpdate: accepted.scheduledUpdate });
+              } catch (error) {
+                const code=error instanceof ProtocolError?error.code:'OWNERSHIP_UNAVAILABLE';
+                send(socket, "command_rejected", { requestMessageId: body.messageId, code }, peer.player.playerId);
+                logger({ level: "info", event: "command_rejected", playerId: peer.player.playerId, code });
+              } finally {actionAdmissionPending=false;}
+            })();
           } else throw new ProtocolError("UNEXPECTED_KIND", "message kind not accepted from client");
         }
       } catch (error) {

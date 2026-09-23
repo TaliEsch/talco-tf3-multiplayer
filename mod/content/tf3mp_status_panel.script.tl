@@ -920,12 +920,16 @@ local function exchangeVehicleDiscovery() : nil
     if type(value) ~= "number" or value < 0 or value > 2147483647 or value % 1 ~= 0 then return nil end
   end
   if request.requestId < 1 then return nil end
+  if request.entity ~= nil and (type(request.entity) ~= "number" or request.entity < 1
+    or request.entity > 2147483647 or request.entity % 1 ~= 0) then return nil end
   if request.requestId > vehicleDiscoverySent then
     vehicleDiscoverySent = request.requestId as integer
-    api.cmd.sendCommand(api.cmd.makeScriptingSendEventCmd("tf3mp_status_1::/tf3mp_status.gs", "tf3mp_engine_bridge", "tf3mp_discover_vehicle", {
+    local event : table = {
       schemaVersion = 1, kind = "vehicle_discovery_request", nonce = bridgeNonce,
       requestId = vehicleDiscoverySent, company = request.company,
-    }))
+    }
+    if request.entity ~= nil then event.entity = request.entity end
+    api.cmd.sendCommand(api.cmd.makeScriptingSendEventCmd("tf3mp_status_1::/tf3mp_status.gs", "tf3mp_engine_bridge", "tf3mp_discover_vehicle", event))
   end
   if request.requestId ~= vehicleDiscoverySent then return nil end
   local value = api.gui.fireGuiScriptEvent("tf3mp_engine_bridge", "tf3mp_get_vehicle_discovery", {})
@@ -933,6 +937,7 @@ local function exchangeVehicleDiscovery() : nil
   local receipt = value as table
   if receipt.schemaVersion ~= 1 or receipt.kind ~= "vehicle_discovery_receipt" or receipt.nonce ~= bridgeNonce
     or receipt.requestId ~= vehicleDiscoverySent or receipt.company ~= request.company then return nil end
+  if request.entity ~= nil and receipt.outcome == "found" and receipt.entity ~= request.entity then return nil end
   local result : table = { schemaVersion = 1, kind = "vehicle_discovery_receipt", nonce = bridgeNonce,
     requestId = vehicleDiscoverySent, outcome = receipt.outcome }
   if receipt.outcome ~= "found" and receipt.outcome ~= "missing" and receipt.outcome ~= "not_owner" then return nil end

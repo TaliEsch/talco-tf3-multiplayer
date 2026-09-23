@@ -428,6 +428,61 @@ test("owned vehicle and speed requests traverse the authoritative host relay", a
   await shutdown(instance.server, [handle.socket]);
 });
 
+test('host waits for exact engine owner proof and prevents action overtaking',{timeout:5000},async()=>{
+  let releaseProof,inspectionStarted;
+  const inspecting=new Promise(resolve=>{inspectionStarted=resolve;});
+  const instance=startHost({legacyModelRelay:true,secret:SECRET,sessionId:'owner-proof',port:0,
+    buildHash:BUILD,modManifestHash:MODS,getUpdateCount:()=>50,
+    inspectVehicleOwner:()=>new Promise(resolve=>{releaseProof=resolve;inspectionStarted();})});
+  await once(instance.server,'listening');
+  let handle,playerId;
+  const messages=[];
+  try{
+    handle=connectClient({secret:SECRET,sessionId:instance.sessionId,port:instance.server.address().port,
+      displayName:'Alice',buildHash:BUILD,modManifestHash:MODS,onMessage(message,context){
+        if(message.kind==='admitted'){
+          playerId=message.payload.player.playerId;
+          instance.authority.bindCompanyEntity(playerId,101);
+          context.send('action_request',{clientSequence:0,commandType:'vehicle.setRunning',originPlayerId:playerId,
+            targetCompanyEntity:101,targetEntity:77,payload:{running:false}});
+        }
+        if(['command_accepted','command_rejected'].includes(message.kind))messages.push(message);
+      }});
+    await inspecting;
+    handle.send('action_request',{clientSequence:1,commandType:'vehicle.setRunning',originPlayerId:playerId,
+      targetCompanyEntity:101,targetEntity:77,payload:{running:true}});
+    for(let i=0;i<100&&!messages.some(m=>m.payload.code==='COMMAND_ADMISSION_BUSY');i++)await new Promise(r=>setTimeout(r,5));
+    assert.equal(messages.some(m=>m.payload.code==='COMMAND_ADMISSION_BUSY'),true);
+    releaseProof({outcome:'found',entity:77,company:101,updateCount:50});
+    for(let i=0;i<100&&!messages.some(m=>m.kind==='command_accepted');i++)await new Promise(r=>setTimeout(r,5));
+    assert.equal(messages.find(m=>m.kind==='command_accepted')?.payload.command.hostSequence,1);
+  }finally{await shutdown(instance.server,handle?[handle.socket]:[]);}
+});
+
+test('host rejects stale owner proof before assigning a sequence',{timeout:5000},async()=>{
+  const instance=startHost({legacyModelRelay:true,secret:SECRET,sessionId:'stale-owner-proof',port:0,
+    buildHash:BUILD,modManifestHash:MODS,getUpdateCount:()=>51,
+    inspectVehicleOwner:async()=>({outcome:'found',entity:77,company:101,updateCount:50})});
+  await once(instance.server,'listening');
+  let handle;
+  try{
+    const code=await new Promise((resolve,reject)=>{
+      handle=connectClient({secret:SECRET,sessionId:instance.sessionId,port:instance.server.address().port,
+        displayName:'Alice',buildHash:BUILD,modManifestHash:MODS,onMessage(message,context){
+          if(message.kind==='admitted'){
+            const playerId=message.payload.player.playerId;
+            instance.authority.bindCompanyEntity(playerId,101);
+            context.send('action_request',{clientSequence:0,commandType:'vehicle.setRunning',originPlayerId:playerId,
+              targetCompanyEntity:101,targetEntity:77,payload:{running:false}});
+          }
+          if(message.kind==='command_rejected')resolve(message.payload.code);
+          if(message.kind==='command_accepted')reject(new Error('stale owner proof accepted'));
+        }});
+    });
+    assert.equal(code,'OWNERSHIP_UNAVAILABLE');
+  }finally{await shutdown(instance.server,handle?[handle.socket]:[]);}
+});
+
 test("fifth compatible player is rejected", () => {
   const authority = new HostAuthority({ sessionId: "s", buildHash: BUILD, modManifestHash: MODS });
   for (let i = 0; i < 4; i++) authority.admit({ displayName: `${i}`, buildHash: BUILD, modManifestHash: MODS });

@@ -44,3 +44,25 @@ test('bridge accepts one fresh paused engine ownership receipt and removes reque
     await assert.rejects(readFile(path.join(directory,'vehicle_discovery_request.lua')),{code:'ENOENT'});
   } finally {await bridge.close();await rm(root,{recursive:true,force:true});}
 });
+
+test('targeted owner inspection binds entity, company and live update',async()=>{
+  const root=await mkdtemp(path.join(os.tmpdir(),'tf3mp-target-owner-'));
+  const directory=path.join(root,'tf3mp_status_1');
+  const bridge=await startGameBridge({directory,intervalMs:5});
+  try {
+    await writeFile(path.join(directory,'telemetry.lua'),lua({schemaVersion:1,kind:'telemetry',nonce:bridge.nonce,
+      counter:1,tickCount:100,updateCount:50}));
+    await writeFile(path.join(directory,'engine_observation.lua'),lua({schemaVersion:1,kind:'engine_observation',nonce:bridge.nonce,
+      counter:1,tickCount:100,updateCount:50,speedup:1,companyEntity:7,balance:0,balanceKnown:1,balanceNegative:0}));
+    await until(()=>bridge.engineObservation.available);
+    const pending=bridge.inspectVehicleOwner({entity:42,company:8,timeoutMs:1000});
+    await until(async()=>{try{return (await readFile(path.join(directory,'vehicle_discovery_request.lua'),'utf8')).includes('entity = 42');}catch{return false;}});
+    const request=parseFlatDataFile(await readFile(path.join(directory,'vehicle_discovery_request.lua'),'utf8'));
+    assert.equal(request.company,8);
+    await assert.rejects(bridge.discoverOwnedVehicle(),/VEHICLE_DISCOVERY_BUSY/);
+    await writeFile(path.join(directory,'vehicle_discovery_receipt.lua'),lua(receipt({nonce:bridge.nonce,
+      requestId:request.requestId,company:8,entity:42})));
+    assert.equal((await pending).entity,42);
+    await assert.rejects(readFile(path.join(directory,'vehicle_discovery_request.lua')),{code:'ENOENT'});
+  }finally{await bridge.close();await rm(root,{recursive:true,force:true});}
+});

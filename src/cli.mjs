@@ -360,6 +360,10 @@ if (command === "hash-game") {
     engineSessionDirectory:opt['bridge-dir'],logger:log});
   const instance = startHost({ secret: sessionSecret, sessionId: hostSessionId, bind: opt.bind, port: opt.port ? Number(opt.port) : undefined, buildHash, modManifestHash: opt["mod-hash"], requiredSave, expiresAt, logger: log,
     getUpdateCount:()=>liveHostUpdateCount(bridge),
+    inspectVehicleOwner:nativeMode.diagnosticOnly?null:async ({targetEntity,targetCompanyEntity})=>{
+      if(nativeGate?.ready!==true)throw new Error('NATIVE_GATE_UNAVAILABLE');
+      return bridge.inspectVehicleOwner({entity:targetEntity,company:targetCompanyEntity});
+    },
     admissionAllowed: () => !nativeMode.diagnosticOnly && nativeGate?.ready===true && localFactory!==null && !vehicleTestActive && !hostCaptureAttempted });
   hostInstance = instance;
   await once(instance.server, "listening");
