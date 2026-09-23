@@ -1,5 +1,21 @@
 # TalCo TF3 multiplayer — current delivery plan
 
+## TF3 executable changed during native Stop trial — 23 September 2026
+
+Steam replaced `TransportFever3.exe` at 13:43:57 UTC while the qualified
+native loader was staged. The installed SHA-256 is now
+`297ef05b740de1a3c4b375fd53ca69f371347a4b1546a37525f04aab6bc8e6e6`,
+different from the loader's exact-build qualification
+`a4843accd706b9c476c645860e2b68f6488c9b89f33ef97efe00cffb74a47be5`.
+The game loaded the disposable save, but the native runtime correctly did not
+expose its IPC pipe; no Stop click, cancellation, host order or replay occurred.
+The game exited without saving, the source save hash stayed unchanged, and the
+hash-matched loader was removed. A subsequent staging attempt rejected the new
+executable. The live checker now checks the staged manifest against the installed
+executable before launch and rechecks after an unavailable runtime. Requalify the
+new build's native sites before another live native trial. Host ordering and
+replay can continue through focused model tests while that gate is closed.
+
 ## One-game checkpoint and native halt composition — 23 September 2026
 
 The live diagnostic now shares one bridge owner between the checkpoint cycle

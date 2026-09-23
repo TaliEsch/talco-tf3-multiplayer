@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {spawn,spawnSync} from 'node:child_process';
-import {randomBytes} from 'node:crypto';
-import {existsSync} from 'node:fs';
+import {createHash,randomBytes} from 'node:crypto';
+import {createReadStream,existsSync,readFileSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
 import path from 'node:path';
 import {NativeRuntimeClient} from '../src/native-runtime-client.mjs';
@@ -81,6 +81,16 @@ const handoff=fileURLToPath(new URL('../dist/native-loader/TF3NativeSessionHando
 assert.equal(process.platform,'win32','WINDOWS_REQUIRED');
 assert.ok(existsSync(exe),'TF3_EXECUTABLE_MISSING');
 assert.ok(existsSync(handoff),'NATIVE_SESSION_HANDOFF_MISSING');
+const manifestPath=path.join(path.dirname(exe),'TalCo-TF3MP-native-loader.json');
+assert.ok(existsSync(manifestPath),'NATIVE_LOADER_MANIFEST_MISSING');
+const manifest=JSON.parse(readFileSync(manifestPath,'utf8'));
+assert.match(manifest.qualifiedExeSha256??'',/^[0-9a-f]{64}$/,'NATIVE_LOADER_MANIFEST_INVALID');
+async function executableHash(){
+  const hash=createHash('sha256');
+  for await(const chunk of createReadStream(exe))hash.update(chunk);
+  return hash.digest('hex');
+}
+assert.equal(await executableHash(),manifest.qualifiedExeSha256,'TF3_EXECUTABLE_CHANGED_SINCE_LOADER_STAGING');
 const pipe=`tf3mp_live_${randomBytes(10).toString('hex')}`;
 const token=randomBytes(32).toString('hex');
 const launchedAt=Date.now();
@@ -104,7 +114,11 @@ for(let attempt=0;attempt<180&&!client;attempt++){
   catch(error){lastError=error;await new Promise(resolve=>setTimeout(resolve,500));}
 }
 try{
-  if(!client)throw new Error(`LIVE_INPROCESS_RUNTIME_UNAVAILABLE:${lastError?.message??'UNKNOWN'}`);
+  if(!client){
+    if(await executableHash()!==manifest.qualifiedExeSha256)
+      throw new Error('TF3_EXECUTABLE_CHANGED_DURING_LAUNCH');
+    throw new Error(`LIVE_INPROCESS_RUNTIME_UNAVAILABLE:${lastError?.message??'UNKNOWN'}`);
+  }
   if(client.handshake.engineObserver!==true)throw new Error(`INPROCESS_OBSERVER_START_FAILED:${client.handshake.observerStartStatus??'UNKNOWN'}`);
   const passiveCapabilities=['transport.health','session.bind','qualification.inprocess.observer'];
   const gateCapabilities=[...passiveCapabilities,'qualification.inprocess.gate','simulation.hold','engine.halt','simulation.gate-receipts.v1','engine.detach','diagnostic.passive-vehicle-action.v1','vehicle.cancel-arm.v1','diagnostic.vehicle-cancel-arm.v1'];

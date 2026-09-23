@@ -1,5 +1,23 @@
 # Completion audit against the build prompt
 
+## Native Stop trial interrupted by TF3 update — 23 September 2026
+
+**Current failure:** the staged loader was qualified for executable SHA-256
+`a4843accd706b9c476c645860e2b68f6488c9b89f33ef97efe00cffb74a47be5`.
+Steam replaced `TransportFever3.exe` at 13:43:57 UTC with SHA-256
+`297ef05b740de1a3c4b375fd53ca69f371347a4b1546a37525f04aab6bc8e6e6`.
+The subsequent TF3 process loaded the known disposable save with its helper
+offline; the native IPC pipe never appeared, consistent with exact-build
+qualification refusing the changed executable. No Stop was clicked and no
+native cancellation, host ordering or held replay occurred. The process exited
+without saving, the disposable save retained SHA-256
+`CCBF4BEB740E53323E06D20890FD029C8E174D3E85EFB06801A8B4275C762FB5`,
+and the staged files were removed by the hash-checked cleanup script. A fresh
+staging attempt rejected the new build. The live checker now verifies the
+staged executable hash before launch and on IPC startup failure; focused tests
+passed 14/14. New-build native site qualification remains required before a
+real Stop trial. **Stage 6:** open.
+
 ## One-game native/checkpoint composition — 23 September 2026
 
 **Single-game verified:** after an initial native-loader staging miss and a
