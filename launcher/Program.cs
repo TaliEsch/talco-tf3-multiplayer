@@ -83,6 +83,9 @@ internal sealed class MainWindow : Window
     private bool busy;
     private readonly StringBuilder logHistory = new StringBuilder();
     private Action hostReady;
+    private Button captureTwoButton;
+    private readonly System.Collections.Generic.HashSet<string> saveReadyPlayers = new System.Collections.Generic.HashSet<string>(StringComparer.Ordinal);
+    private bool hostCaptureRequested;
     private bool unauditedBuild;
     private string sessionFailure;
 
@@ -251,12 +254,27 @@ internal sealed class MainWindow : Window
             ? "Before they join: forward TCP ports 37333–37334 to " + network.LocalAddress + ".\nPublic endpoint in code: " + network.JoinAddress
             : "Local-network address: " + network.JoinAddress;
         content.Children.Add(new TextBlock { Text = "Save: " + saveName + "\n" + networkText, TextAlignment = TextAlignment.Center, TextWrapping = TextWrapping.Wrap, Foreground = mutedBrush, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 10, 0, 16) });
+        captureTwoButton = PrimaryButton("BEGIN 2-COMPANY CHECKPOINT", CaptureTwoClicked, Color.FromRgb(67, 118, 232));
+        captureTwoButton.IsEnabled = saveReadyPlayers.Count == 2 && !hostCaptureRequested;
+        captureTwoButton.Margin = new Thickness(0, 4, 0, 10);
+        content.Children.Add(captureTwoButton);
         StackPanel buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center };
         buttons.Children.Add(new TextBlock { Text = "TF3 was launched with the native handoff.", Foreground = mutedBrush, VerticalAlignment = VerticalAlignment.Center });
         Button stop = LinkButton("Stop and return", StopAndHomeClicked); stop.Margin = new Thickness(12, 0, 0, 0); buttons.Children.Add(stop); content.Children.Add(buttons);
         content.Children.Add(new TextBlock { Text = "The game panel confirms the bridge connection. Wait for a matching Join checkpoint before gameplay.", TextWrapping = TextWrapping.Wrap, TextAlignment = TextAlignment.Center, Foreground = mutedBrush, Margin = new Thickness(0, 20, 0, 12) });
         content.Children.Add(LinkButton("Debug and connection details", DebugClicked));
         page.Children.Add(content); SetStatus("Hosting — waiting for a player");
+    }
+
+    private void CaptureTwoClicked(object sender, RoutedEventArgs e)
+    {
+        if (hostCaptureRequested || saveReadyPlayers.Count != 2 || helper == null || helper.HasExited) return;
+        if (MessageBox.Show(this, "Use a disposable save with the two verified companies. Both TF3 instances must have loaded the same Host save and be paused. This starts a one-attempt checkpoint; a failed or unknown attempt requires a fresh session. Continue?", "Two-company checkpoint", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No) != MessageBoxResult.Yes) return;
+        hostCaptureRequested = true;
+        captureTwoButton.IsEnabled = false;
+        helper.StandardInput.WriteLine("multiplayer-capture-two-confirmed");
+        helper.StandardInput.Flush();
+        SetStatus("Two-company checkpoint requested — waiting for engine receipts");
     }
 
     private void ShowJoinProgress(string address)
@@ -816,6 +834,14 @@ internal sealed class MainWindow : Window
             if (code == "BUILD_MISMATCH") { sessionFailure = "Different TF3 versions. Update both players to the same version, then retry."; SetStatus(sessionFailure); }
             if (eventName == "game_hash" && message.TryGetValue("recommended", out value)) unauditedBuild = !(value is bool && (bool)value);
             if (eventName == "host_listening" && hostReady != null) { Action ready = hostReady; hostReady = null; ready(); }
+            if (eventName == "peer_save_ready" && message.TryGetValue("playerId", out value) && value is string) {
+                saveReadyPlayers.Add((string)value);
+                if (captureTwoButton != null) captureTwoButton.IsEnabled = saveReadyPlayers.Count == 2 && !hostCaptureRequested;
+                SetStatus(saveReadyPlayers.Count == 2 ? "Both players verified the Host save — load both TF3 worlds before checkpoint" : "Host save verified for one player — waiting for Join");
+            }
+            if (eventName == "multiplayer_capture") SetStatus(code == "CAPTURE_SENT_AWAIT_ENGINE_RECEIPTS"
+                ? "Two-company checkpoint sent — waiting for both engine receipts"
+                : "Two-company checkpoint stopped: " + code + " • start a fresh session after inspection");
             if (eventName == "save_received") SetStatus("Save received and verified");
             if (kind == "session_ready") ShowJoinReady(joiningSaveName);
             if (eventName == "bridge_connected") SetStatus("Game connected • diagnostics active • gameplay sync pending");
@@ -880,6 +906,8 @@ internal sealed class MainWindow : Window
     {
         if (!Dispatcher.CheckAccess()) { Dispatcher.BeginInvoke((Action)ResetBatchUi); return; }
         guidedBatchOwnsHelper = false; batchControlsReady = false;
+        saveReadyPlayers.Clear(); hostCaptureRequested = false;
+        if (captureTwoButton != null) { captureTwoButton.IsEnabled = false; captureTwoButton = null; }
         if (batchConfirmButton != null) batchConfirmButton.IsEnabled = false;
         if (batchStartButton != null) batchStartButton.IsEnabled = true;
         ResetPhase2SetupUi();
