@@ -352,6 +352,7 @@ if (command === "hash-game") {
   if(localFactory){
     const local=connectHostLocalParticipant({host:instance,displayName:opt['host-local-name']??'Host',
       engineBinding:localFactory.engineBinding,createAdapter:localFactory.createAdapter,verifiedSave:localFactory.verifiedSave,
+      deferAdapterUntilCapture:true,
       onMessage:(message)=>{
         if(message.kind==='session_ended')log({level:'warn',event:'host_local_participant_ended',gameplayVerified:false});
       }});

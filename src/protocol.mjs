@@ -14,7 +14,7 @@ const KINDS = new Set([
   "command_accepted", "command_rejected", "speed_request", "state_hash",
   "peer_joined", "peer_left", "save_ready", "session_ready", "error",
   "diagnostic_hello", "diagnostic_ready", "diagnostic_ping", "diagnostic_pong",
-  "coordination_prepare", "coordination_ready", "coordination_heartbeat", "participant_ready", "participant_heartbeat",
+  "coordination_capture", "coordination_prepare", "coordination_ready", "coordination_heartbeat", "participant_ready", "participant_heartbeat",
   "command_prepare", "command_prepared", "command_commit", "command_applied", "command_completed", "participant_released", "session_halted",
 ]);
 

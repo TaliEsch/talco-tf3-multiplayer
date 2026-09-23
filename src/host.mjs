@@ -193,5 +193,13 @@ export function startHost({ secret, sessionId = randomUUID(), bind = DEFAULT_BIN
         throw new ProtocolError("LOCAL_ENGINE_BINDING_REQUIRED", "host-local engine adapter must attach before coordination");
       }
       coordinator.prepare(authority.players(), checkpoint);
+    },
+    beginCapture({updateCount}) {
+      if ([...peers].some(p => p.player && !p.ready)) throw new ProtocolError("SAVE_REQUIRED", "all participants must verify the save");
+      if (pendingLocalConnections !== 0 || pendingLocalPlayerIds.size !== 0
+        || [...localParticipants.values()].some(attachment => attachment.attached !== true && attachment.captureReady !== true)) {
+        throw new ProtocolError("LOCAL_ENGINE_BINDING_REQUIRED", "host-local capture adapter must be registered before coordination");
+      }
+      coordinator.capture(authority.players(), {updateCount});
     } };
 }

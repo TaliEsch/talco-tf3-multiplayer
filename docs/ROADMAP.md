@@ -15,15 +15,23 @@ The full suite still has the same five native controller/observer teardown
 failures seen before this clock change; no new test failure was observed.
 
 Composition audit: the first-party provider requires a `companies` Map with
-two to four distinct verified members when its adapter is constructed.
-`connectHostLocalParticipant` currently invokes that factory on admission
-without a companies map, while the production Host CLI never calls
-`bindCompanyEntity`. This blocks attachment before coordination. The Node
-bridge now has a bounded reader for the existing read-only vehicle discovery
-receipt; focused mock-mailbox tests pass, but it has not yet been consumed
-from TF3 in this path. Resolve verified membership and use a fresh ownership
-receipt before enabling this path; a GUI vehicle selection alone does not
-prove ownership.
+two to four distinct verified members when its adapter is constructed. The
+Host local wrapper now waits for the authenticated coordinator capture frame
+to construct its adapter with that roster. The host has a matching capture
+entry point and the wire protocol admits the capture kind; focused network
+tests pass. The production Host CLI still never calls `bindCompanyEntity` or
+begins capture, so live attachment and ordering remain blocked. The Node
+bridge has a bounded reader for the existing read-only vehicle discovery
+receipt, tested with a mock mailbox but not yet consumed from TF3. Resolve
+verified membership and use a fresh ownership receipt before enabling this
+path; a GUI vehicle selection alone does not prove ownership.
+
+The capture integration run reported 921 test cases but did not exit after
+the final case; it was stopped after over two idle minutes. Six native
+controller/observer/IPC cases failed in that run. Five were the previously
+observed teardown failures; the IPC rebinding case passed when run alone.
+The focused capture/network/provider tests passed 27/27. This is an
+integration-suite failure, not a TF3 runtime qualification.
 
 ## One-use vehicle Stop cancellation — 23 September 2026
 

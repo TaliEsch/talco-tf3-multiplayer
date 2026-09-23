@@ -1,5 +1,16 @@
 # Completion audit against the build prompt
 
+## Host local capture composition — 23 September 2026
+
+**Implemented and network tested:** the host local adapter can wait for an
+authenticated `coordination_capture` frame before construction, receive its
+verified two-to-four-company map, and process the capture first. The host
+capture entry point enforces verified save readiness and a registered local
+participant. The Host CLI still has no live company assignment or capture
+trigger, so this is not a TF3 or multi-instance result. Focused tests passed;
+the full integration run reported six native failures and did not exit after
+all 921 cases were reported. **Stage 6:** open.
+
 ## Read-only vehicle ownership bridge — 23 September 2026
 
 **Implemented and mock-mailbox tested:** the Node bridge can issue one paused,

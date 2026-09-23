@@ -10,7 +10,7 @@ const FORWARDED = new Set([
 const ident = value => typeof value === 'string' && /^[A-Za-z0-9_.:-]{1,128}$/.test(value);
 const entity = value => Number.isSafeInteger(value) && value >= 0 && value <= 2147483647;
 
-function companiesFromCapture(payload, playerId) {
+export function companiesFromCapture(payload, playerId) {
   const players = payload?.players;
   if (!Array.isArray(players) || players.length < 2 || players.length > 4
     || players.some(player => !player || Object.keys(player).sort().join(',') !== 'companyEntity,playerId'

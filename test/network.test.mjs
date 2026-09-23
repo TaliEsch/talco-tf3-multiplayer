@@ -158,6 +158,36 @@ test("host-local closes an engine adapter that resolves after transport teardown
   }
 });
 
+test("host-local production attachment waits for authenticated capture roster", async () => {
+  const instance=startHost({secret:SECRET,sessionId:'host-local-capture',port:0,
+    buildHash:BUILD,modManifestHash:MODS,getUpdateCount:()=>100});
+  await once(instance.server,'listening');
+  let local,remote,received=[];
+  try {
+    local=connectHostLocalParticipant({host:instance,displayName:'Host',engineBinding:{native:true},
+      deferAdapterUntilCapture:true,createAdapter:input=>{
+        assert.deepEqual([...input.companies.values()],[101,102]);
+        return {receive(kind){received.push(kind);},poll(){},close(){}};
+      }});
+    assert.equal(typeof local.attachment.then,'function');
+    remote=connectClient({secret:SECRET,sessionId:instance.sessionId,port:instance.server.address().port,
+      displayName:'Remote',buildHash:BUILD,modManifestHash:MODS,onMessage:()=>{}});
+    await until(()=>local.connection.playerId&&remote.playerId);
+    instance.authority.bindCompanyEntity(local.connection.playerId,101);
+    instance.authority.bindCompanyEntity(remote.playerId,102);
+    assert.equal(local.ready,false);
+    assert.throws(()=>instance.beginCoordination({updateCount:100,checkpointHash:'d'.repeat(64)}),{code:'LOCAL_ENGINE_BINDING_REQUIRED'});
+    instance.beginCapture({updateCount:100});
+    await local.attachment;
+    assert.equal(local.ready,true);
+    assert.equal(received[0],'coordination_capture');
+  } finally {
+    await local?.close();
+    remote?.socket.destroy();
+    await new Promise(resolve=>instance.server.close(resolve));
+  }
+});
+
 test("host-local polling serializes real adapter work and fails closed on an adapter fault", async () => {
   const instance = startHost({ secret: SECRET, sessionId: "host-local-poll-failure", port: 0, buildHash: BUILD, modManifestHash: MODS });
   await once(instance.server, "listening");
