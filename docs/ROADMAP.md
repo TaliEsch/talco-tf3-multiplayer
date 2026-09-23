@@ -2,6 +2,22 @@
 
 ## Current checkpoint — 23 September 2026
 
+The corrected single-game ordered Stop path passed in TF3 build 40392. In a
+fresh disposable run, moving host-owned Road Vehicle 1 (entity 66005, company
+3141) supplied a nonce-bound owner/prestate receipt; its one-use native Stop
+was cancelled. The production Host scheduled sequence 1 for update 3428, the
+game-side held-action and release receipts both named update 3428, and TF3
+visibly showed **Stopped**. The native terminal gate parked the engine and the
+report outcome was `local_cycle_and_explicit_halt_passed`, with confirmed halt
+source `native_terminal_parked`. See the top of `docs/completion-audit.md` for
+the private report path and limits. This was one real engine with one local
+receipt mirror; two-instance agreement and playable four-player co-op remain
+unverified. The next critical step is a real second TF3 instance with matching
+save/build/mod, then compare a no-input checkpoint and one ordered action.
+The disposable source save is unchanged and the loader is unstaged.
+
+## Earlier terminal-halt attempts — 23 September 2026
+
 The latest exact-build single-game run again cancelled one owned Stop and
 applied host sequence 1 once at update 3210; TF3 visibly showed the vehicle
 Stopped. Its native terminal gate parked, but the local report timed out

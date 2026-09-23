@@ -1,5 +1,30 @@
 # Completion audit against the build prompt
 
+## Corrected ordered Stop and halt check — 23 September 2026
+
+**Single-game pass:** Exact TF3 build 40392 (SHA-256
+`cbd8092757e539a42f56c51e00eeb7671d967a9072838d7a5f47d2de88348716`)
+loaded the disposable save. The production Host and bridge observed moving
+Road Vehicle 1, entity 66005, owned by company 3141, with Stop flag 0. One
+native Stop invocation was armed at update 3361, clicked within the 5000 ms
+window, and cancelled at update 3368 while the vehicle still moved. Host
+sequence 1 was scheduled for update 3428; one game-side held-action receipt
+and one release receipt reported update 3428 (update error 0). TF3 then
+visibly displayed the vehicle **Stopped**. The native terminal gate parked;
+the report records `local_cycle_and_explicit_halt_passed`, `haltState=confirmed`,
+and `haltSource=native_terminal_parked`. The private report is
+`reports/local-batch-41003023-d3bb-43cd-9296-a2acb821f0f6/report.json`.
+The disposable source save retained SHA-256
+`ccbf4beb740e53323e06d20890fd029c8e174d3e85efb06801a8b4275c762fb5`;
+TF3 closed without saving and the exact loader was unstaged. This verifies
+the corrected halt completion in one TF3 process. It does **not** verify two
+real games: `realEngineCount=1`, `simulatedParticipantCount=1`,
+`gameplayVerified=false`, and `multiGameVerified=false` remain correct. The
+next critical action is two-instance checkpoint and action agreement with
+separate companies. The latest full suite before this run had five existing
+native controller/observer fixture failures; it has not been rerun for this
+documentation-only update.
+
 ## Latest terminal-halt integration attempt — 23 September 2026
 
 **Single-game evidence:** On exact build 40392, one owned moving vehicle Stop
