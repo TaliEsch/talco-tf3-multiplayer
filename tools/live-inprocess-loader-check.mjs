@@ -6,10 +6,11 @@ import {fileURLToPath} from 'node:url';
 import path from 'node:path';
 import {NativeRuntimeClient} from '../src/native-runtime-client.mjs';
 import {startGameBridge} from '../src/game-bridge.mjs';
+import {runLiveCheckpointCycle} from './live-checkpoint-cycle.mjs';
 import {createLiveControlIdBudget,LIVE_CONTROL_POLL_INTERVAL_MS,LIVE_CONTROL_WAIT_WINDOW_MS,
   LIVE_VEHICLE_ACTION_WAIT_WINDOW_MS} from './live-inprocess-control-budget.mjs';
 
-const usage='usage: node tools/live-inprocess-loader-check.mjs [TF3 exe] [--bridge-dir <absolute tf3mp_status_1 directory>] [--observe-vehicle-action] [--observe-vehicle-completion] [--cancel-vehicle-stop <entity>] (--gate-detach|--gate-halt)';
+const usage='usage: node tools/live-inprocess-loader-check.mjs [TF3 exe] [--bridge-dir <absolute tf3mp_status_1 directory>] [--checkpoint-capture <local-company> <peer-company>] [--observe-vehicle-action] [--observe-vehicle-completion] [--cancel-vehicle-stop <entity>] (--gate-detach|--gate-halt)';
 // The game-side UI writes an observation only every 30 onStep calls. Reading
 // the same file five times is not five independent confirmations of a halt.
 async function stableFreshWorld(bridge,label,afterWorld=null){
@@ -38,7 +39,7 @@ async function nextFreshWorld(bridge,afterCounter,label){
   throw new Error(`${label}_PUBLIC_OBSERVATION_DID_NOT_REFRESH`);
 }
 const input=process.argv.slice(2);
-let requestedExe=null,bridgeDirectory=null,gateMode=null,observeVehicleAction=false,observeVehicleCompletion=false,cancelStopEntity=null;
+let requestedExe=null,bridgeDirectory=null,gateMode=null,observeVehicleAction=false,observeVehicleCompletion=false,cancelStopEntity=null,checkpointCompanies=null;
 for(let index=0;index<input.length;index++){
   const argument=input[index];
   if(argument==='--bridge-dir'){
@@ -51,6 +52,12 @@ for(let index=0;index<input.length;index++){
     assert.equal(gateMode,null,usage);gateMode='halt';
   }else if(argument==='--observe-vehicle-action'){
     assert.equal(observeVehicleAction,false,usage);observeVehicleAction=true;
+  }else if(argument==='--checkpoint-capture'){
+    assert.equal(checkpointCompanies,null,usage);
+    const local=input[++index],peer=input[++index];
+    assert.ok(/^[1-9][0-9]*$/.test(local??'')&&/^[1-9][0-9]*$/.test(peer??'')
+      &&Number.isSafeInteger(Number(local))&&Number.isSafeInteger(Number(peer))&&local!==peer,usage);
+    checkpointCompanies=[local,peer];
   }else if(argument==='--observe-vehicle-completion'){
     assert.equal(observeVehicleCompletion,false,usage);observeVehicleCompletion=true;
   }else if(argument==='--cancel-vehicle-stop'){
@@ -67,6 +74,7 @@ for(let index=0;index<input.length;index++){
 assert.ok(gateMode!==null,usage);
 assert.ok(!observeVehicleCompletion||observeVehicleAction,usage);
 assert.ok(cancelStopEntity===null||observeVehicleCompletion&&gateMode==='detach',usage);
+assert.ok(checkpointCompanies===null||bridgeDirectory!==null,usage);
 if(bridgeDirectory!==null)assert.ok(path.isAbsolute(bridgeDirectory)&&path.basename(bridgeDirectory)==='tf3mp_status_1','INVALID_BRIDGE_DIRECTORY');
 const exe=requestedExe??'E:\\Steam\\steamapps\\common\\Transport Fever 3\\TransportFever3.exe';
 const handoff=fileURLToPath(new URL('../dist/native-loader/TF3NativeSessionHandoff.exe',import.meta.url));
@@ -95,8 +103,8 @@ for(let attempt=0;attempt<180&&!client;attempt++){
   try{client=await NativeRuntimeClient.connect({pipe,token,timeoutMs:5000});}
   catch(error){lastError=error;await new Promise(resolve=>setTimeout(resolve,500));}
 }
-if(!client)throw new Error(`LIVE_INPROCESS_RUNTIME_UNAVAILABLE:${lastError?.message??'UNKNOWN'}`);
 try{
+  if(!client)throw new Error(`LIVE_INPROCESS_RUNTIME_UNAVAILABLE:${lastError?.message??'UNKNOWN'}`);
   if(client.handshake.engineObserver!==true)throw new Error(`INPROCESS_OBSERVER_START_FAILED:${client.handshake.observerStartStatus??'UNKNOWN'}`);
   const passiveCapabilities=['transport.health','session.bind','qualification.inprocess.observer'];
   const gateCapabilities=[...passiveCapabilities,'qualification.inprocess.gate','simulation.hold','engine.halt','simulation.gate-receipts.v1','engine.detach','diagnostic.passive-vehicle-action.v1','vehicle.cancel-arm.v1','diagnostic.vehicle-cancel-arm.v1'];
@@ -340,6 +348,31 @@ try{
         marshalerMatchesCallbackStorage:current.latestMarshalerMatchesCallbackStorage}:{})})}\n`);
   }
   let gateEvidence=null;
+  let checkpointEvidence=null;
+  if(checkpointCompanies){
+    // This diagnostic composes the existing engine checkpoint cycle and the
+    // exact-build native controller in one TF3 process. It does not claim a
+    // network peer or native hold around the script's game-speed barrier.
+    let pulseFailure=null,pulseBusy=false;
+    const pulse=setInterval(()=>{
+      if(pulseBusy||pulseFailure)return;
+      pulseBusy=true;
+      controlIds.issue(()=>client.control('ping')).catch(error=>{
+        pulseFailure=error;
+      }).finally(()=>{pulseBusy=false;});
+    },1000);
+    try{
+      const record=await runLiveCheckpointCycle({bridge,directory:bridgeDirectory,
+        localCompany:Number(checkpointCompanies[0]),peerCompany:Number(checkpointCompanies[1]),
+        production:true});
+      if(pulseFailure)throw pulseFailure;
+      assert.ok(record&&record.diagnosticOnly===false&&record.ready&&record.released
+        &&record.checkpointEvidence,'LIVE_CHECKPOINT_CAPTURE_EVIDENCE_MISSING');
+      checkpointEvidence={singleGameDiagnostic:true,readyUpdate:record.ready.updateCount,
+        releasedUpdate:record.released.releaseUpdate,
+        hash:record.ready.checkpointHash};
+    }finally{clearInterval(pulse);}
+  }
   const epoch=String(launchedAt);
   if(bridge&&gateMode==='detach'){
     // The one-native-boundary/public-clock relation has only been qualified at
@@ -476,11 +509,12 @@ try{
       observationActive:ping.observationActive,observationCrossThread:ping.observationCrossThread},
     ...(correlation?{correlation}:{}),...(vehicleObservation?{vehicleObservation}:{}),
     ...(cancelEvidence?{cancelEvidence}:{}),
+    ...(checkpointEvidence?{checkpointEvidence}:{}),
     ...(gateEvidence?{gateEvidence}:{}),elapsedMs:Date.now()-launchedAt})}\n`);
 }finally{
-  if(!shutdownSent){
+  if(client&&!shutdownSent){
     try{await controlIds.issue(()=>client.control('shutdown'));}catch{}
   }
-  client.close();
+  client?.close();
   await bridge?.close().catch(()=>{});
 }

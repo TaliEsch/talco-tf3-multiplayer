@@ -1,5 +1,19 @@
 # TalCo TF3 multiplayer — current delivery plan
 
+## One-game checkpoint and native halt composition — 23 September 2026
+
+The live diagnostic now shares one bridge owner between the checkpoint cycle
+and exact-build native controller. In one disposable TF3 world it captured and
+released a two-company checkpoint with production coverage, then requested a
+native terminal halt directly from running. The checker observed continued
+control traffic while the world was parked. The disposable save hash was
+unchanged and the hash-checked loader files were removed after exit. This was
+one TF3 process with no network peer, cancelled Stop, host-ordered action or
+held replay; Stage 6 remains open. The next critical step is the cancelled
+Stop through host ordering and held execution in one game, with correlated
+postcondition. Try a second local TF3 process after that slice is working;
+use two systems for multi-instance acceptance if local coexistence fails.
+
 ## One-use native Stop to host ordering path — 23 September 2026
 
 An explicit Host CLI command now arms one selected Stop through the qualified

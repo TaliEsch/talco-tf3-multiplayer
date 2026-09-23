@@ -1,5 +1,28 @@
 # Completion audit against the build prompt
 
+## One-game native/checkpoint composition — 23 September 2026
+
+**Single-game verified:** after an initial native-loader staging miss and a
+second attempt that exposed a competing `bridge.lock`, the corrected diagnostic
+used one bridge owner in the exact-build TF3 process. With the disposable
+two-company world running at normal speed, production-scope checkpoint capture
+and release both reported update 3008 and matching hash
+`b16495ef803db37fa459df18bb50980d67d5ae574e19a7ca75989989517185d1`.
+The native observer correlated 131 advancing public ticks/updates, then a
+generation-zero terminal halt parked the world at tick 57302/update 3010 while
+control traffic remained responsive. This is evidence of a checkpoint and
+terminal halt in one process, not a synchronized two-player hold or action.
+The game was closed without saving; after its terminal park, Return to Desktop
+did not exit the game, so the verified test process was stopped. The source
+save SHA-256 stayed
+`CCBF4BEB740E53323E06D20890FD029C8E174D3E85EFB06801A8B4275C762FB5`.
+The three hash-matched application-local loader files and session handoff were
+unstaged. Focused tests passed 15/15 before the final live run. The full
+integration suite exited with the same five native controller/observer
+teardown fixture failures reported at the previous milestone. No native
+cancelled Stop, host ordering, held replay, remote peer, or second game instance
+was exercised. **Stage 6:** open.
+
 ## Native cancelled Stop routed to host action path — 23 September 2026
 
 **Implemented and model tested:** a one-use explicit host command requires
