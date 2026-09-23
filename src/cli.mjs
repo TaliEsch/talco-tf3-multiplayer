@@ -116,6 +116,7 @@ let hostInstance, nativeGate, vehicleTestActive = false;
 let hostCapture=null,hostCaptureAttempted=false;
 let hostCancelledStop=null;
 let hostLocalParticipant=null;
+let joinConnection=null,joinSessionReady=false,joinCompanyClaimed=false;
 async function enableBridge() {
   if (opt["bridge-dir"]) {
     bridge = await startGameBridge({ directory: opt["bridge-dir"], logger: log });
@@ -154,6 +155,27 @@ if (command === "host" || command === "join") createInterface({ input: process.s
     replayLog(code,code==='CAPTURE_UNSUPPORTED'&&typeof error.issues==='string'?{issues:error.issues}:{});
   });
   else if(roadReplayWorkflow||roadReplayBusy)replayLog('REPLAY_OWNS_HELPER_STOP_TO_EXIT');
+  else if(line.trim()==='multiplayer-claim-company-confirmed'){
+    const observation=bridge?.engineObservation;
+    const companyEntity=observation?.sample?.companyEntity;
+    if(command!=='join'||!joinConnection||!joinSessionReady||joinCompanyClaimed
+      ||nativeGate?.ready!==true||bridge?.connected!==true||observation?.available!==true
+      ||observation.sample.speedup!==0||!Number.isSafeInteger(companyEntity)
+      ||companyEntity<1||companyEntity>2147483647)
+      rawLog({level:'warn',event:'join_company_claim',code:'QUALIFIED_PAUSED_JOIN_REQUIRED',engineVerified:false});
+    else {
+      joinCompanyClaimed=true;
+      try {
+        if(joinConnection.socket.destroyed)throw new Error('JOIN_CONNECTION_CLOSED');
+        joinConnection.send('company_claim',{companyEntity});
+        rawLog({level:'info',event:'join_company_claim',code:'CLAIM_SENT_AWAIT_HOST_ENGINE_PROOF',
+          companyEntity,updateCount:observation.sample.updateCount,engineVerified:false});
+      } catch {
+        rawLog({level:'error',event:'join_company_claim',code:'CLAIM_DELIVERY_UNKNOWN_STOP_SESSION',engineVerified:false});
+        void stop();
+      }
+    }
+  }
   else if(line.trim().startsWith('multiplayer-arm-stop-confirmed')){
     const parts=line.trim().split(/\s+/),entity=Number(parts[1]);
     if(command!=='host'||parts.length!==2||parts[0]!=='multiplayer-arm-stop-confirmed'
@@ -450,6 +472,7 @@ if (command === 'prepare-join') {
   let testSent = false, bootstrapStarted = false, joinBootstrap;
   const connection=connectClient({ secret: sessionSecret, sessionId: opt.session, host: opt.host, port: opt.port ? Number(opt.port) : undefined, displayName: opt.name, buildHash, modManifestHash: opt["mod-hash"], diagnosticOnly:nativeMode.diagnosticOnly, onMessage: (message, context) => {
     if (message.kind === "session_ended") stop();
+    if (message.kind === "session_ready") joinSessionReady=true;
     log({ level: "info", event: "message", kind: message.kind, code: message.payload?.code, payload: message.payload });
     if (message.kind === "admitted" && opt["test-message"] && !testSent) {
       testSent = true;
@@ -461,6 +484,7 @@ if (command === 'prepare-join') {
         .catch((error)=>log({level:'error',event:'join_engine_bootstrap_failed',code:error.code??error.message??'JOIN_ENGINE_BOOTSTRAP_FAILED'}));
     }
   } });
+  joinConnection=connection;
   if(!nativeMode.diagnosticOnly)joinBootstrap=createJoinEngineBootstrap({connection,
     modulePath:opt['join-adapter-module']??firstPartyEngineProvider,bridge,nativeGate,
     sessionId:opt.session,buildHash,modManifestHash:opt['mod-hash'],logger:log,

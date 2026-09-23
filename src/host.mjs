@@ -41,7 +41,7 @@ export function startHost({ secret, sessionId = randomUUID(), bind = DEFAULT_BIN
     pendingConnections++;
     socket.setNoDelay(true);
     socket.setTimeout(HELLO_TIMEOUT_MS, () => { if (!peer.player) socket.destroy(); });
-    const peer = { socket, player: null, pending: true, ready: requiredSave === null, decoder: new FrameDecoder(), count: 0, window: Date.now(), lastSequence: -1, seen: new Set() };
+    const peer = { socket, player: null, pending: true, ready: requiredSave === null, companyClaim: null, decoder: new FrameDecoder(), count: 0, window: Date.now(), lastSequence: -1, seen: new Set() };
     peers.add(peer);
     socket.on("data", (chunk) => {
       try {
@@ -103,6 +103,20 @@ export function startHost({ secret, sessionId = randomUUID(), bind = DEFAULT_BIN
             peer.ready = true;
             send(socket, "session_ready", { saveSha256: requiredSave.sha256 }, peer.player.playerId);
             logger({ level: "info", event: "peer_save_ready", playerId: peer.player.playerId, sha256: requiredSave.sha256 });
+          }
+          else if (body.kind === "company_claim") {
+            // A signed claim is a lobby proposal, not engine ownership proof.
+            // Capture must independently inspect every proposed entity in TF3,
+            // and each participant's bindSession rechecks its own local player.
+            if (!requiredSave || !peer.ready || localParticipants.has(peer.player.playerId)
+              || coordinator.locked || peer.companyClaim !== null
+              || Object.keys(body.payload).join(",") !== "companyEntity"
+              || !Number.isSafeInteger(body.payload.companyEntity)
+              || body.payload.companyEntity < 1 || body.payload.companyEntity > 2147483647)
+              throw new ProtocolError("INVALID_COMPANY_CLAIM", "one saved remote company proposal is allowed before capture");
+            peer.companyClaim = body.payload.companyEntity;
+            logger({ level: "info", event: "peer_company_claim", playerId: peer.player.playerId,
+              companyEntity: peer.companyClaim, engineVerified: false });
           }
           else if (body.kind === "test") {
             if (Object.keys(body.payload).length !== 1 || typeof body.payload.value !== "string"
@@ -178,7 +192,7 @@ export function startHost({ secret, sessionId = randomUUID(), bind = DEFAULT_BIN
     socket.on("close", () => {
       peers.delete(peer);
       if (peer.pending) { peer.pending = false; pendingConnections--; }
-      if (peer.player) { localParticipants.delete(peer.player.playerId); coordinator.disconnected(peer.player.playerId); authority.remove(peer.player.playerId); broadcast("peer_left", { playerId: peer.player.playerId }); }
+      if (peer.player) { localParticipants.delete(peer.player.playerId); coordinator.disconnected(peer.player.playerId); authority.remove(peer.player.playerId); broadcast("peer_left", { playerId: peer.player.playerId }); logger({level:"warn",event:"peer_left",playerId:peer.player.playerId}); }
     });
     socket.on("error", () => {});
   });
@@ -203,6 +217,8 @@ export function startHost({ secret, sessionId = randomUUID(), bind = DEFAULT_BIN
   };
   return { server, authority, sessionId, coordinator,
     ensureCaptureReady,
+    companyClaims() { return [...peers].filter(peer => peer.player && peer.companyClaim !== null)
+      .map(peer => Object.freeze({ playerId: peer.player.playerId, companyEntity: peer.companyClaim })); },
     // This is deliberately a real authenticated loopback client: local host
     // actions enter the same decoder, identity, save, authority and coordinator
     // branches as remote actions.  The wrapper in host-local-participant.mjs

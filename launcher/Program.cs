@@ -85,6 +85,7 @@ internal sealed class MainWindow : Window
     private Action hostReady;
     private Button captureTwoButton;
     private readonly System.Collections.Generic.HashSet<string> saveReadyPlayers = new System.Collections.Generic.HashSet<string>(StringComparer.Ordinal);
+    private readonly System.Collections.Generic.HashSet<string> companyClaimPlayers = new System.Collections.Generic.HashSet<string>(StringComparer.Ordinal);
     private bool hostCaptureRequested;
     private bool unauditedBuild;
     private string sessionFailure;
@@ -255,20 +256,20 @@ internal sealed class MainWindow : Window
             : "Local-network address: " + network.JoinAddress;
         content.Children.Add(new TextBlock { Text = "Save: " + saveName + "\n" + networkText, TextAlignment = TextAlignment.Center, TextWrapping = TextWrapping.Wrap, Foreground = mutedBrush, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 10, 0, 16) });
         captureTwoButton = PrimaryButton("BEGIN 2-COMPANY CHECKPOINT", CaptureTwoClicked, Color.FromRgb(67, 118, 232));
-        captureTwoButton.IsEnabled = saveReadyPlayers.Count == 2 && !hostCaptureRequested;
+        captureTwoButton.IsEnabled = saveReadyPlayers.Count == 2 && companyClaimPlayers.Count == 1 && !hostCaptureRequested;
         captureTwoButton.Margin = new Thickness(0, 4, 0, 10);
         content.Children.Add(captureTwoButton);
         StackPanel buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center };
         buttons.Children.Add(new TextBlock { Text = "TF3 was launched with the native handoff.", Foreground = mutedBrush, VerticalAlignment = VerticalAlignment.Center });
         Button stop = LinkButton("Stop and return", StopAndHomeClicked); stop.Margin = new Thickness(12, 0, 0, 0); buttons.Children.Add(stop); content.Children.Add(buttons);
-        content.Children.Add(new TextBlock { Text = "The game panel confirms the bridge connection. Wait for a matching Join checkpoint before gameplay.", TextWrapping = TextWrapping.Wrap, TextAlignment = TextAlignment.Center, Foreground = mutedBrush, Margin = new Thickness(0, 20, 0, 12) });
+        content.Children.Add(new TextBlock { Text = "The joining player must load the Host save and claim their selected company. Then both games must pass the same checkpoint before gameplay.", TextWrapping = TextWrapping.Wrap, TextAlignment = TextAlignment.Center, Foreground = mutedBrush, Margin = new Thickness(0, 20, 0, 12) });
         content.Children.Add(LinkButton("Debug and connection details", DebugClicked));
         page.Children.Add(content); SetStatus("Hosting — waiting for a player");
     }
 
     private void CaptureTwoClicked(object sender, RoutedEventArgs e)
     {
-        if (hostCaptureRequested || saveReadyPlayers.Count != 2 || helper == null || helper.HasExited) return;
+        if (hostCaptureRequested || saveReadyPlayers.Count != 2 || companyClaimPlayers.Count != 1 || helper == null || helper.HasExited) return;
         if (MessageBox.Show(this, "Use a disposable save with the two verified companies. Both TF3 instances must have loaded the same Host save and be paused. This starts a one-attempt checkpoint; a failed or unknown attempt requires a fresh session. Continue?", "Two-company checkpoint", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No) != MessageBoxResult.Yes) return;
         hostCaptureRequested = true;
         captureTwoButton.IsEnabled = false;
@@ -298,7 +299,20 @@ internal sealed class MainWindow : Window
         Border instruction = new Border { Background = cardBrush, CornerRadius = new CornerRadius(12), Padding = new Thickness(24), BorderBrush = new SolidColorBrush(Color.FromRgb(43, 54, 72)), BorderThickness = new Thickness(1) };
         instruction.Child = new TextBlock { Text = "Inspect the TF3 world and wait for the Host's matching checkpoint.\nThe session must halt if state differs.", TextAlignment = TextAlignment.Center, FontSize = 16, FontWeight = FontWeights.Medium };
         content.Children.Add(instruction);
+        Button claim = PrimaryButton("CLAIM SELECTED COMPANY", ClaimJoinCompanyClicked, Color.FromRgb(38, 166, 126));
+        claim.Margin = new Thickness(0, 14, 0, 12);
+        content.Children.Add(claim);
         content.Children.Add(LinkButton("Leave session", StopAndHomeClicked)); page.Children.Add(content); SetStatus("Join checkpoint ready — inspect TF3");
+    }
+
+    private void ClaimJoinCompanyClicked(object sender, RoutedEventArgs e)
+    {
+        if (helper == null || helper.HasExited) return;
+        if (MessageBox.Show(this, "In the loaded disposable TF3 world, select the company you will control and pause the game. This sends its current company ID to the Host as a proposal. The Host and both engines must verify the roster before gameplay. Send once?", "Claim selected company", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No) != MessageBoxResult.Yes) return;
+        ((Button)sender).IsEnabled = false;
+        helper.StandardInput.WriteLine("multiplayer-claim-company-confirmed");
+        helper.StandardInput.Flush();
+        SetStatus("Company proposal sent — waiting for Host engine verification");
     }
 
     private void DebugClicked(object sender, RoutedEventArgs e)
@@ -836,12 +850,26 @@ internal sealed class MainWindow : Window
             if (eventName == "host_listening" && hostReady != null) { Action ready = hostReady; hostReady = null; ready(); }
             if (eventName == "peer_save_ready" && message.TryGetValue("playerId", out value) && value is string) {
                 saveReadyPlayers.Add((string)value);
-                if (captureTwoButton != null) captureTwoButton.IsEnabled = saveReadyPlayers.Count == 2 && !hostCaptureRequested;
-                SetStatus(saveReadyPlayers.Count == 2 ? "Both players verified the Host save — load both TF3 worlds before checkpoint" : "Host save verified for one player — waiting for Join");
+                if (captureTwoButton != null) captureTwoButton.IsEnabled = saveReadyPlayers.Count == 2 && companyClaimPlayers.Count == 1 && !hostCaptureRequested;
+                SetStatus(saveReadyPlayers.Count == 2 ? "Both players verified the Host save — waiting for Join company proposal" : "Host save verified for one player — waiting for Join");
+            }
+            if (eventName == "peer_company_claim" && message.TryGetValue("playerId", out value) && value is string) {
+                companyClaimPlayers.Add((string)value);
+                if (captureTwoButton != null) captureTwoButton.IsEnabled = saveReadyPlayers.Count == 2 && companyClaimPlayers.Count == 1 && !hostCaptureRequested;
+                SetStatus("Join company proposed — inspect both TF3 worlds, then begin the checkpoint");
+            }
+            if (eventName == "peer_left" && message.TryGetValue("playerId", out value) && value is string) {
+                saveReadyPlayers.Remove((string)value);
+                companyClaimPlayers.Remove((string)value);
+                if (captureTwoButton != null) captureTwoButton.IsEnabled = false;
+                SetStatus("A player left — checkpoint requires a fresh qualified roster");
             }
             if (eventName == "multiplayer_capture") SetStatus(code == "CAPTURE_SENT_AWAIT_ENGINE_RECEIPTS"
                 ? "Two-company checkpoint sent — waiting for both engine receipts"
                 : "Two-company checkpoint stopped: " + code + " • start a fresh session after inspection");
+            if (eventName == "join_company_claim") SetStatus(code == "CLAIM_SENT_AWAIT_HOST_ENGINE_PROOF"
+                ? "Company proposal sent — Host and TF3 must verify it before gameplay"
+                : "Company proposal unavailable: " + code + " • inspect Debug");
             if (eventName == "save_received") SetStatus("Save received and verified");
             if (kind == "session_ready") ShowJoinReady(joiningSaveName);
             if (eventName == "bridge_connected") SetStatus("Game connected • diagnostics active • gameplay sync pending");
@@ -906,7 +934,7 @@ internal sealed class MainWindow : Window
     {
         if (!Dispatcher.CheckAccess()) { Dispatcher.BeginInvoke((Action)ResetBatchUi); return; }
         guidedBatchOwnsHelper = false; batchControlsReady = false;
-        saveReadyPlayers.Clear(); hostCaptureRequested = false;
+        saveReadyPlayers.Clear(); companyClaimPlayers.Clear(); hostCaptureRequested = false;
         if (captureTwoButton != null) { captureTwoButton.IsEnabled = false; captureTwoButton = null; }
         if (batchConfirmButton != null) batchConfirmButton.IsEnabled = false;
         if (batchStartButton != null) batchStartButton.IsEnabled = true;

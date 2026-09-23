@@ -12,7 +12,7 @@ const CONTROL_AAD = "tf3mp-control-v2";
 const KINDS = new Set([
   "hello", "admitted", "test", "test_echo", "action_request",
   "command_accepted", "command_rejected", "speed_request", "state_hash",
-  "peer_joined", "peer_left", "save_ready", "session_ready", "error",
+  "peer_joined", "peer_left", "save_ready", "session_ready", "company_claim", "error",
   "diagnostic_hello", "diagnostic_ready", "diagnostic_ping", "diagnostic_pong",
   "coordination_capture", "coordination_prepare", "coordination_ready", "coordination_heartbeat", "participant_ready", "participant_heartbeat",
   "command_prepare", "command_prepared", "command_commit", "command_applied", "command_completed", "participant_released", "session_halted",

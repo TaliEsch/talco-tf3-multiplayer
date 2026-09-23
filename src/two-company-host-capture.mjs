@@ -3,6 +3,7 @@
 // per helper. Both engine adapters still recheck the roster at bindSession.
 export function createTwoCompanyHostCapture({host,bridge,nativeGate,hostLocal}) {
   if(!host||typeof host.ensureCaptureReady!=='function'||typeof host.beginCapture!=='function'
+    ||typeof host.companyClaims!=='function'
     ||!host.authority||typeof host.authority.bindCompanyEntity!=='function'
     ||!bridge||typeof bridge.discoverHostCompanyPair!=='function'||!nativeGate||!hostLocal)
     throw new TypeError('INVALID_TWO_COMPANY_CAPTURE_OPTIONS');
@@ -20,14 +21,21 @@ export function createTwoCompanyHostCapture({host,bridge,nativeGate,hostLocal}) 
       if(initial.length!==2||typeof hostId!=='string'||!initial.some(p=>p.playerId===hostId)
         ||initial.some(p=>p.companyEntity!==null))throw new Error('TWO_COMPANY_CAPTURE_ROSTER_REQUIRED');
       const remoteId=initial.find(p=>p.playerId!==hostId).playerId;
+      const initialClaims=host.companyClaims();
+      if(initialClaims.length!==1||initialClaims[0].playerId!==remoteId)
+        throw new Error('TWO_COMPANY_CAPTURE_CLAIM_REQUIRED');
       const proof=await bridge.discoverHostCompanyPair();
       const observation=bridge.engineObservation;
       const current=host.authority.players();
+      const currentClaims=host.companyClaims();
       if(nativeGate.ready!==true||bridge.connected!==true||observation?.available!==true
         ||observation.sample?.speedup!==0||observation.sample.companyEntity!==proof.hostCompanyEntity
         ||observation.sample.updateCount!==proof.updateCount
         ||!Number.isSafeInteger(proof.secondCompanyEntity)||proof.secondCompanyEntity<=0
         ||proof.secondCompanyEntity===proof.hostCompanyEntity
+        ||currentClaims.length!==1||currentClaims[0].playerId!==remoteId
+        ||currentClaims[0].companyEntity!==proof.secondCompanyEntity
+        ||initialClaims[0].companyEntity!==currentClaims[0].companyEntity
         ||current.length!==2||current.some(p=>p.companyEntity!==null)
         ||!current.some(p=>p.playerId===hostId)||!current.some(p=>p.playerId===remoteId))
         throw new Error('TWO_COMPANY_CAPTURE_PROOF_LOST');

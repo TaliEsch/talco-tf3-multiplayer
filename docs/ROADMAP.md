@@ -2,6 +2,17 @@
 
 ## Current checkpoint — 23 September 2026
 
+The Join launcher can now propose its selected in-game company after save
+verification and a paused live bridge observation. The authenticated Host
+retains that proposal without binding ownership. The two-company capture
+requires one remote proposal and rejects it unless the Host's fresh TF3
+inspection identifies that same saved second company; each engine's session
+bind still rechecks its local player. The Host launcher exposes the capture
+control only after both save-ready receipts and the Join proposal. This wiring
+passed focused network tests and the launcher build, but has not been run
+across two TF3 instances. Three/four-company discovery and admission remain
+unfinished.
+
 The corrected single-game ordered Stop path passed in TF3 build 40392. In a
 fresh disposable run, moving host-owned Road Vehicle 1 (entity 66005, company
 3141) supplied a nonce-bound owner/prestate receipt; its one-use native Stop

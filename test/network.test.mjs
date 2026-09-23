@@ -63,6 +63,30 @@ async function until(predicate) {
   assert.fail("local participant test timed out");
 }
 
+test("authenticated company claim remains unbound until TF3 roster proof", async () => {
+  const events = [];
+  const save = {bytes: 12, sha256: "a".repeat(64)};
+  const instance = startHost({secret: SECRET, sessionId: "company-claim", port: 0,
+    buildHash: BUILD, modManifestHash: MODS, requiredSave: save, logger: event => events.push(event)});
+  await once(instance.server, "listening");
+  let client;
+  try {
+    client = connectClient({secret: SECRET, sessionId: instance.sessionId,
+      port: instance.server.address().port, displayName: "Join", buildHash: BUILD, modManifestHash: MODS,
+      onMessage(message, context) {
+        if(message.kind === "admitted") context.send("save_ready", save);
+        if(message.kind === "session_ready") context.send("company_claim", {companyEntity: 55652});
+      }});
+    await until(() => events.some(event => event.event === "peer_company_claim"));
+    const claim = instance.companyClaims();
+    assert.equal(claim.length, 1);
+    assert.equal(claim[0].playerId, client.playerId);
+    assert.equal(claim[0].companyEntity, 55652);
+    assert.equal(instance.authority.players()[0].companyEntity, null);
+    assert.equal(events.find(event => event.event === "peer_company_claim").engineVerified, false);
+  } finally { await shutdown(instance.server, client ? [client.socket] : []); }
+});
+
 test("host-local actions use the authenticated client authority path and share host ordering", async () => {
   const instance = startHost({ legacyModelRelay: true, secret: SECRET, sessionId: "host-local-order", port: 0,
     buildHash: BUILD, modManifestHash: MODS, getUpdateCount: () => 50, resolveEntityOwner: entity => entity === 71 ? 101 : entity === 72 ? 102 : null });
@@ -160,20 +184,24 @@ test("host-local closes an engine adapter that resolves after transport teardown
 });
 
 test("host-local production attachment waits for authenticated capture roster", async () => {
+  const requiredSave={bytes:12,sha256:'e'.repeat(64)};
   const instance=startHost({secret:SECRET,sessionId:'host-local-capture',port:0,
-    buildHash:BUILD,modManifestHash:MODS,getUpdateCount:()=>100});
+    buildHash:BUILD,modManifestHash:MODS,getUpdateCount:()=>100,requiredSave});
   await once(instance.server,'listening');
   let local,remote,received=[];
   try {
     local=connectHostLocalParticipant({host:instance,displayName:'Host',engineBinding:{native:true},
-      deferAdapterUntilCapture:true,createAdapter:input=>{
+      deferAdapterUntilCapture:true,verifiedSave:requiredSave,createAdapter:input=>{
         assert.deepEqual([...input.companies.values()],[101,102]);
         return {receive(kind){received.push(kind);},poll(){},close(){}};
       }});
     assert.equal(typeof local.attachment.then,'function');
     remote=connectClient({secret:SECRET,sessionId:instance.sessionId,port:instance.server.address().port,
-      displayName:'Remote',buildHash:BUILD,modManifestHash:MODS,onMessage:()=>{}});
-    await until(()=>local.connection.playerId&&remote.playerId);
+      displayName:'Remote',buildHash:BUILD,modManifestHash:MODS,onMessage:(message,context)=>{
+        if(message.kind==='admitted')context.send('save_ready',requiredSave);
+        if(message.kind==='session_ready')context.send('company_claim',{companyEntity:102});
+      }});
+    await until(()=>local.connection.playerId&&remote.playerId&&instance.companyClaims().length===1);
     assert.equal(local.ready,false);
     assert.throws(()=>instance.beginCoordination({updateCount:100,checkpointHash:'d'.repeat(64)}),{code:'LOCAL_ENGINE_BINDING_REQUIRED'});
     const bridge={connected:true,engineObservation:{available:true,sample:{speedup:0,companyEntity:101,updateCount:100}},

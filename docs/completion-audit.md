@@ -1,5 +1,18 @@
 # Completion audit against the build prompt
 
+## Join company proposal to two-company capture — 23 September 2026
+
+The Join helper now sends one authenticated selected-company proposal only
+after save readiness and a paused live engine observation. The Host retains it
+as unverified until its fresh game inspection matches the fixture's second
+company; a mismatch binds no player. The Host/Join launcher controls expose
+these steps. Focused network and mismatch tests pass; the launcher compiles.
+No new TF3 or two-instance result is claimed. This still does not admit three
+or four companies. The elevated integration run reported 949 tests: 943
+passed, five previously recorded native controller/observer teardown fixtures
+failed, and one skipped. Its private log is
+`C:\Users\olihf\Downloads\Temp\tf3mp-check-20260923-company-claim-elevated.log`.
+
 ## Qualified Host/Join launcher wiring — 23 September 2026
 
 The launcher Host/Join buttons previously omitted required native credentials.
