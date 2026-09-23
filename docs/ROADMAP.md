@@ -2,6 +2,20 @@
 
 ## Current checkpoint — 23 September 2026
 
+The latest exact-build single-game run again cancelled one owned Stop and
+applied host sequence 1 once at update 3210; TF3 visibly showed the vehicle
+Stopped. Its native terminal gate parked, but the local report timed out
+waiting for a separate game mailbox halt that cannot execute after parking.
+The adapter now treats the correlated native `terminal_parked` event as the
+normal-run halt proof and keeps unknown/disconnect outcomes fail-closed. Twelve
+focused tests pass. This change has not yet passed the complete TF3 run.
+Two subsequent disposable runs missed the five-second native arm; neither
+captured, ordered or replayed a Stop. Do not repeat the unchanged UI timing
+test. Improve the bounded test control offline, then verify this halt change
+in TF3 and proceed to the two-instance checkpoint/action baseline. The source
+save is unchanged and the loader is unstaged. Stage 6 and four-player
+acceptance remain open.
+
 The one-game ordered Stop path now worked on exact UI build 40392. A moving
 owned vehicle's one-use native Stop was cancelled, host sequence 1 was applied
 at its scheduled update 3114, and TF3 showed the vehicle Stopped. The report

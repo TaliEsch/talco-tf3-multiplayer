@@ -20,7 +20,8 @@ export async function createLocalCoordinatorRun({directory,bridge,playerId,compa
     ?'single_game_cancelled_stop_with_receipt_mirror':'single_game_real_adapter_with_receipt_mirror',
     metadata:{gameHash:hash(metadata.gameHash),modManifestHash:hash(metadata.modManifestHash)},
     gameplayVerified:false,multiGameVerified:false,realEngineCount:1,simulatedParticipantCount:1,
-    outcome:'in_progress',haltState:'not_requested',checks:[],events:[],startedAt:now(),finishedAt:null};
+    outcome:'in_progress',haltState:'not_requested',haltSource:nativeRuntime?'native_terminal_parked':'game_mailbox',
+    checks:[],events:[],startedAt:now(),finishedAt:null};
   let phase='arming',adapter,sequence=0,controlsStarted=false,closed=false,polling=null,persisting=Promise.resolve();
   let firstCommandGate=beforeFirstCommand===null?'passed':'pending';
   let terminalDeadline=0,reportFailed=false,lastRelease=null;
@@ -116,10 +117,11 @@ export async function createLocalCoordinatorRun({directory,bridge,playerId,compa
     if(report.haltState!==adapter.haltState){report.haltState=adapter.haltState;await persist();}
     if(phase==='failed')return;
     if(phase==='stopping') {
+      if(nativeRuntime&&adapter.phase==='halted') {fail(adapter.fault??'ADAPTER_HALTED_DURING_STOP');return;}
       if(adapter.haltState==='confirmed') {
         phase='passed';report.outcome='local_cycle_and_explicit_halt_passed';report.finishedAt=now();
         await persist();
-        if(!reportFailed)event('LOCAL_RUN_PASSED_GAME_HELD');
+        if(!reportFailed)event('LOCAL_RUN_PASSED_GAME_HELD',{haltSource:adapter.haltSource});
       } else if(adapter.haltState==='unknown'||now()>=terminalDeadline)fail('STOP_NOT_VERIFIED');
       return;
     }

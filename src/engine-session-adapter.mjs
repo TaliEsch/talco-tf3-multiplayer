@@ -21,7 +21,8 @@ export async function createEngineSessionAdapter({directory,bridge,playerId,comp
     requireCompleteCheckpointCoverage:checkpointEvidenceScope==='production',onCheckpointEvidence:evidence=>{
       checkpointEvidence=structuredClone(evidence);onCheckpointEvidence(structuredClone(evidence));
     }});
-  let participant,lease,closed=false,lastCounter=-1,polling=null,closing=null,nativeHaltPromise=null;
+  let participant,lease,closed=false,lastCounter=-1,polling=null,closing=null,nativeHaltPromise=null,orderlyStop=null;
+  let nativeHaltState='not_requested',nativeConnectionLost=false;
   // This adapter has not issued a native hold, so the only legal fail-stop
   // coordinate for a freshly bound production gate is generation zero.  A
   // failed terminal request is never retried at another coordinate.
@@ -32,8 +33,10 @@ export async function createEngineSessionAdapter({directory,bridge,playerId,comp
   const nativeHalt=reason=>{
     if(!nativeRuntime)return Promise.resolve();
     if(nativeHaltPromise)return nativeHaltPromise;
+    nativeHaltState='pending';
     const command=Object.freeze({control:'halt',epoch:nativeHaltEpoch,generation:'0'});
     const failStop=error=>{
+      nativeHaltState='unknown';
       // A closed IPC endpoint is not evidence that TF3 stopped.  It merely
       // prevents any later control from being mistaken for a retry.
       nativeRuntime.client.off('disconnect',nativeDisconnected);
@@ -49,16 +52,20 @@ export async function createEngineSessionAdapter({directory,bridge,playerId,comp
           ||receipt.epoch!==command.epoch||receipt.generation!==command.generation
           ||receipt.haltGeneration!==command.generation)throw new Error('NATIVE_RUNTIME_HALT_RECEIPT_INVALID');
         const parked=await nativeRuntime.awaitGateEvent(command,{timeoutMs:3000});
-        if(!parked||parked.event!=='terminal_parked'||parked.epoch!==command.epoch
+        if(nativeConnectionLost||!parked||parked.event!=='terminal_parked'||parked.epoch!==command.epoch
           ||parked.generation!==command.generation||parked.haltGeneration!==command.generation)throw new Error('NATIVE_RUNTIME_HALT_EVENT_INVALID');
+        nativeHaltState='confirmed';
         nativeRuntime.logger({level:'info',event:'native_runtime_halt_confirmed',reason,
           control:command.control,epoch:command.epoch,generation:command.generation,
           engineHaltConfirmed:true,gameWorldReceipt:true});
       } catch(error) {failStop(error);}
+      return nativeHaltState;
     })();
     return nativeHaltPromise;
   };
   const nativeDisconnected=reason=>{
+    nativeConnectionLost=true;
+    nativeHaltState='unknown';
     nativeRuntime?.logger({level:'error',event:'native_runtime_disconnected',reason,gameWorldReceipt:false});
     participant?.halt('NATIVE_RUNTIME_DISCONNECTED');
   };
@@ -123,7 +130,8 @@ export async function createEngineSessionAdapter({directory,bridge,playerId,comp
   return {
     get phase(){return closed?'closed':participant.phase;},
     get leaseState(){return lease.phase;},
-    get haltState(){return participant.haltState;},
+    get haltState(){return orderlyStop?nativeHaltState:participant.haltState;},
+    get haltSource(){return orderlyStop?'native_terminal_parked':'game_mailbox';},
     get fault(){return participant.fault;},
     get faultEvidence(){return participant.faultEvidence;},
     get checkpointEvidence(){return checkpointEvidence===null?null:structuredClone(checkpointEvidence);},
@@ -135,6 +143,9 @@ export async function createEngineSessionAdapter({directory,bridge,playerId,comp
     },
     poll(){
       if(closed)return Promise.resolve(false);
+      // The completed local run parks the engine itself. No mailbox operation
+      // can complete afterward, and a stopped lease is expected here.
+      if(orderlyStop)return Promise.resolve(nativeHaltState==='confirmed');
       if(polling)return polling;
       polling=(async()=>{
         check();participant.poll();
@@ -151,13 +162,25 @@ export async function createEngineSessionAdapter({directory,bridge,playerId,comp
       })().finally(()=>{polling=null;});
       return polling;
     },
-    halt(code='EXPLICIT_STOP'){participant.halt(code);},
+    halt(code='EXPLICIT_STOP'){
+      // The native terminal event is the completion proof for a normal run.
+      // Once that boundary parks, a Lua mailbox request cannot execute. Faults
+      // still issue the game-side halt immediately through participant.halt().
+      if(code==='LOCAL_RUN_COMPLETE'&&nativeRuntime){
+        if(!orderlyStop)orderlyStop=nativeHalt(code).then(state=>{
+          stopRenewal();
+          if(state!=='confirmed')participant.halt('NATIVE_HALT_UNKNOWN');
+        });
+        return orderlyStop;
+      }
+      participant.halt(code);
+    },
     close(){
       if(closing)return closing;
       closed=true;stopRenewal();nativeRuntime?.client.off('disconnect',nativeDisconnected);
       // Teardown awaits the one typed halt attempt.  On an unknown outcome the
       // native endpoint is closed, but no engine-stop proof is fabricated.
-      closing=(async()=>{await nativeHalt('ADAPTER_CLOSED');await polling;await mailbox.close();})();
+      closing=(async()=>{await nativeHalt('ADAPTER_CLOSED');await orderlyStop;await polling;await mailbox.close();})();
       return closing;
     },
   };

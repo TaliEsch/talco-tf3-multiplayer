@@ -102,6 +102,64 @@ test('native runtime disconnect latches the participant, issues one typed halt, 
   } finally {await adapter?.close();await rm(root,{recursive:true,force:true});}
 });
 
+test('completed run requires the native terminal park without waiting for a mailbox halt',async()=>{
+  const root=await mkdtemp(path.join(os.tmpdir(),'tf3mp-orderly-halt-')),directory=path.join(root,'tf3mp_status_1');await mkdir(directory);
+  const native=new EventEmitter();let adapter,releasePark,haltCommands=0;
+  const parked=new Promise(resolve=>{releasePark=resolve;});
+  native.requireCapability=()=>{};
+  native.bindSession=async()=>({status:'accepted',boundSessionId:'native.session:5',boundRole:'host'});
+  native.gateControl=async command=>{haltCommands++;return {status:'halt_requested',...command,haltGeneration:command.generation};};
+  native.awaitGateEvent=async command=>{await parked;return {event:'terminal_parked',...command,haltGeneration:command.generation};};
+  native.close=()=>{};
+  const lease={phase:'active',get active(){return this.phase==='active';},stop(){this.phase='closed';}};
+  const bridge={nonce:'e'.repeat(32),engineObservation:{available:true,sample:{counter:1,updateCount:100,speedup:1}},async startCoordinationLease(){return lease;}};
+  try {
+    adapter=await createEngineSessionAdapter({directory,bridge,playerId:'host',companies:new Map([['host',7],['mirror',9]]),healthy:()=>true,
+      controlsReady:()=>true,send:()=>{},disconnect:()=>{},nativeRuntime:{client:native,sessionId:'native.session:5',role:'host',
+        gateControl:native.gateControl,awaitGateEvent:native.awaitGateEvent,logger:()=>{}}});
+    adapter.receive('coordination_capture',{roundId:'r',updateCount:140,players:[{playerId:'host',companyEntity:7},{playerId:'mirror',companyEntity:9}]});
+    const stop=adapter.halt('LOCAL_RUN_COMPLETE');
+    await new Promise(resolve=>setImmediate(resolve));
+    assert.equal(haltCommands,1);
+    try {
+      const before=parseFlatDataFile(await readFile(path.join(directory,'coordination_request.lua'),'utf8'));
+      assert.notEqual(before.operation,'halt','the game-side halt must wait for the real native terminal event');
+    } catch(error){if(error?.code!=='ENOENT')throw error;}
+    releasePark();await stop;
+    assert.equal(adapter.haltState,'confirmed');
+    assert.equal(adapter.haltSource,'native_terminal_parked');
+    try {
+      const after=parseFlatDataFile(await readFile(path.join(directory,'coordination_request.lua'),'utf8'));
+      assert.notEqual(after.operation,'halt','a mailbox halt cannot complete after the native park');
+    } catch(error){if(error?.code!=='ENOENT')throw error;}
+    assert.equal(haltCommands,1,'the native halt is one-shot');
+  } finally {releasePark?.();await adapter?.close();await rm(root,{recursive:true,force:true});}
+});
+
+test('completed run does not accept a terminal event after native disconnect',async()=>{
+  const root=await mkdtemp(path.join(os.tmpdir(),'tf3mp-orderly-disconnect-')),directory=path.join(root,'tf3mp_status_1');await mkdir(directory);
+  const native=new EventEmitter();let adapter,releasePark,haltCommands=0;
+  const parked=new Promise(resolve=>{releasePark=resolve;});
+  native.requireCapability=()=>{};
+  native.bindSession=async()=>({status:'accepted',boundSessionId:'native.session:6',boundRole:'host'});
+  native.gateControl=async command=>{haltCommands++;return {status:'halt_requested',...command,haltGeneration:command.generation};};
+  native.awaitGateEvent=async command=>{await parked;return {event:'terminal_parked',...command,haltGeneration:command.generation};};
+  native.close=()=>{};
+  const lease={phase:'active',get active(){return this.phase==='active';},stop(){this.phase='closed';}};
+  const bridge={nonce:'f'.repeat(32),engineObservation:{available:true,sample:{counter:1,updateCount:100,speedup:1}},async startCoordinationLease(){return lease;}};
+  try {
+    adapter=await createEngineSessionAdapter({directory,bridge,playerId:'host',companies:new Map([['host',7],['mirror',9]]),healthy:()=>true,
+      controlsReady:()=>true,send:()=>{},disconnect:()=>{},nativeRuntime:{client:native,sessionId:'native.session:6',role:'host',
+        gateControl:native.gateControl,awaitGateEvent:native.awaitGateEvent,logger:()=>{}}});
+    const stop=adapter.halt('LOCAL_RUN_COMPLETE');
+    native.emit('disconnect','NATIVE_RUNTIME_IPC_DISCONNECTED');
+    releasePark();await stop;
+    assert.equal(adapter.haltState,'unknown');
+    assert.equal(adapter.fault,'NATIVE_RUNTIME_DISCONNECTED');
+    assert.equal(haltCommands,1,'an unknown terminal outcome is not retried');
+  } finally {releasePark?.();await adapter?.close();await rm(root,{recursive:true,force:true});}
+});
+
 test('invalid native binding receipt rejects adapter setup before a lease can start',async()=>{
   const root=await mkdtemp(path.join(os.tmpdir(),'tf3mp-native-bind-')),directory=path.join(root,'tf3mp_status_1');await mkdir(directory);
   const native=new EventEmitter();let leaseStarted=false;

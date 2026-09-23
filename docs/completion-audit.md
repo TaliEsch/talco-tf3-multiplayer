@@ -1,5 +1,26 @@
 # Completion audit against the build prompt
 
+## Latest terminal-halt integration attempt — 23 September 2026
+
+**Single-game evidence:** On exact build 40392, one owned moving vehicle Stop
+was natively cancelled; host sequence 1 had one held-action receipt and one
+release at scheduled update 3210. TF3 showed Road Vehicle 1 Stopped. The
+native `terminal_parked` event followed, but the local report was
+`STOP_NOT_VERIFIED`: the prior runner waited for a Lua halt receipt after the
+engine was already parked. The adapter now distinguishes the typed native
+terminal event from the game mailbox halt, with a disconnect/unknown latch.
+Focused adapter and coordinator tests pass 12/12. **The corrected completion
+path is not yet verified in TF3.** The full suite completed with five native
+controller/observer fixture failures; the changed adapter tests passed.
+Two further disposable runs missed the
+five-second native Stop arm and captured no action; the later failure also had
+an unknown native terminal outcome. No mutation was retried. The source save
+still hashes to `ccbf4beb740e53323e06d20890fd029c8e174d3e85efb06801a8b4275c762fb5`;
+TF3 is closed and the loader unstaged. The native-park report is
+`reports/local-batch-3aa08784-1ef2-4228-9c58-564ca6026bdc/report.json`.
+This remains one real game plus a receipt mirror, not two-game synchronization
+or playable four-player co-op.
+
 ## Build-40392 ordered Stop checkpoint — 23 September 2026
 
 **Single-game result:** An exact-build TF3 run on executable SHA-256
