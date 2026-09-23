@@ -56,7 +56,7 @@ OwnedVehicleSendReturnSite LABEL BYTE
     ret
 OwnedVehicleAdmissionExecute ENDP
 
-; Mirrors e17833 CALL e26870 followed by e17838 NOP. The observed NOP is
+; Mirrors e1bb23 CALL e2ab60 followed by e1bb28 NOP. The observed NOP is
 ; reached only when the complete send body, including its native cleanup,
 ; returns normally.
 OwnedVehiclePostSendBodyExecute PROC FRAME

@@ -1,5 +1,33 @@
 # Completion audit against the build prompt
 
+## Current-build one-use Stop cancellation — 23 September 2026
+
+**Single-game verified:** the exact-build native runtime was requalified for
+TF3 executable SHA-256
+`297ef05b740de1a3c4b375fd53ca69f371347a4b1546a37525f04aab6bc8e6e6`.
+The first two fresh disposable trials armed Stop but expired with zero claims;
+diagnostics showed an admission and callback but no factory receipt. The
+candidate factory produced command tag `0x30`, so disassembly selected the
+actual Stop tag `0x32` factory/post sites. The corrected runtime passed its
+owned smoke tests before another live attempt.
+
+Road Vehicle 1, entity 66005, was moving in the fresh disposable world. One
+armed Stop click completed cancellation for invocation 1. Factory, admission,
+callback, send return, marshaler return and correlated post-send-body each
+reported one hit for that invocation; no candidate was dropped. The callback
+result was zero, and the UI subsequently showed the vehicle still moving at
+25 km/h. The native gate also completed hold, release, re-hold and detach.
+TF3 exited without saving; the staged hash-matched loader was removed and the
+source disposable save still hashes to
+`CCBF4BEB740E53323E06D20890FD029C8E174D3E85EFB06801A8B4275C762FB5`.
+The live-checker focused tests passed 10/10. The full integration suite exited
+nonzero with five previously recorded native controller/observer debugger
+fixture failures; the new checker tests passed in the full run. A sandboxed
+first attempt also failed process-spawn tests due to fixture permissions and
+was stopped; the normal-access full run is the integration result.
+No Host CLI action request, host ordering, held replay, second instance or
+cross-instance postcondition was exercised in this live run. **Stage 6:** open.
+
 ## Native Stop trial interrupted by TF3 update — 23 September 2026
 
 **Current failure:** the staged loader was qualified for executable SHA-256

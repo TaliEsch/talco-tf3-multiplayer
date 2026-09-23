@@ -1,5 +1,30 @@
 # TalCo TF3 multiplayer — current delivery plan
 
+## Current Stage 6 checkpoint — 23 September 2026
+
+The replacement TF3 executable (SHA-256
+`297ef05b740de1a3c4b375fd53ca69f371347a4b1546a37525f04aab6bc8e6e6`)
+has been requalified at the exact native Stop observation and cancellation
+sites. Two initial disposable runs expired safely without a cancellation claim:
+the candidate factory belonged to a different command tag. Hash-pinned
+disassembly identified the Stop tag (`0x32`) factory at `0x9ef112` and its
+post site at `0x9ef188`; the native runtime was rebuilt and smoke tested.
+
+In a fresh run, Road Vehicle 1 (entity 66005) was moving when its Stop was
+armed and clicked. TF3 produced one correlated factory, admission, callback,
+send return, marshaler return and post-send-body receipt, all tied to invocation
+1. The one-use arm completed with callback result zero and the vehicle panel
+still showed 25 km/h afterward. The separate native gate held, released,
+re-held and detached. TF3 exited without saving, the hash-matched loader was
+unstaged and the source disposable save retained SHA-256
+`CCBF4BEB740E53323E06D20890FD029C8E174D3E85EFB06801A8B4275C762FB5`.
+This establishes a single-game native Stop cancellation on the current build.
+The production Host CLI's cancellation → authenticated host action route has
+model/network tests but has not yet been run through host ordering and held
+execution in TF3. That one-game composition, with an engine postcondition,
+is the next critical Stage 6 action. A second game/system is needed later for
+multi-instance acceptance. Stage 6 remains open.
+
 ## TF3 executable changed during native Stop trial — 23 September 2026
 
 Steam replaced `TransportFever3.exe` at 13:43:57 UTC while the qualified

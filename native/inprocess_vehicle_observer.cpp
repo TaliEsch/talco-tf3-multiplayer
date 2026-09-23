@@ -12,22 +12,22 @@
 namespace tf3vehicleobserver {
 namespace {
 
-constexpr DWORD kFactoryRva = 0x9eee72;
-constexpr DWORD kFactoryPostRva = 0x9eeee8;
-constexpr DWORD kAdmissionRva = 0xe26a2c;
-constexpr DWORD kCallbackTailRva = 0xe3a504;
-constexpr DWORD kCallbackContinuationRva = 0xe260d0;
-constexpr DWORD kSendReturnRva = 0xe26a32;
-constexpr DWORD kMarshalerReturnRva = 0xe0d707;
-constexpr DWORD kPostSendBodyRva = 0xe17838;
-constexpr DWORD kCallbackVtableRva = 0x373a730;
-constexpr DWORD kCallbackInvokeRva = 0xe3a500;
+constexpr DWORD kFactoryRva = 0x9ef112;
+constexpr DWORD kFactoryPostRva = 0x9ef188;
+constexpr DWORD kAdmissionRva = 0xe2ad1c;
+constexpr DWORD kCallbackTailRva = 0xe3e7f4;
+constexpr DWORD kCallbackContinuationRva = 0xe2a3c0;
+constexpr DWORD kSendReturnRva = 0xe2ad22;
+constexpr DWORD kMarshalerReturnRva = 0xe119f7;
+constexpr DWORD kPostSendBodyRva = 0xe1bb28;
+constexpr DWORD kCallbackVtableRva = 0x373fa90;
+constexpr DWORD kCallbackInvokeRva = 0xe3e7f0;
 constexpr std::array<unsigned char, 3> kFactoryBytes{0x41, 0x8b, 0xd8}; // mov ebx,r8d
 constexpr std::array<unsigned char, 1> kFactoryPostBytes{0x90}; // nop after constructed output
 constexpr std::array<unsigned char, 3> kAdmissionBytes{0x48, 0x8b, 0xd3}; // mov rdx,rbx
 constexpr std::array<unsigned char, 5> kCallbackTailBytes{0xe9, 0xc7, 0xbb, 0xfe, 0xff};
 constexpr std::array<unsigned char, 1> kNormalReturnBytes{0x90};
-constexpr std::array<unsigned char, 9> kSendReturnWindow{0x90, 0x48, 0x8b, 0xcb, 0xe8, 0x15, 0x8d, 0xba, 0xff};
+constexpr std::array<unsigned char, 9> kSendReturnWindow{0x90, 0x48, 0x8b, 0xcb, 0xe8, 0xc5, 0x4c, 0xba, 0xff};
 constexpr std::array<unsigned char, 9> kMarshalerReturnWindow{0x90, 0x48, 0x8b, 0x94, 0x24, 0xb0, 0x00, 0x00, 0x00};
 constexpr std::array<unsigned char, 6> kPostSendBodyWindow{0xe8, 0x38, 0xf0, 0x00, 0x00, 0x90};
 constexpr std::uintptr_t kMaximumUserPointer = 0x00007fffffffffffULL;
@@ -419,7 +419,7 @@ void RecordMarshalerReturn(const CONTEXT* context) noexcept {
 }
 
 void RecordPostSendBody(const CONTEXT* context) noexcept {
-    // e17838 is the NOP immediately following e17833 CALL e26870. Reaching
+    // e1bb28 is the NOP immediately following e1bb23 CALL e2ab60. Reaching
     // it proves the whole send body, including its native cleanup, returned
     // normally; no entry, callback, or progress pointer is retained here.
     const DWORD thread = GetCurrentThreadId();
@@ -509,11 +509,11 @@ bool SafeReadCheckedCallback(const CONTEXT* context, std::uintptr_t* implementat
 #endif
         const auto target = *reinterpret_cast<const std::uintptr_t*>(original_table + 0x10);
         const bool allowed_adapter =
-            (original_table == base + 0x3677c00 && target == base + 0x1201c0) ||
-            (original_table == base + 0x3677b20 && target == base + 0x1201c0) ||
-            (original_table == base + 0x36c5c58 && target == base + 0x6ab5f0) ||
-            (original_table == base + 0x3783520 && target == base + 0x27c4330) ||
-            (original_table == base + 0x3677c38 && target == base + 0x120430);
+            (original_table == base + 0x367cc00 && target == base + 0x1201a0) ||
+            (original_table == base + 0x367cb20 && target == base + 0x1201a0) ||
+            (original_table == base + 0x36cab88 && target == base + 0x6ab640) ||
+            (original_table == base + 0x3788880 && target == base + 0x27c86e0) ||
+            (original_table == base + 0x367cc38 && target == base + 0x120410);
         if (!allowed_adapter || table != base + kCallbackVtableRva ||
             *reinterpret_cast<const std::uintptr_t*>(table + 0x10) != base + kCallbackInvokeRva) return false;
         *implementation = original;
@@ -922,7 +922,7 @@ LONG CALLBACK OnException(EXCEPTION_POINTERS* pointers) noexcept {
         (address == post_send_body && rip == post_send_body)) {
         // Each exact site is a one-byte NOP after a normal CALL return. The
         // send and marshaler sites are before their local native cleanup;
-        // e17838 is after e26870 has completed its cleanup. Preserve every
+        // e1bb28 is after e2ab60 has completed its cleanup. Preserve every
         // register/flag and keep emulating traps raised during Stop.
         pointers->ContextRecord->Rip += kNormalReturnBytes.size();
         if (active.load(std::memory_order_acquire)) {

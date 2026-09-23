@@ -203,13 +203,20 @@ try{
       assert.equal(client.vehicleCancelArmObservation(ping).state,'disabled');
       process.stdout.write(`${JSON.stringify({event:'tf3-cancel-vehicle-awaiting-arm',entity:cancelStopEntity,
         instruction:'Select the vehicle and prepare its Stop control, then send ARM on stdin.'})}\n`);
-      let armSignal=false;
+      let armSignal=false,wakeArm=null;
       process.stdin.setEncoding('utf8');
-      process.stdin.on('data',chunk=>{if(chunk.trim()==='ARM')armSignal=true;});
+      process.stdin.on('data',chunk=>{
+        if(chunk.trim()==='ARM'){armSignal=true;wakeArm?.();}
+      });
       const armSignalDeadline=Date.now()+600000;
       while(!armSignal&&Date.now()<armSignalDeadline){
-        await new Promise(resolve=>setTimeout(resolve,5000));
-        ping=await controlIds.issue(()=>client.control('ping'));
+        await new Promise(resolve=>{
+          const timer=setTimeout(resolve,5000);
+          wakeArm=()=>{clearTimeout(timer);resolve();};
+          if(armSignal)wakeArm();
+        });
+        wakeArm=null;
+        if(!armSignal)ping=await controlIds.issue(()=>client.control('ping'));
       }
       assert.equal(armSignal,true,'TF3_CANCEL_ARM_SIGNAL_TIMEOUT');
       const arm=await controlIds.issue(()=>client.armVehicleCancel({entity:cancelStopEntity,stopped:1,ttlMs:5000}));
@@ -244,7 +251,7 @@ try{
       if(cancelStopEntity!==null){
         const armState=client.vehicleCancelArmObservation(ping);
         if(['expired','revoked','failed'].includes(armState.state))
-          throw new Error(`TF3_CANCEL_ARM_TERMINAL:${JSON.stringify(armState)}`);
+          throw new Error(`TF3_CANCEL_ARM_TERMINAL:${JSON.stringify({armState,baseline,current})}`);
       }
     }
     const actionCounters=JSON.stringify({baseline,current,

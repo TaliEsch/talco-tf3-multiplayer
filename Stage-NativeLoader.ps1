@@ -2,7 +2,7 @@
 param([string]$GameDirectory = 'E:\Steam\steamapps\common\Transport Fever 3')
 
 $ErrorActionPreference = 'Stop'
-$expectedExe = 'a4843accd706b9c476c645860e2b68f6488c9b89f33ef97efe00cffb74a47be5'
+$expectedExe = '297ef05b740de1a3c4b375fd53ca69f371347a4b1546a37525f04aab6bc8e6e6'
 $game = (Resolve-Path -LiteralPath $GameDirectory).Path
 $exe = Join-Path $game 'TransportFever3.exe'
 if ((Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expectedExe) {
