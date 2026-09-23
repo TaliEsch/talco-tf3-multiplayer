@@ -1,5 +1,23 @@
 # TalCo TF3 multiplayer — current delivery plan
 
+## Paused TF3 ownership receipts — 23 September 2026
+
+The first read-only live probe found a mod dispatch gap: company inspection
+returned host company 3141 and second company 55652 at held update 3075,
+but vehicle discovery timed out because it was polled only in vehicle-test
+mode. Vehicle discovery now runs in the common GUI bridge dispatch. After
+reviewing and staging that mod, a fresh load of the same disposable save
+returned owned vehicle 66005 for company 3141 and the same company pair at
+held update 2962. The save SHA-256 remained
+`CCBF4BEB740E53323E06D20890FD029C8E174D3E85EFB06801A8B4275C762FB5`
+after quitting without saving. Focused discovery/inspection tests passed
+11/11 and mod review passed. No native loader was used. This verifies
+read-only receipts in one TF3 instance; the Host CLI capture command and
+native action route have not been run together in TF3. The next critical
+action is to connect fresh engine ownership and the cancelled vehicle intent
+to host ordering and held execution, then verify one application with a
+correlated postcondition. Stage 6 remains open.
+
 ## Host scheduling clock wired; ownership still open — 23 September 2026
 
 The production Host CLI now samples the fresh game bridge update count for
@@ -18,8 +36,8 @@ Host local wrapper now waits for the authenticated coordinator capture frame
 to construct its adapter with that roster. The host has a matching capture
 entry point and the wire protocol admits the capture kind; focused network
 tests pass. The Node bridge has a bounded reader for the existing read-only
-vehicle discovery receipt, tested with a mock mailbox but not yet consumed
-from TF3. A GUI vehicle selection alone does not prove ownership.
+vehicle discovery receipt, now also consumed in the paused single-game trial
+above. A GUI vehicle selection alone does not prove ownership.
 
 The Host CLI now has an explicit one-attempt
 `multiplayer-capture-two-confirmed` command for the saved two-company test

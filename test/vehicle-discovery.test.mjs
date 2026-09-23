@@ -25,4 +25,9 @@ test('vehicle discovery is a bounded read-only owner-filtered bridge request',()
     '"tf3mp_get_vehicle_discovery"',
     'app.saveUserdata("tf3mp_status_1", "vehicle_discovery_receipt", result)',
   ])assert.ok(panel.includes(marker),marker);
+  const dispatch=panel.slice(panel.indexOf('local function exchangeTelemetry('));
+  const discoveryDispatch=dispatch.indexOf('pcall(exchangeVehicleDiscovery)');
+  assert.ok(discoveryDispatch>=0,'vehicle discovery is dispatched');
+  assert.ok(discoveryDispatch<dispatch.indexOf('if config.mode == "company_test"'),
+    'read-only discovery runs in telemetry mode before mode-specific actions');
 });

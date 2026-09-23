@@ -1748,6 +1748,8 @@ local function exchangeTelemetry(tickCount : integer, updateCount : integer) : s
   end
   local inspectionOk = pcall(exchangeCompanyInspection)
   if not inspectionOk then return "company inspection unavailable / see launcher" end
+  local discoveryOk = pcall(exchangeVehicleDiscovery)
+  if not discoveryOk then return "vehicle discovery error / see launcher" end
   if config.mode == "company_test" then
     local roadReplayOk = pcall(exchangeNativeRoadStopReplay)
     if not roadReplayOk then return "road replay outcome unknown / do not retry" end
@@ -1769,8 +1771,6 @@ local function exchangeTelemetry(tickCount : integer, updateCount : integer) : s
     return ok and "company test / see launcher / disposable save" or "company test error / do not retry"
   end
   if config.mode == "vehicle_test" then
-    local discoveryOk = pcall(exchangeVehicleDiscovery)
-    if not discoveryOk then return "vehicle discovery error / see launcher" end
     local ok = pcall(exchangeVehicleTest)
     return ok and "LOCAL vehicle test / not multiplayer" or "vehicle test error / see launcher"
   end

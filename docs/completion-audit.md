@@ -1,5 +1,20 @@
 # Completion audit against the build prompt
 
+## Live read-only company and vehicle receipts — 23 September 2026
+
+**Single-game verified:** the ordinary TF3 executable loaded the known
+disposable two-company save. At paused update 3075, the Node bridge received
+a correlated company inspection naming engine entities 3141 and 55652.
+Vehicle discovery timed out because the GUI mod dispatched that read-only
+request only in vehicle-test mode. Moving it into common dispatch and staging
+the reviewed mod produced a fresh paused-update-2962 receipt for owned
+vehicle 66005, company 3141, followed by the same two-company inspection.
+The game was closed without saving; the disposable save retained SHA-256
+`CCBF4BEB740E53323E06D20890FD029C8E174D3E85EFB06801A8B4275C762FB5`.
+Focused tests passed 11/11 and mod review passed. No native loader, host
+capture, multiplayer action ordering or second game instance was exercised.
+**Stage 6:** open.
+
 ## Host local capture composition — 23 September 2026
 
 **Implemented and network tested:** the host local adapter can wait for an
@@ -9,8 +24,9 @@ capture entry point enforces verified save readiness and a registered local
 participant. The Host CLI now has a one-attempt manual capture path for the
 saved two-company test fixture. Its read-only inspection receipt, paused
 update, authenticated roster and native gate must agree before either company
-is bound. This is mock-mailbox/network tested, not a TF3 or multi-instance
-result; arbitrary three/four-company admission is still missing. Focused tests passed;
+is bound. The capture command remains mock-mailbox/network tested; only its
+underlying read-only company receipt was exercised in TF3. Arbitrary
+three/four-company admission is still missing. Focused tests passed;
 the full integration run reported six native failures and did not exit after
 all 921 cases were reported. **Stage 6:** open.
 
@@ -20,8 +36,9 @@ all 921 cases were reported. **Stage 6:** open.
 nonce-bound vehicle discovery request and accept only a fresh engine receipt
 for the same company and update. It rejects missing, foreign, malformed and
 stale evidence and removes the request. The source mod already produces this
-receipt. This bridge path has not yet been exercised in TF3, bound to host
-membership, or connected to command ordering. **Stage 6:** still open.
+receipt. This bridge path has now returned a paused TF3 receipt, but has not
+been bound to host membership or connected to command ordering. **Stage 6:**
+still open.
 
 ## Host clock composition — 23 September 2026
 
