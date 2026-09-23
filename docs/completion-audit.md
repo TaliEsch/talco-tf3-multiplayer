@@ -1,5 +1,14 @@
 # Completion audit against the build prompt
 
+## Read-only vehicle ownership bridge — 23 September 2026
+
+**Implemented and mock-mailbox tested:** the Node bridge can issue one paused,
+nonce-bound vehicle discovery request and accept only a fresh engine receipt
+for the same company and update. It rejects missing, foreign, malformed and
+stale evidence and removes the request. The source mod already produces this
+receipt. This bridge path has not yet been exercised in TF3, bound to host
+membership, or connected to command ordering. **Stage 6:** still open.
+
 ## Host clock composition — 23 September 2026
 
 **Implemented and focused-tested:** the production Host CLI passes a live

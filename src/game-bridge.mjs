@@ -24,6 +24,8 @@ import { parseCompanyInspection, companyInspectionRows } from "./company-inspect
 import {createRoadStopReplayRequest} from './road-stop-replay-request.mjs';
 import {checkRoadStopReplayIdentity} from './road-stop-replay-case.mjs';
 import {publishRoadStopReplayRequest,readRoadStopReplayReceipt} from './road-stop-replay-mailbox.mjs';
+import {parseVehicleDiscoveryReceipt} from './vehicle-discovery-receipt.mjs';
+import {setTimeout as delay} from 'node:timers/promises';
 
 const LIMIT = 4096;
 export function parseTelemetry(source, nonce) {
@@ -116,6 +118,7 @@ export async function startGameBridge({ directory, logger = () => {}, intervalMs
   let lastObservationWarning = 0;
   let probe = null, requestSequence = 0;
   let vehicleTest = null;
+  let vehicleDiscoveryBusy = false;
   let pauseTest = null;
   let controlLease = null;
   let snapshotProbe = null;
@@ -530,6 +533,54 @@ export async function startGameBridge({ directory, logger = () => {}, intervalMs
     get connected() { return connected; },
     get clock() { return { ...clock }; },
     get engineObservation() { return { ...observations.status, available: connected && observations.status.available }; },
+    async discoverOwnedVehicle({timeoutMs=15000}={}) {
+      if(vehicleDiscoveryBusy)throw new Error('VEHICLE_DISCOVERY_BUSY');
+      if(!Number.isSafeInteger(timeoutMs)||timeoutMs<100||timeoutMs>30000)throw new TypeError('INVALID_VEHICLE_DISCOVERY_TIMEOUT');
+      vehicleDiscoveryBusy=true;
+      try {
+        const start=pending.then(async()=>{
+          const observation=observations.status;
+          if(stopped||!connected||!observation.available||observation.sample?.speedup!==0)
+            throw new Error('PAUSED_FRESH_BRIDGE_OBSERVATION_REQUIRED');
+          if(vehicleTest||companyTestUsed||haltTest||pauseTest||probe)
+            throw new Error('VEHICLE_DISCOVERY_BUSY');
+          const company=observation.sample.companyEntity;
+          const update=observation.sample.updateCount;
+          const requestId=++requestSequence;
+          await publish(directory,'vehicle_discovery_request.lua',{
+            schemaVersion:1,kind:'vehicle_discovery_request',nonce,requestId,company});
+          return {requestId,company,update};
+        });
+        pending=start.catch(()=>{});
+        const context=await start;
+        const deadline=Date.now()+timeoutMs;
+        while(!stopped&&Date.now()<deadline) {
+          const observation=observations.status;
+          if(!connected||!observation.available||observation.sample?.speedup!==0
+            ||observation.sample.companyEntity!==context.company||observation.sample.updateCount!==context.update)
+            throw new Error('VEHICLE_DISCOVERY_CONTEXT_LOST');
+          try {
+            const receipt=parseVehicleDiscoveryReceipt(await readBounded(directory,'vehicle_discovery_receipt.lua'),{
+              nonce,requestId:context.requestId,company:context.company});
+            if(receipt.updateCount!==context.update)throw new Error('VEHICLE_DISCOVERY_CLOCK_MISMATCH');
+            if(receipt.outcome!=='found')throw new Error(receipt.outcome==='not_owner'?'VEHICLE_DISCOVERY_NOT_OWNER':'VEHICLE_DISCOVERY_MISSING');
+            const latest=observations.status;
+            if(stopped||!connected||!latest.available||latest.sample?.speedup!==0
+              ||latest.sample.companyEntity!==context.company||latest.sample.updateCount!==context.update)
+              throw new Error('VEHICLE_DISCOVERY_CONTEXT_LOST');
+            return receipt;
+          } catch(error) {
+            if(['VEHICLE_DISCOVERY_CLOCK_MISMATCH','VEHICLE_DISCOVERY_NOT_OWNER','VEHICLE_DISCOVERY_MISSING','VEHICLE_DISCOVERY_CONTEXT_LOST'].includes(error.message))throw error;
+            // Old, missing and partially written receipts cannot prove ownership.
+          }
+          await delay(100);
+        }
+        throw new Error(stopped?'VEHICLE_DISCOVERY_CLOSED':'VEHICLE_DISCOVERY_TIMEOUT');
+      } finally {
+        await unlink(path.join(directory,'vehicle_discovery_request.lua')).catch(()=>{});
+        vehicleDiscoveryBusy=false;
+      }
+    },
     get haltState() { return haltTest?.phase ?? "not_requested"; },
     get coordinationLeaseState() { return coordinationLease?.phase ?? "not_started"; },
     get coordinatorSetup() {
@@ -955,6 +1006,7 @@ export async function startGameBridge({ directory, logger = () => {}, intervalMs
       if (companyProbe) logger({ level: "warn", event: companyProbe.finance ? "finance_test_result" : "company_test_result", code: "OUTCOME_UNKNOWN_DO_NOT_RETRY" });
       if (vehicleTest) await vehicleTest.close();
       for (const name of ["vehicle_intent.lua", "vehicle_command.lua", "vehicle_receipt.lua"]) await unlink(path.join(directory, name)).catch(() => {});
+      await unlink(path.join(directory, 'vehicle_discovery_request.lua')).catch(() => {});
       await unlink(path.join(directory, "bridge.lua")).catch(() => {});
       await unlink(path.join(directory, "ack.lua")).catch(() => {});
       await unlink(path.join(directory, "engine_request.lua")).catch(() => {});
