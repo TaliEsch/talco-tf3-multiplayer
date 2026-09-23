@@ -75,6 +75,26 @@ test("inspection publishes only read-only requests and can be repeated after com
     assert.equal(events.some(e => e.gameplayVerified === true), false);
   } finally { await bridge.close(); await rm(root, { recursive: true, force: true }); }
 });
+
+test('host pair discovery requires the paused engine company and exact update',async()=>{
+  const root=await mkdtemp(path.join(os.tmpdir(),'tf3mp-host-pair-'));
+  const directory=path.join(root,'tf3mp_status_1');
+  const bridge=await startGameBridge({directory,intervalMs:5});
+  try{
+    await assert.rejects(bridge.discoverHostCompanyPair(),/PAUSED_FRESH_BRIDGE_OBSERVATION_REQUIRED/);
+    await writeFile(path.join(directory,'telemetry.lua'),lua({schemaVersion:1,kind:'telemetry',nonce:bridge.nonce,
+      counter:1,tickCount:100,updateCount:50}));
+    await writeFile(path.join(directory,'engine_observation.lua'),lua({schemaVersion:1,kind:'engine_observation',nonce:bridge.nonce,
+      counter:1,tickCount:100,updateCount:50,speedup:0,companyEntity:7,balance:100,balanceKnown:1,balanceNegative:0}));
+    await until(()=>bridge.engineObservation.available);
+    const pair=bridge.discoverHostCompanyPair();
+    await until(async()=>{try{return (await readFile(path.join(directory,'company_inspect_request.lua'),'utf8')).includes('requestId = 1');}catch{return false;}});
+    await assert.rejects(bridge.discoverHostCompanyPair(),/HOST_COMPANY_PAIR_BUSY/);
+    await writeFile(path.join(directory,'company_inspection.lua'),lua(receipt({nonce:bridge.nonce,requestId:1,tickCount:101,updateCount:50})));
+    assert.deepEqual(await pair,{hostCompanyEntity:7,secondCompanyEntity:8,updateCount:50,tickCount:101,requestId:1});
+    await until(async()=>{try{await readFile(path.join(directory,'company_inspect_request.lua'));return false;}catch{return true;}});
+  }finally{await bridge.close();await rm(root,{recursive:true,force:true});}
+});
 test("GUI inspection uses documented read APIs and never issues commands", async () => {
   const source = await readFile(new URL("../mod/content/tf3mp_status_panel.script.tl", import.meta.url), "utf8");
   const region = source.slice(source.indexOf("local function exchangeCompanyInspection"), source.indexOf("local function dispatchPauseAtUpdate"));

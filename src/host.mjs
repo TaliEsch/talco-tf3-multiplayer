@@ -153,7 +153,15 @@ export function startHost({ secret, sessionId = randomUUID(), bind = DEFAULT_BIN
     const host = address.address === "0.0.0.0" ? "127.0.0.1" : address.address === "::" ? "::1" : address.address;
     return { host, port: address.port };
   };
+  const ensureCaptureReady=()=>{
+    if ([...peers].some(p => p.player && !p.ready)) throw new ProtocolError("SAVE_REQUIRED", "all participants must verify the save");
+    if (pendingLocalConnections !== 0 || pendingLocalPlayerIds.size !== 0
+      || [...localParticipants.values()].some(attachment => attachment.attached !== true && attachment.captureReady !== true)) {
+      throw new ProtocolError("LOCAL_ENGINE_BINDING_REQUIRED", "host-local capture adapter must be registered before coordination");
+    }
+  };
   return { server, authority, sessionId, coordinator,
+    ensureCaptureReady,
     // This is deliberately a real authenticated loopback client: local host
     // actions enter the same decoder, identity, save, authority and coordinator
     // branches as remote actions.  The wrapper in host-local-participant.mjs
@@ -195,11 +203,7 @@ export function startHost({ secret, sessionId = randomUUID(), bind = DEFAULT_BIN
       coordinator.prepare(authority.players(), checkpoint);
     },
     beginCapture({updateCount}) {
-      if ([...peers].some(p => p.player && !p.ready)) throw new ProtocolError("SAVE_REQUIRED", "all participants must verify the save");
-      if (pendingLocalConnections !== 0 || pendingLocalPlayerIds.size !== 0
-        || [...localParticipants.values()].some(attachment => attachment.attached !== true && attachment.captureReady !== true)) {
-        throw new ProtocolError("LOCAL_ENGINE_BINDING_REQUIRED", "host-local capture adapter must be registered before coordination");
-      }
+      ensureCaptureReady();
       coordinator.capture(authority.players(), {updateCount});
     } };
 }

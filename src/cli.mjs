@@ -22,6 +22,7 @@ import {prepareDisposableStartupLoad} from './startup-load.mjs';
 import {connectHostLocalParticipant} from './host-local-participant.mjs';
 import {loadHostLocalEngineFactory} from './host-local-cli-seam.mjs';
 import {liveHostUpdateCount} from './live-host-clock.mjs';
+import {createTwoCompanyHostCapture} from './two-company-host-capture.mjs';
 import {createJoinEngineBootstrap} from './join-engine-bootstrap.mjs';
 import {fileURLToPath} from 'node:url';
 
@@ -109,6 +110,7 @@ const log = record => {
 const sessionSecret = opt.secret ?? process.env.TF3MP_SESSION_SECRET;
 let bridge;
 let hostInstance, nativeGate, vehicleTestActive = false;
+let hostCapture=null,hostCaptureAttempted=false;
 async function enableBridge() {
   if (opt["bridge-dir"]) {
     bridge = await startGameBridge({ directory: opt["bridge-dir"], logger: log });
@@ -147,6 +149,18 @@ if (command === "host" || command === "join") createInterface({ input: process.s
     replayLog(code,code==='CAPTURE_UNSUPPORTED'&&typeof error.issues==='string'?{issues:error.issues}:{});
   });
   else if(roadReplayWorkflow||roadReplayBusy)replayLog('REPLAY_OWNS_HELPER_STOP_TO_EXIT');
+  else if(line.trim()==='multiplayer-capture-two-confirmed'){
+    if(command!=='host'||!hostCapture||hostCaptureAttempted||vehicleTestActive||integrationBatch||batchStarting
+      ||coordinatorRun||coordinatorStarting||phase2Setup||phase2Starting||depotPreviewOwnsHelper)
+      rawLog({level:'warn',event:'multiplayer_capture',code:'FRESH_QUALIFIED_HOST_REQUIRED'});
+    else {
+      hostCaptureAttempted=true;
+      hostCapture.start().then(result=>rawLog({level:'info',event:'multiplayer_capture',
+        code:'CAPTURE_SENT_AWAIT_ENGINE_RECEIPTS',...result,gameplayVerified:false}))
+        .catch(error=>rawLog({level:'warn',event:'multiplayer_capture',
+          code:error?.code??error?.message??'CAPTURE_FAILED_STOP_HELPER',gameplayVerified:false}));
+    }
+  }
   else if(line.trim()==='phase2-setup') {
     if(command!=='host'||!bridge||!hostInstance||vehicleTestActive||integrationBatch||batchStarting||coordinatorRun||coordinatorStarting||phase2Setup||phase2Starting||!observedSaveHash||hostInstance.authority.players().length!==0)
       rawLog({level:'warn',event:'phase2_setup',code:'FAILED_STOP_HELPER'});
@@ -346,7 +360,7 @@ if (command === "hash-game") {
     engineSessionDirectory:opt['bridge-dir'],logger:log});
   const instance = startHost({ secret: sessionSecret, sessionId: hostSessionId, bind: opt.bind, port: opt.port ? Number(opt.port) : undefined, buildHash, modManifestHash: opt["mod-hash"], requiredSave, expiresAt, logger: log,
     getUpdateCount:()=>liveHostUpdateCount(bridge),
-    admissionAllowed: () => !nativeMode.diagnosticOnly && nativeGate?.ready===true && localFactory!==null && !vehicleTestActive });
+    admissionAllowed: () => !nativeMode.diagnosticOnly && nativeGate?.ready===true && localFactory!==null && !vehicleTestActive && !hostCaptureAttempted });
   hostInstance = instance;
   await once(instance.server, "listening");
   if(localFactory){
@@ -356,6 +370,7 @@ if (command === "hash-game") {
       onMessage:(message)=>{
         if(message.kind==='session_ended')log({level:'warn',event:'host_local_participant_ended',gameplayVerified:false});
       }});
+    if(!nativeMode.diagnosticOnly)hostCapture=createTwoCompanyHostCapture({host:instance,bridge,nativeGate,hostLocal:local});
     local.attachment.then(()=>{
       const accepted=local.ready;
       log({level:accepted?'info':'warn',event:accepted?'host_local_adapter_attached':'host_local_adapter_rejected',

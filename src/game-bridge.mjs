@@ -138,6 +138,7 @@ export async function startGameBridge({ directory, logger = () => {}, intervalMs
   // This is not a reset of the generic diagnostic latch or a retry permission.
   let phase2FundedContext = null;
   let companyInspection = null;
+  let hostCompanyPairBusy = false;
   let depotPreview = false;
   let phase2Setup = null;
   let companyInspectionResult = null, coordinatorSelection = null, selectionId = null;
@@ -212,6 +213,18 @@ export async function startGameBridge({ directory, logger = () => {}, intervalMs
         catch { /* A partial/old response cannot produce inspection success. */ }
       }
       if (receipt || code) {
+        if(companyInspection.hostPair){
+          const proof=companyInspection.hostPair;
+          const observation=observations.status;
+          if(receipt?.outcome==='inspected'&&connected&&observation.available
+            &&observation.sample?.speedup===0&&observation.sample.companyEntity===proof.companyEntity
+            &&observation.sample.updateCount===proof.updateCount
+            &&receipt.updateCount===proof.updateCount&&receipt.tickCount>=proof.issuedTick){
+            proof.resolve(Object.freeze({hostCompanyEntity:receipt.companyEntity,
+              secondCompanyEntity:receipt.newCompanyEntity,updateCount:receipt.updateCount,
+              tickCount:receipt.tickCount,requestId:receipt.requestId}));
+          } else proof.reject(new Error(code??'HOST_COMPANY_PAIR_UNVERIFIED'));
+        }
         if(phase2Setup?.status==='inspecting') {
           if(receipt?.outcome==='inspected' && phase2HeldContext(phase2Setup)
             &&receipt.companyEntity===phase2Setup.originalCompany&&receipt.updateCount===phase2Setup.updateCount
@@ -587,6 +600,27 @@ export async function startGameBridge({ directory, logger = () => {}, intervalMs
       return {vehicleEntity:coordinatorSelection,companyEntity:companyInspectionResult?.companyEntity??null,
         secondCompanyEntity:companyInspectionResult?.newCompanyEntity??null,
         inspection:companyInspectionResult?.outcome??'pending'};
+    },
+    discoverHostCompanyPair() {
+      if(hostCompanyPairBusy)return Promise.reject(new Error('HOST_COMPANY_PAIR_BUSY'));
+      hostCompanyPairBusy=true;
+      let resolve,reject;
+      const completed=new Promise((yes,no)=>{resolve=yes;reject=no;});
+      const operation=pending.then(async()=>{
+        const observation=observations.status;
+        if(stopped||!connected||!observation.available||observation.sample?.speedup!==0)
+          throw new Error('PAUSED_FRESH_BRIDGE_OBSERVATION_REQUIRED');
+        if(selectionId||haltTest||pauseTest||vehicleTest||probe||companyProbe||companyInspection||companyTestUsed)
+          throw new Error('HOST_COMPANY_PAIR_BUSY');
+        const requestId=++requestSequence;
+        await publish(directory,'company_inspect_request.lua',{schemaVersion:1,kind:'company_inspect',nonce,requestId});
+        companyInspection={requestId,companyEntity:observation.sample.companyEntity,
+          deadline:Date.now()+15000,hostPair:{resolve,reject,companyEntity:observation.sample.companyEntity,
+            updateCount:observation.sample.updateCount,issuedTick:observation.sample.tickCount}};
+      });
+      pending=operation.catch(()=>{});
+      operation.catch(reject);
+      return completed.finally(()=>{hostCompanyPairBusy=false;});
     },
     beginCoordinatorSelection() {
       const operation=pending.then(async()=>{
@@ -979,6 +1013,7 @@ export async function startGameBridge({ directory, logger = () => {}, intervalMs
       if (controlLease) await controlLease.close().catch(() => logger({ level: "warn", event: "control_test_failed", code: "RESTORE_UNKNOWN_CHECK_GAME" }));
       if (pauseTest) await pauseTest.close();
       await unlink(path.join(directory, "company_inspect_request.lua")).catch(() => {});
+      if(companyInspection?.hostPair)companyInspection.hostPair.reject(new Error('HOST_COMPANY_PAIR_CLOSED'));
       await unlink(path.join(directory, "depot_preview.lua")).catch(() => {});
       for(const name of ['phase2_setup.lua','phase2_plan.lua'])await unlink(path.join(directory,name)).catch(()=>{});
       await unlink(path.join(directory, "company_request.lua")).catch(() => {});

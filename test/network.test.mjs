@@ -5,6 +5,7 @@ import { startHost } from "../src/host.mjs";
 import { connectClient } from "../src/client.mjs";
 import { HostAuthority } from "../src/lockstep.mjs";
 import { connectHostLocalParticipant } from "../src/host-local-participant.mjs";
+import {createTwoCompanyHostCapture} from '../src/two-company-host-capture.mjs';
 
 const BUILD = "b".repeat(64);
 const MODS = "c".repeat(64);
@@ -173,11 +174,12 @@ test("host-local production attachment waits for authenticated capture roster", 
     remote=connectClient({secret:SECRET,sessionId:instance.sessionId,port:instance.server.address().port,
       displayName:'Remote',buildHash:BUILD,modManifestHash:MODS,onMessage:()=>{}});
     await until(()=>local.connection.playerId&&remote.playerId);
-    instance.authority.bindCompanyEntity(local.connection.playerId,101);
-    instance.authority.bindCompanyEntity(remote.playerId,102);
     assert.equal(local.ready,false);
     assert.throws(()=>instance.beginCoordination({updateCount:100,checkpointHash:'d'.repeat(64)}),{code:'LOCAL_ENGINE_BINDING_REQUIRED'});
-    instance.beginCapture({updateCount:100});
+    const bridge={connected:true,engineObservation:{available:true,sample:{speedup:0,companyEntity:101,updateCount:100}},
+      async discoverHostCompanyPair(){return {hostCompanyEntity:101,secondCompanyEntity:102,updateCount:100};}};
+    const capture=createTwoCompanyHostCapture({host:instance,bridge,nativeGate:{ready:true},hostLocal:local});
+    assert.equal((await capture.start()).remoteCompanyEntity,102);
     await local.attachment;
     assert.equal(local.ready,true);
     assert.equal(received[0],'coordination_capture');

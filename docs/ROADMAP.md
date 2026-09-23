@@ -7,24 +7,29 @@ authority scheduling. One authenticated request uses the same sample for its
 coordinator checks, authority acceptance and proposal. A missing or stale
 bridge produces an invalid clock and fails the request closed. Focused network
 and clock tests passed. The Host CLI still lacks an engine verified vehicle
-ownership resolver and company assignment path, so a real native-cancelled
-intent cannot yet enter host ordering. The next step is to consume a fresh
-engine ownership receipt, bind the host member, then route one cancelled
-vehicle intent through the existing coordinator and executeHeld path.
-The full suite still has the same five native controller/observer teardown
-failures seen before this clock change; no new test failure was observed.
+ownership resolver, so a real native-cancelled intent cannot yet enter host
+ordering. The next step is to consume a fresh ownership receipt at the held
+update, then route one cancelled vehicle intent through the existing
+coordinator and executeHeld path.
 
 Composition audit: the first-party provider requires a `companies` Map with
 two to four distinct verified members when its adapter is constructed. The
 Host local wrapper now waits for the authenticated coordinator capture frame
 to construct its adapter with that roster. The host has a matching capture
 entry point and the wire protocol admits the capture kind; focused network
-tests pass. The production Host CLI still never calls `bindCompanyEntity` or
-begins capture, so live attachment and ordering remain blocked. The Node
-bridge has a bounded reader for the existing read-only vehicle discovery
-receipt, tested with a mock mailbox but not yet consumed from TF3. Resolve
-verified membership and use a fresh ownership receipt before enabling this
-path; a GUI vehicle selection alone does not prove ownership.
+tests pass. The Node bridge has a bounded reader for the existing read-only
+vehicle discovery receipt, tested with a mock mailbox but not yet consumed
+from TF3. A GUI vehicle selection alone does not prove ownership.
+
+The Host CLI now has an explicit one-attempt
+`multiplayer-capture-two-confirmed` command for the saved two-company test
+fixture. It waits for a paused, fresh `company_inspection` receipt, checks the
+current host company/update and native gate again, binds the authenticated
+host and second player, then sends coordinator capture. This path has passed
+focused network and mock-mailbox tests. It has not been exercised in TF3 and
+does not select arbitrary companies or support three/four-company admission
+yet. The live action ownership resolver and cancelled-intent route remain
+unwired, so Stage 6 is still open.
 
 The capture integration run reported 921 test cases but did not exit after
 the final case; it was stopped after over two idle minutes. Six native

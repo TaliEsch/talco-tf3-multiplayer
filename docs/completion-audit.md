@@ -6,8 +6,11 @@
 authenticated `coordination_capture` frame before construction, receive its
 verified two-to-four-company map, and process the capture first. The host
 capture entry point enforces verified save readiness and a registered local
-participant. The Host CLI still has no live company assignment or capture
-trigger, so this is not a TF3 or multi-instance result. Focused tests passed;
+participant. The Host CLI now has a one-attempt manual capture path for the
+saved two-company test fixture. Its read-only inspection receipt, paused
+update, authenticated roster and native gate must agree before either company
+is bound. This is mock-mailbox/network tested, not a TF3 or multi-instance
+result; arbitrary three/four-company admission is still missing. Focused tests passed;
 the full integration run reported six native failures and did not exit after
 all 921 cases were reported. **Stage 6:** open.
 
