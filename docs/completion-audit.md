@@ -1,5 +1,15 @@
 # Completion audit against the build prompt
 
+## Host clock composition — 23 September 2026
+
+**Implemented and focused-tested:** the production Host CLI passes a live
+bridge update count to HostAuthority and SessionCoordinator, with an invalid
+clock when the bridge is missing or stale. Each accepted network request uses
+one sampled host update throughout its authority and coordination checks.
+This closes the previous zero-valued scheduling default in the Host CLI. It
+does not provide engine verified company membership or vehicle ownership,
+native intent routing, or a live host ordered replay. **Stage 6:** still open.
+
 ## One-use cancellation trial — 23 September 2026
 
 **Implemented and owned-tested:** a default-disabled one-use native arm,

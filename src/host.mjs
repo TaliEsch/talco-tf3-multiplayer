@@ -111,10 +111,14 @@ export function startHost({ secret, sessionId = randomUUID(), bind = DEFAULT_BIN
           else if (body.kind === "action_request" || body.kind === "speed_request") {
             try {
               if (!peer.ready) throw new ProtocolError("SAVE_REQUIRED", "authoritative save must be verified before gameplay requests");
-              if (!legacyModelRelay) coordinator.beforeCommand(getUpdateCount());
-              const accepted = authority.accept({ ...body.payload, messageId: body.messageId }, getUpdateCount(), peer.player.playerId);
+              // Keep the authority and coordinator on one sampled host update.
+              // A changing or lost observation cannot move the deadline between
+              // acceptance and proposal of this same authenticated request.
+              const hostUpdate=getUpdateCount();
+              if (!legacyModelRelay) coordinator.beforeCommand(hostUpdate);
+              const accepted = authority.accept({ ...body.payload, messageId: body.messageId }, hostUpdate, peer.player.playerId);
               if (legacyModelRelay) broadcast("command_accepted", { command: accepted });
-              else coordinator.propose(accepted, getUpdateCount());
+              else coordinator.propose(accepted, hostUpdate);
               logger({ level: "info", event: legacyModelRelay ? "command_accepted" : "command_proposed", playerId: peer.player.playerId, hostSequence: accepted.hostSequence, scheduledUpdate: accepted.scheduledUpdate });
             } catch (error) {
               if (!(error instanceof ProtocolError)) throw error;

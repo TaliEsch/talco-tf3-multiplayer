@@ -1,5 +1,19 @@
 # TalCo TF3 multiplayer — current delivery plan
 
+## Host scheduling clock wired; ownership still open — 23 September 2026
+
+The production Host CLI now samples the fresh game bridge update count for
+authority scheduling. One authenticated request uses the same sample for its
+coordinator checks, authority acceptance and proposal. A missing or stale
+bridge produces an invalid clock and fails the request closed. Focused network
+and clock tests passed. The Host CLI still lacks an engine verified vehicle
+ownership resolver and company assignment path, so a real native-cancelled
+intent cannot yet enter host ordering. The next step is to consume a fresh
+engine ownership receipt, bind the host member, then route one cancelled
+vehicle intent through the existing coordinator and executeHeld path.
+The full suite still has the same five native controller/observer teardown
+failures seen before this clock change; no new test failure was observed.
+
 ## One-use vehicle Stop cancellation — 23 September 2026
 
 The native arm now substitutes a distinct read-only failure-completion vtable
@@ -72,17 +86,16 @@ responsive UI and clean teardown before connecting the already guarded
 executeHeld route to host ordering. A safe same-process world reload requires
 an explicit quiescent epoch rebind; no owner reset has been added.
 
-## Current stage-6 gate — 23 September 2026
+## Earlier six-site gate — 23 September 2026
 
-Still below **6/10**. Two normal-return observation sites are implemented and
-owned-tested, but the first six-site live run never reached an action-ready
+At that point readiness was below **6/10**. Two normal-return observation sites
+were implemented and owned-tested, but the first six-site live run never reached an action-ready
 state after a second world load in one process: public tick/update advanced
 3,422 with no native observer-hit increase. Diagnose whether the observer's
 first-thread-only counter saw a new world thread; then run a fresh single-load
-trial and qualify normal send/marshaler returns. Only after that should one
-bounded vehicle Stop be suppressed, host-ordered and applied once through the
-retained coordinator and game-side executor. Neither a passive receipt nor
-the previous gate pass meets stage 6. See `native-review-handoff.md` for the
+trial and qualify normal send/marshaler returns. Subsequent normal cleanup and
+bounded cancellation results are recorded above. Neither a passive receipt nor
+the previous gate pass met stage 6. See `native-review-handoff.md` for the
 failed run and exact safety cleanup.
 
 Integration builds passed. The final elevated full suite found **912 tests:

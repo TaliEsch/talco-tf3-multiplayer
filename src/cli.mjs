@@ -21,6 +21,7 @@ import {openNativeHostJoinGate,resolveNativeHostJoinMode} from './native-host-jo
 import {prepareDisposableStartupLoad} from './startup-load.mjs';
 import {connectHostLocalParticipant} from './host-local-participant.mjs';
 import {loadHostLocalEngineFactory} from './host-local-cli-seam.mjs';
+import {liveHostUpdateCount} from './live-host-clock.mjs';
 import {createJoinEngineBootstrap} from './join-engine-bootstrap.mjs';
 import {fileURLToPath} from 'node:url';
 
@@ -343,7 +344,9 @@ if (command === "hash-game") {
   const localFactory=await loadHostLocalEngineFactory({modulePath:nativeMode.diagnosticOnly?undefined:(opt['host-local-adapter-module']??firstPartyEngineProvider),bridge,nativeGate,
     sessionId:hostSessionId,buildHash,modManifestHash:opt['mod-hash'],requiredSave,verifiedSave:requiredSave,
     engineSessionDirectory:opt['bridge-dir'],logger:log});
-  const instance = startHost({ secret: sessionSecret, sessionId: hostSessionId, bind: opt.bind, port: opt.port ? Number(opt.port) : undefined, buildHash, modManifestHash: opt["mod-hash"], requiredSave, expiresAt, logger: log, admissionAllowed: () => !nativeMode.diagnosticOnly && nativeGate?.ready===true && localFactory!==null && !vehicleTestActive });
+  const instance = startHost({ secret: sessionSecret, sessionId: hostSessionId, bind: opt.bind, port: opt.port ? Number(opt.port) : undefined, buildHash, modManifestHash: opt["mod-hash"], requiredSave, expiresAt, logger: log,
+    getUpdateCount:()=>liveHostUpdateCount(bridge),
+    admissionAllowed: () => !nativeMode.diagnosticOnly && nativeGate?.ready===true && localFactory!==null && !vehicleTestActive });
   hostInstance = instance;
   await once(instance.server, "listening");
   if(localFactory){
