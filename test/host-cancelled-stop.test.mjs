@@ -2,9 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHostCancelledStop} from '../src/host-cancelled-stop.mjs';
 
-const baseline={active:true,saturated:false,callbackHits:'5',sendReturnHits:'6',
+const baseline={active:true,saturated:false,factoryHits:'2',admissionHits:'3',
+  correlatedHits:'4',droppedCandidates:'0',callbackHits:'5',sendReturnHits:'6',
   marshalerReturnHits:'7',postSendBodyCorrelatedHits:'8'};
-const action={...baseline,callbackHits:'6',sendReturnHits:'7',marshalerReturnHits:'8',postSendBodyCorrelatedHits:'9',
+const action={...baseline,factoryHits:'3',admissionHits:'4',correlatedHits:'5',
+  callbackHits:'6',sendReturnHits:'7',marshalerReturnHits:'8',postSendBodyCorrelatedHits:'9',
   active:true,saturated:false,latestValid:true,latestCallbackValid:true,latestMarshalerValid:true,
   latestPostSendBodyValid:true,latestCallbackMatchesAdmissionStorage:true,
   latestMarshalerMatchesAdmissionStorage:true,latestMarshalerMatchesCallbackStorage:true,
@@ -65,6 +67,16 @@ test('uncorrelated native completion cannot enter host ordering',async()=>{
   await assert.rejects(completion,/NOT_CONFIRMED/);
   assert.equal(f.sent.length,0);
   assert.equal(f.inspections,1);
+});
+
+test('extra native factory or dropped candidate cannot enter host ordering',async()=>{
+  for(const nativeAction of [{...action,factoryHits:'4'},
+    {...action,droppedCandidates:'1'}]){
+    const f=fixture({nativeAction});
+    const {completion}=await f.router.start(77);
+    await assert.rejects(completion,/NOT_EXACTLY_ONCE/);
+    assert.equal(f.sent.length,0);
+  }
 });
 
 test('normal game application after claimed cancellation blocks host replay',async()=>{

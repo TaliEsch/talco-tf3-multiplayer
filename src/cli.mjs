@@ -14,6 +14,7 @@ import nodePath from "node:path";
 import { createLocalIntegrationBatch } from "./local-integration-batch.mjs";
 import { createBatchReportWriter } from "./batch-report.mjs";
 import { createLocalCoordinatorRun } from "./local-coordinator-run.mjs";
+import {cancelOneLocalStop} from './local-native-cancel-gate.mjs';
 import {createPhase2SetupSession} from './phase2-setup-session.mjs';
 import {beginRoadStopReplayRecording,finishRoadStopReplayRecording,loadRoadStopReplayRecordingCase,previewRoadStopReplayCaptureDiagnostics,readRoadStopReadbackDiagnostic} from './road-stop-replay-session.mjs';
 import {checkRoadStopReplayIdentity} from './road-stop-replay-case.mjs';
@@ -113,13 +114,14 @@ let bridge;
 let hostInstance, nativeGate, vehicleTestActive = false;
 let hostCapture=null,hostCaptureAttempted=false;
 let hostCancelledStop=null;
+let hostLocalParticipant=null;
 async function enableBridge() {
   if (opt["bridge-dir"]) {
     bridge = await startGameBridge({ directory: opt["bridge-dir"], logger: log });
     log({ level: "info", event: "bridge_waiting" });
   }
 }
-async function waitForLiveBridge(timeoutMs=15000) {
+async function waitForLiveBridge(timeoutMs=300000) {
   if(!bridge)throw new Error('LIVE_GAME_BRIDGE_REQUIRED');
   const deadline=Date.now()+timeoutMs;
   while(Date.now()<deadline){
@@ -227,14 +229,21 @@ if (command === "host" || command === "join") createInterface({ input: process.s
     }
   }
   else if(coordinatorRun||coordinatorStarting) rawLog({level:"warn",event:"coordinator_local_run",code:"RUN_OWNS_HELPER_STOP_TO_EXIT"});
-  else if(line.trim()==="coordinator-run-confirmed"||line.trim().startsWith("coordinator-run-confirmed ")) {
+  else if(line.trim()==="coordinator-run-confirmed"||line.trim().startsWith("coordinator-run-confirmed ")
+    ||line.trim().startsWith('coordinator-cancel-stop-confirmed ')) {
     const args=line.trim().split(/\s+/);
-    const selectInGame=args.length===1;
+    const cancelledRun=args[0]==='coordinator-cancel-stop-confirmed';
+    const selectInGame=!cancelledRun&&args.length===1;
     let secondCompany=Number(args[1]),vehicleEntity=Number(args[2]);
     let localCompany=bridge?.engineObservation.sample?.companyEntity;
     if(!selectInGame&&(args.length!==3||![secondCompany,vehicleEntity,localCompany].every(n=>Number.isSafeInteger(n)&&n>=0&&n<=2147483647)||secondCompany===localCompany))
       rawLog({level:"warn",event:"coordinator_local_run",code:"VERIFIED_COMPANY_AND_VEHICLE_REQUIRED"});
-    else if(command!=="host"||!bridge||!hostInstance||vehicleTestActive||integrationBatch||batchStarting||hostInstance.authority.players().length!==0)
+    else if(command!=="host"||!bridge||!hostInstance||vehicleTestActive||integrationBatch||batchStarting
+      ||hostInstance.coordinator.phase!=='lobby'
+      ||(cancelledRun
+        ?nativeGate?.ready!==true||hostInstance.authority.players().length!==1
+          ||hostInstance.authority.players()[0].playerId!==hostLocalParticipant?.connection?.playerId
+        :hostInstance.authority.players().length!==0))
       rawLog({level:"warn",event:"coordinator_local_run",code:"FRESH_SOLO_HOST_REQUIRED"});
     else {
       vehicleTestActive=true;coordinatorStarting=true;
@@ -260,7 +269,18 @@ if (command === "host" || command === "join") createInterface({ input: process.s
         }
         coordinatorRun=await createLocalCoordinatorRun({directory:opt["bridge-dir"],bridge,playerId:"local",
           companies:new Map([["local",localCompany],["receipt-mirror",secondCompany]]),vehicleEntity,
-          logger:rawLog,saveReport,metadata:{gameHash:observedGameHash,modManifestHash:opt["mod-hash"]}});
+          logger:rawLog,saveReport,metadata:{gameHash:observedGameHash,modManifestHash:opt["mod-hash"]},
+          commandLimit:cancelledRun?1:4,
+          beforeFirstCommand:cancelledRun?({entity,company,recordCancellationEvidence})=>cancelOneLocalStop({
+            nativeGate,bridge,entity,company,logger:value=>{
+              rawLog(value);recordCancellationEvidence(value);
+            }}):null,
+          nativeRuntime:cancelledRun?{
+            client:nativeGate.client,binding:nativeGate.binding,
+            sessionId:nativeGate.binding.sessionId,role:'host',logger:rawLog,
+            gateControl:request=>nativeGate.gateControl(request),
+            awaitGateEvent:(request,options)=>nativeGate.awaitGateEvent(request,options),
+          }:null});
         if(stopping){await coordinatorRun.close();return;}
         coordinatorTimer=setInterval(()=>{void coordinatorRun.poll();},250);
       })().catch(()=>rawLog({level:"warn",event:"coordinator_local_run",code:"SETUP_FAILED_STOP_HELPER_NO_RETRY"}))
@@ -391,6 +411,7 @@ if (command === "hash-game") {
       onMessage:(message)=>{
         if(message.kind==='session_ended')log({level:'warn',event:'host_local_participant_ended',gameplayVerified:false});
       }});
+    hostLocalParticipant=local;
     if(!nativeMode.diagnosticOnly)hostCapture=createTwoCompanyHostCapture({host:instance,bridge,nativeGate,hostLocal:local});
     if(!nativeMode.diagnosticOnly)hostCancelledStop=createHostCancelledStop({host:instance,hostLocal:local,
       bridge,nativeGate,logger:log});

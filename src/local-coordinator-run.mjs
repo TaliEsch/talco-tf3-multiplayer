@@ -6,18 +6,23 @@ import { randomUUID } from 'node:crypto';
 // members are explicitly receipt mirrors, NOT independent engines or peers.
 // This remains useful as a regression harness after real network integration.
 export async function createLocalCoordinatorRun({directory,bridge,playerId,companies,vehicleEntity,
-  logger=()=>{},saveReport,now=Date.now,leadUpdates=60,metadata={}}) {
+  logger=()=>{},saveReport,now=Date.now,leadUpdates=60,metadata={},
+  beforeFirstCommand=null,commandLimit=4,nativeRuntime=null}) {
   if(!(companies instanceof Map)||companies.size!==2||!companies.has(playerId)
     ||!Number.isSafeInteger(vehicleEntity)||vehicleEntity<0||vehicleEntity>2147483647
     ||!Number.isSafeInteger(leadUpdates)||leadUpdates<40||leadUpdates>150
+    ||(beforeFirstCommand!==null&&typeof beforeFirstCommand!=='function')
+    ||!Number.isSafeInteger(commandLimit)||commandLimit<1||commandLimit>4
     ||typeof saveReport!=='function') throw new TypeError('INVALID_LOCAL_RUN_OPTIONS');
   const messages=[],reports=[];
   const hash=value=>typeof value==='string'&&/^[a-f0-9]{64}$/.test(value)?value:null;
-  const report={schemaVersion:1,batchId:randomUUID(),scope:'single_game_real_adapter_with_receipt_mirror',
+  const report={schemaVersion:1,batchId:randomUUID(),scope:beforeFirstCommand
+    ?'single_game_cancelled_stop_with_receipt_mirror':'single_game_real_adapter_with_receipt_mirror',
     metadata:{gameHash:hash(metadata.gameHash),modManifestHash:hash(metadata.modManifestHash)},
     gameplayVerified:false,multiGameVerified:false,realEngineCount:1,simulatedParticipantCount:1,
     outcome:'in_progress',haltState:'not_requested',checks:[],events:[],startedAt:now(),finishedAt:null};
   let phase='arming',adapter,sequence=0,controlsStarted=false,closed=false,polling=null,persisting=Promise.resolve();
+  let firstCommandGate=beforeFirstCommand===null?'passed':'pending';
   let terminalDeadline=0,reportFailed=false,lastRelease=null;
   const timings=new Map();
   const coordinator=new SessionCoordinator({now,requireReleaseAck:true,timeoutMs:30000,
@@ -26,18 +31,46 @@ export async function createLocalCoordinatorRun({directory,bridge,playerId,compa
     report.events.push({at:now(),code,...data});
     logger({level:phase==='failed'?'warn':'info',event:'coordinator_local_run',code,...data,gameplayVerified:false});
   }
+  function failureContext() {
+    const observation=bridge.engineObservation;
+    const sample=observation?.sample;
+    return {bridgeConnected:bridge.connected===true,
+      observationAvailable:observation?.available===true,
+      updateCount:sample?.updateCount??null,tickCount:sample?.tickCount??null,
+      speedup:sample?.speedup??null,companyEntity:sample?.companyEntity??null,
+      firstCommandGate,lastReleaseAgeMs:lastRelease?now()-lastRelease.at:null};
+  }
   function persist() {
     const snapshot=structuredClone({...report,phase});
     persisting=persisting.then(()=>saveReport(snapshot)).catch(()=>{
-      reportFailed=true;phase='failed';report.outcome='report_write_failed';adapter?.halt('REPORT_WRITE_FAILED');
+      reportFailed=true;phase='failed';report.outcome='report_write_failed';
+      report.failureContext=failureContext();adapter?.halt('REPORT_WRITE_FAILED');
     });return persisting;
   }
   function fail(code) {
     if(phase==='failed'||phase==='passed'||closed)return;
+    report.failureContext=failureContext();
     phase='failed';report.outcome=code;report.finishedAt=now();event(code);adapter?.halt(code);persist();
   }
+  function recordCancellationEvidence(value) {
+    if(!beforeFirstCommand||!value)return;
+    const sample=bridge.engineObservation?.sample;
+    if(value.event==='local_cancel_stop_owner_inspection_failed')
+      event('OWNER_INSPECTION_FAILED',{code:value.code,updateCount:value.updateCount,
+        tickCount:value.tickCount,speedup:value.speedup});
+    else if(value.event==='local_cancel_stop_owner_prestate')
+      event('OWNER_PRESTATE_RECEIPT',{issuedUpdate:value.issuedUpdate,
+        receiptUpdate:value.receiptUpdate,paused:value.paused,stopFlag:value.stopFlag});
+    else if(['local_cancel_stop_armed','local_cancel_stop_confirmed'].includes(value.event))
+      event(value.event==='local_cancel_stop_armed'?'NATIVE_STOP_ARMED':'NATIVE_STOP_CONFIRMED',{
+      entity:value.entity,company:value.company,invocation:value.expectedInvocation??value.invocation,
+      ttlMs:value.ttlMs??null,updateCount:sample?.updateCount??null,
+      tickCount:sample?.tickCount??null,speedup:sample?.speedup??null});
+    else return;
+    persist();
+  }
   adapter=await createEngineSessionAdapter({directory,bridge,playerId,companies,now,
-    checkpointEvidenceScope:'local_diagnostic',
+    nativeRuntime,checkpointEvidenceScope:nativeRuntime===null?'local_diagnostic':'production',
     healthy:()=>!closed&&!reportFailed&&phase!=='failed',controlsReady:()=>bridge.coordinationControlsLocked,
     disconnect:()=>{if(phase!=='stopping')fail(adapter?.fault??'ADAPTER_DISCONNECTED');},
     send:(kind,payload)=>reports.push({kind,payload})});
@@ -110,7 +143,16 @@ export async function createLocalCoordinatorRun({directory,bridge,playerId,compa
       if(!adapter.receive(message.kind,message.payload)){fail(adapter.fault??'MESSAGE_REJECTED');return;}
     }
     if(coordinator.phase==='running'&&adapter.phase==='running') {
-      if(sequence===4){phase='stopping';terminalDeadline=now()+20000;adapter.halt('LOCAL_RUN_COMPLETE');event('VERIFYING_EXPLICIT_ENGINE_STOP');}
+      if(firstCommandGate==='pending'&&lastRelease&&now()-lastRelease.at>=2000){
+        firstCommandGate='waiting';
+        Promise.resolve().then(()=>beforeFirstCommand({entity:vehicleEntity,company:companies.get(playerId),
+          recordCancellationEvidence}))
+          .then(()=>{if(!closed&&phase!=='failed'){firstCommandGate='passed';event('NATIVE_CANCELLATION_CONFIRMED');}})
+          .catch(error=>fail(error?.message??'NATIVE_CANCELLATION_UNKNOWN'));
+        event('AWAITING_NATIVE_CANCELLATION');
+      }
+      if(firstCommandGate!=='passed')return;
+      if(sequence===commandLimit){phase='stopping';terminalDeadline=now()+20000;adapter.halt('LOCAL_RUN_COMPLETE');event('VERIFYING_EXPLICIT_ENGINE_STOP');}
       else {
         // Observe the actual update rate after a speed change; simulation speed
         // is not assumed to multiply callback frequency. Allow telemetry lag.

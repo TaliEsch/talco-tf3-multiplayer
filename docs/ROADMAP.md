@@ -1,6 +1,21 @@
 # TalCo TF3 multiplayer — current delivery plan
 
-## Current Stage 6 checkpoint — 23 September 2026
+## Current Stage 6 state — 23 September 2026
+
+The installed `TransportFever3.exe` now hashes to
+`cbd8092757e539a42f56c51e00eeb7671d967a9072838d7a5f47d2de88348716`
+(UI build 40392). The previous native Stop qualification below belongs to
+`297ef05b740de1a3c4b375fd53ca69f371347a4b1546a37525f04aab6bc8e6e6`
+(UI build 40390). During the latest one-game attempt the native pipe was absent
+after this build change; no Stop was clicked, ordered or replayed. The loader
+was unstaged, TF3 exited without saving, and the disposable save retained SHA-256
+`ccbf4beb740e53323e06d20890fd029c8e174d3e85efb06801a8b4275c762fb5`.
+Requalify the current executable's native sites before another Stop trial.
+The one-game cancelled Stop → host order → held execution → observed vehicle
+postcondition remains the immediate Stage 6 integration target. Then verify
+the two-instance synchronized baseline and action. Stage 6 remains open.
+
+## Previous-build Stage 6 checkpoint — 23 September 2026
 
 The replacement TF3 executable (SHA-256
 `297ef05b740de1a3c4b375fd53ca69f371347a4b1546a37525f04aab6bc8e6e6`)

@@ -7,10 +7,11 @@ import {createLocalCoordinatorRun} from '../src/local-coordinator-run.mjs';
 import {parseFlatDataFile} from '../src/userdata-ipc.mjs';
 const lua=p=>`function data() return {${Object.entries(p).map(([k,v])=>`${k}=${JSON.stringify(v)},`).join('')}} end`;
 
-for(const scenario of ['success','unknown_action','report_failure'])test(`local driver traverses actual adapter/files: ${scenario}`,async()=>{
+for(const scenario of ['success','unknown_action','report_failure','cancelled_stop','cancel_rejected'])test(`local driver traverses actual adapter/files: ${scenario}`,async()=>{
   const failAction=scenario==='unknown_action',failReport=scenario==='report_failure';
+  const cancelRun=['cancelled_stop','cancel_rejected'].includes(scenario);
   const root=await mkdtemp(path.join(os.tmpdir(),'tf3mp-local-driver-')),directory=path.join(root,'tf3mp_status_1');await mkdir(directory);
-  let run,locked=false,time=0,leasePhase='active';const saved=[],seen=new Set(),actions=[],events=[];
+  let run,locked=false,time=0,leasePhase='active',cancelCalls=0;const saved=[],seen=new Set(),actions=[],events=[];
   const sample={counter:1,updateCount:100,speedup:1};
   const bridge={nonce:'a'.repeat(32),get engineObservation(){return {available:true,sample};},
     get coordinationLeaseState(){return leasePhase;},get coordinationControlsLocked(){return locked;},
@@ -18,7 +19,16 @@ for(const scenario of ['success','unknown_action','report_failure'])test(`local 
     async startCoordinationLease(){return {get phase(){return leasePhase;},get active(){return leasePhase==='active';},stop(){leasePhase='closed';}};}};
   try {
     run=await createLocalCoordinatorRun({directory,bridge,playerId:'a',companies:new Map([['a',7],['b',9]]),vehicleEntity:42,now:()=>time,
-      logger:e=>events.push(e),saveReport:async r=>{if(failReport&&r.phase==='passed')throw new Error('disk full');saved.push(r);}});
+      logger:e=>events.push(e),saveReport:async r=>{if(failReport&&r.phase==='passed')throw new Error('disk full');saved.push(r);},
+      commandLimit:cancelRun?1:4,beforeFirstCommand:cancelRun?async ({entity,company,recordCancellationEvidence})=>{
+        cancelCalls++;assert.equal(entity,42);assert.equal(company,7);
+        recordCancellationEvidence({event:'local_cancel_stop_owner_prestate',issuedUpdate:100,
+          receiptUpdate:100,paused:false,stopFlag:0});
+        recordCancellationEvidence({event:'local_cancel_stop_armed',entity,company,
+          expectedInvocation:'1',ttlMs:5000});
+        if(scenario==='cancel_rejected')throw new Error('NATIVE_CANCEL_REJECTED');
+        recordCancellationEvidence({event:'local_cancel_stop_confirmed',entity,company,invocation:'1'});
+      }:null});
     for(let i=0;i<350&&run.phase!=='passed'&&!(run.phase==='failed'&&run.report.haltState==='confirmed');i++) {
       time+=50;await run.poll();
       await new Promise(r=>setTimeout(r,3));
@@ -46,14 +56,22 @@ for(const scenario of ['success','unknown_action','report_failure'])test(`local 
       await writeFile(pending,lua(receipt));
       await rename(pending,path.join(directory,'coordination_receipt.lua'));
     }
-    assert.equal(run.phase,failAction||failReport?'failed':'passed',JSON.stringify(run.report.events));
-    assert.deepEqual(actions,failAction?[1]:[1,2,3,4],JSON.stringify(run.report));
+    assert.equal(run.phase,failAction||failReport||scenario==='cancel_rejected'?'failed':'passed',JSON.stringify(run.report.events));
+    assert.deepEqual(actions,scenario==='cancel_rejected'?[]:failAction||cancelRun?[1]:[1,2,3,4],JSON.stringify(run.report));
+    assert.equal(cancelCalls,cancelRun?1:0);
     assert.equal(run.report.realEngineCount,1);assert.equal(run.report.simulatedParticipantCount,1);
     assert.equal(run.report.multiGameVerified,false);assert.ok(saved.length>0);
     assert.equal(run.report.haltState,'confirmed');
-    assert.equal(events.some(e=>e.code==='LOCAL_RUN_PASSED_GAME_HELD'),!failAction&&!failReport);
+    assert.equal(events.some(e=>e.code==='LOCAL_RUN_PASSED_GAME_HELD'),!failAction&&!failReport&&scenario!=='cancel_rejected');
     if(failAction)assert.equal(run.report.outcome,'ENGINE_OUTCOME_UNKNOWN');
     if(failReport)assert.equal(run.report.outcome,'report_write_failed');
+    if(scenario==='cancel_rejected')assert.equal(run.report.outcome,'NATIVE_CANCEL_REJECTED');
+    if(cancelRun){
+      assert.ok(run.report.events.some(e=>e.code==='OWNER_PRESTATE_RECEIPT'&&e.stopFlag===0));
+      assert.ok(run.report.events.some(e=>e.code==='NATIVE_STOP_ARMED'&&e.ttlMs===5000));
+      assert.equal(run.report.events.some(e=>e.code==='NATIVE_STOP_CONFIRMED'),scenario==='cancelled_stop');
+    }
+    if(run.phase==='failed')assert.ok(run.report.failureContext);
     for(const check of run.report.checks){
       assert.equal(check.updateError,0);
       assert.equal(check.scheduledUpdate,check.proposedUpdate+60);

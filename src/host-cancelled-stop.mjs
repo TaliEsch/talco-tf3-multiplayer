@@ -22,9 +22,12 @@ export function confirmCancelledStop({arm,state,baseline,action,entity}) {
     ||action.latestPostSendBodyInvocation!==arm.expectedInvocation
     ||action.latestPostSendBodyThread!==action.latestCorrelatedAdmissionThread)
     throw new Error('NATIVE_STOP_ACTION_NOT_CORRELATED');
-  for(const name of ['callbackHits','sendReturnHits','marshalerReturnHits','postSendBodyCorrelatedHits'])
+  for(const name of ['factoryHits','admissionHits','correlatedHits','callbackHits',
+    'sendReturnHits','marshalerReturnHits','postSendBodyCorrelatedHits'])
     if(counter(action[name])!==counter(baseline[name])+1n)
       throw new Error('NATIVE_STOP_ACTION_NOT_EXACTLY_ONCE');
+  if(counter(action.droppedCandidates)!==counter(baseline.droppedCandidates))
+    throw new Error('NATIVE_STOP_ACTION_NOT_EXACTLY_ONCE');
   return Object.freeze({entity,invocation:arm.expectedInvocation});
 }
 

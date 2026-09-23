@@ -99,7 +99,7 @@ export async function createAsyncEngineMailbox({directory,nonce=randomBytes(16).
   directory=await requirePlainDirectory(directory);
   const lockPath=path.join(directory,"coordination.lock"), requestPath=path.join(directory,"coordination_request.lua");
   const lock=await open(lockPath,"wx",0o600);
-  let tail=Promise.resolve(), closed=false, halting=false;
+  let tail=Promise.resolve(), closed=false, halting=false, expectedExecution=null;
   async function regularOrAbsent(filename) {
     try { const s=await lstat(filename); if (!s.isFile() || s.isSymbolicLink() || s.nlink !== 1) throw new Error("unsafe mailbox file"); }
     catch(e) { if (e.code !== "ENOENT") throw e; }
@@ -112,6 +112,12 @@ export async function createAsyncEngineMailbox({directory,nonce=randomBytes(16).
       let source;
       try { source=encodeAsyncEngineRequest(request,nonce); } catch(e) { return Promise.reject(e); }
       if (halting) return Promise.reject(new Error("mailbox halted; create a new verified session"));
+      if(request.operation==='executeHeld')expectedExecution=Object.freeze({
+        roundId:request.roundId,operationId:request.operationId,
+        hostSequence:request.command.hostSequence,scheduledUpdate:request.command.scheduledUpdate,
+        entity:request.command.targetEntity,company:request.command.targetCompanyEntity,
+        stopped:request.command.payload.running===false,
+      });
       const halt = request.operation === "halt";
       if (halt) halting=true; // Latch before any queued publication can run.
       let publicationStage = 'queued';
@@ -177,7 +183,16 @@ export async function createAsyncEngineMailbox({directory,nonce=randomBytes(16).
         p={...p,status:'unknown'}; // Never accept an expected-hash echo from the real adapter.
       }
       if(p.operation==='executeHeld'&&p.status==='ok') {
-        try {p=decodeExecutionReceipt(p).receipt;} catch {p={...p,status:'unknown'};}
+        try {
+          const decoded=decodeExecutionReceipt(p),expected=expectedExecution;
+          if(!expected||p.roundId!==expected.roundId||p.operationId!==expected.operationId
+            ||p.hostSequence!==expected.hostSequence||p.updateCount!==expected.scheduledUpdate
+            ||decoded.state.vehicle.entity!==expected.entity
+            ||decoded.state.vehicle.ownerCompanyEntity!==expected.company
+            ||decoded.state.vehicle.stopped!==expected.stopped)
+            throw new Error('EXECUTION_POSTCONDITION_MISMATCH');
+          p=decoded.receipt;
+        } catch {p={...p,status:'unknown'};}
       }
       delete p.nonce; return participant.receiveEngine(p);
     },

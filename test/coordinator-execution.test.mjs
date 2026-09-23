@@ -39,6 +39,13 @@ test('mailbox translates raw execution evidence and fails closed on digest-only 
       return mailbox.poll({receiveEngine:r=>{observed=r;return true;}});
     };
     await poll(p);
+    assert.equal(observed.status,'unknown');
+    await mailbox.publish({schemaVersion:1,roundId:p.roundId,operationId:p.operationId,
+      operation:'executeHeld',command:{protocolVersion:2,hostSequence:1,scheduledUpdate:100,
+        originPlayerId:'host',targetCompanyEntity:7,targetEntity:42,
+        commandType:'vehicle.setRunning',payload:{running:false},clientSequence:0,
+        requestMessageId:'request:1'}});
+    await poll(p);
     assert.equal(observed.stateHash,decodeExecutionReceipt(p).receipt.stateHash);
     assert.equal(observed.nonce,undefined);
     assert.equal(observed.balance,undefined);
@@ -46,5 +53,10 @@ test('mailbox translates raw execution evidence and fails closed on digest-only 
     assert.equal(observed.status,'unknown');
     await poll({...p,held:false});
     assert.equal(observed.status,'unknown');
+    for(const change of [{entity:43},{ownerCompanyEntity:8},{stopFlag:0},
+      {updateCount:101},{hostSequence:2},{operationId:'other'}]){
+      await poll({...p,...change});
+      assert.equal(observed.status,'unknown');
+    }
   } finally {await mailbox?.close();await rm(root,{recursive:true,force:true});}
 });

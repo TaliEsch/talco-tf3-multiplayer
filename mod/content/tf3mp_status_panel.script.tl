@@ -1734,6 +1734,11 @@ local function exchangeTelemetry(tickCount : integer, updateCount : integer) : s
     pcall(exchangePreparation)
     pcall(exchangeExecution)
     pcall(exchangeCoordinationHalt)
+    -- The coordinator inspects ownership before arming a native Stop and
+    -- again after its receipt. Keep this read-only exchange alive in the
+    -- terminal watchdog mode that owns those command phases.
+    local discoveryOk = pcall(exchangeVehicleDiscovery)
+    if not discoveryOk then return "vehicle discovery error / see launcher" end
     local watchdogOk = pcall(exchangeWatchdog)
     if missedAcks > 10 then return watchdogOk and "helper disconnected / observing engine stop" or "helper disconnected / stop evidence unavailable" end
     if lastAck < 0 then return "bridge connecting" end

@@ -1,6 +1,24 @@
 # Completion audit against the build prompt
 
-## Current-build one-use Stop cancellation — 23 September 2026
+## Latest Stage 6 attempt — 23 September 2026
+
+**Single-game result:** an earlier run on executable hash `297ef05b...` reached
+the native cancellation arm, but its five-second window expired without a Stop
+click. Another run recorded a read-only vehicle-owner receipt ahead of the GUI
+observation; the bridge now waits within its existing deadline for the GUI clock
+to catch up. A subsequent trial started against that qualified hash, but the
+installed executable changed to
+`cbd8092757e539a42f56c51e00eeb7671d967a9072838d7a5f47d2de88348716`
+before host startup. Its native IPC pipe was absent. No Stop click, host order,
+held replay or changed vehicle postcondition was observed in these attempts.
+The hash-matched loader was removed, and the disposable save was unchanged.
+The launcher now rechecks the executable before host startup. Focused tests for
+the local cancellation and coordinator path passed 20/20, and the mod review
+passed. The full suite was attempted but did not complete; its native fixtures
+reported failures and a later test stalled, so there is no full-suite pass to
+claim. The two-instance path remains untested. **Stage 6:** open.
+
+## Previous-build one-use Stop cancellation — 23 September 2026
 
 **Single-game verified:** the exact-build native runtime was requalified for
 TF3 executable SHA-256

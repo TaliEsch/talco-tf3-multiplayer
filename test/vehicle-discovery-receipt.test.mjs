@@ -91,3 +91,28 @@ test('running owner inspection accepts a bounded advancing update',async()=>{
       {issuedUpdate:50,updateCount:52,paused:false});
   }finally{await bridge.close();await rm(root,{recursive:true,force:true});}
 });
+
+test('running owner inspection waits for GUI observation behind engine receipt',async()=>{
+  const root=await mkdtemp(path.join(os.tmpdir(),'tf3mp-owner-catchup-'));
+  const directory=path.join(root,'tf3mp_status_1');
+  const bridge=await startGameBridge({directory,intervalMs:5});
+  try{
+    const publishClock=async(counter,updateCount)=>{
+      await writeFile(path.join(directory,'telemetry.lua'),lua({schemaVersion:1,kind:'telemetry',nonce:bridge.nonce,
+        counter,tickCount:100+counter,updateCount}));
+      await writeFile(path.join(directory,'engine_observation.lua'),lua({schemaVersion:1,kind:'engine_observation',nonce:bridge.nonce,
+        counter,tickCount:100+counter,updateCount,speedup:1,companyEntity:7,balance:0,balanceKnown:1,balanceNegative:0}));
+      await until(()=>bridge.engineObservation.available&&bridge.engineObservation.sample.updateCount===updateCount);
+    };
+    await publishClock(1,50);
+    const pending=bridge.inspectVehicleOwner({entity:42,company:7,timeoutMs:1000});
+    await until(async()=>{try{return (await readFile(path.join(directory,'vehicle_discovery_request.lua'),'utf8')).includes('entity = 42');}catch{return false;}});
+    const request=parseFlatDataFile(await readFile(path.join(directory,'vehicle_discovery_request.lua'),'utf8'));
+    await writeFile(path.join(directory,'vehicle_discovery_receipt.lua'),lua(receipt({nonce:bridge.nonce,
+      requestId:request.requestId,company:7,entity:42,updateCount:52,tickCount:102})));
+    await new Promise(resolve=>setTimeout(resolve,120));
+    await publishClock(2,53);
+    const proof=await pending;
+    assert.equal(proof.updateCount,52);
+  }finally{await bridge.close();await rm(root,{recursive:true,force:true});}
+});

@@ -606,7 +606,9 @@ export async function startGameBridge({ directory, logger = () => {}, intervalMs
         const start=pending.then(async()=>{
           const observation=observations.status;
           if(stopped||!connected||!observation.available)throw new Error('FRESH_BRIDGE_OBSERVATION_REQUIRED');
-          if(vehicleTest||companyTestUsed||haltTest||pauseTest||probe)
+          // Coordination uses the terminal lease, while this request only
+          // reads ownership and state after the held checkpoint is released.
+          if(vehicleTest||companyTestUsed||(haltTest&&!coordinationLease?.active)||pauseTest||probe)
             throw new Error('VEHICLE_DISCOVERY_BUSY');
           const update=observation.sample.updateCount;
           const tick=observation.sample.tickCount;
@@ -634,6 +636,13 @@ export async function startGameBridge({ directory, logger = () => {}, intervalMs
             if(receipt.outcome!=='found'||receipt.entity!==entity)
               throw new Error('VEHICLE_OWNER_NOT_CONFIRMED');
             const latest=observations.status;
+            // The engine can publish this receipt before the GUI's next
+            // observation sample. Wait for the read-only clock to catch up;
+            // the existing deadline and lag bound still reject stale proof.
+            if(!context.paused&&latest.available&&latest.sample.updateCount<receipt.updateCount){
+              await delay(100);
+              continue;
+            }
             if(stopped||!connected||!latest.available
               ||(latest.sample.speedup===0)!==context.paused
               ||!ownerProofClockCurrent({issuedUpdate:context.update,
