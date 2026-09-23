@@ -93,6 +93,18 @@ struct PassiveVehicleActionObservation {
   bool latest_marshaler_valid;
   bool latest_marshaler_matches_admission_storage;
   bool latest_marshaler_matches_callback_storage;
+  // Continuation after the common send body has returned normally and run
+  // its local cleanup. This remains passive evidence, not Lua/UI success.
+  std::uint64_t post_send_body_hits;
+  std::uint32_t post_send_body_thread;
+  std::uint64_t post_send_body_correlated_hits;
+  std::uint64_t latest_correlated_admission_invocation;
+  std::uint64_t latest_send_return_invocation;
+  std::uint64_t latest_post_send_body_invocation;
+  std::int32_t latest_post_send_body_entity;
+  std::uint8_t latest_post_send_body_stopped;
+  bool latest_post_send_body_valid;
+  std::uint32_t latest_post_send_body_thread;
 };
 using PassiveVehicleActionObservationProvider =
   PassiveVehicleActionObservation (*)() noexcept;

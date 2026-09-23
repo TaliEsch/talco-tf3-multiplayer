@@ -52,6 +52,20 @@ struct Snapshot {
     bool latest_marshaler_valid;
     bool latest_marshaler_matches_admission_storage;
     bool latest_marshaler_matches_callback_storage;
+    // Reached only after e17833's send-body CALL returns normally to e17838.
+    std::uint64_t post_send_body_hits;
+    std::uint32_t post_send_body_thread;
+    // Correlated cleanup receipts are separate from the hot, generic site.
+    // Latest tuple publication is bounded/best-effort under contention: require
+    // valid and matching admission/send-return tokens, never count alone.
+    std::uint64_t post_send_body_correlated_hits;
+    std::uint64_t latest_correlated_admission_invocation;
+    std::uint64_t latest_send_return_invocation;
+    std::uint64_t latest_post_send_body_invocation;
+    std::int32_t latest_post_send_body_entity;
+    std::uint8_t latest_post_send_body_stopped;
+    bool latest_post_send_body_valid;
+    std::uint32_t latest_post_send_body_thread;
 };
 
 // Exact-build, passive observation only. No engine pointer escapes this API.
@@ -63,7 +77,8 @@ Snapshot Read() noexcept;
 #ifdef TF3_VEHICLE_OBSERVER_OWNED_TEST
 Status StartOwnedFixture(void* factory_site, void* factory_post_site,
                          void* admission_site, void* callback_tail_site,
-                         void* send_return_site, void* marshaler_return_site) noexcept;
+                         void* send_return_site, void* marshaler_return_site,
+                         void* post_send_body_site) noexcept;
 LONG DispatchOwnedException(EXCEPTION_POINTERS* pointers) noexcept;
 #endif
 

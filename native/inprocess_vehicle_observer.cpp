@@ -18,6 +18,7 @@ constexpr DWORD kCallbackTailRva = 0xe3a504;
 constexpr DWORD kCallbackContinuationRva = 0xe260d0;
 constexpr DWORD kSendReturnRva = 0xe26a32;
 constexpr DWORD kMarshalerReturnRva = 0xe0d707;
+constexpr DWORD kPostSendBodyRva = 0xe17838;
 constexpr DWORD kCallbackVtableRva = 0x373a730;
 constexpr DWORD kCallbackInvokeRva = 0xe3a500;
 constexpr std::array<unsigned char, 3> kFactoryBytes{0x41, 0x8b, 0xd8}; // mov ebx,r8d
@@ -27,6 +28,7 @@ constexpr std::array<unsigned char, 5> kCallbackTailBytes{0xe9, 0xc7, 0xbb, 0xfe
 constexpr std::array<unsigned char, 1> kNormalReturnBytes{0x90};
 constexpr std::array<unsigned char, 9> kSendReturnWindow{0x90, 0x48, 0x8b, 0xcb, 0xe8, 0x15, 0x8d, 0xba, 0xff};
 constexpr std::array<unsigned char, 9> kMarshalerReturnWindow{0x90, 0x48, 0x8b, 0x94, 0x24, 0xb0, 0x00, 0x00, 0x00};
+constexpr std::array<unsigned char, 6> kPostSendBodyWindow{0xe8, 0x38, 0xf0, 0x00, 0x00, 0x90};
 constexpr std::uintptr_t kMaximumUserPointer = 0x00007fffffffffffULL;
 static_assert(std::atomic<std::uint64_t>::is_always_lock_free);
 static_assert(std::atomic<std::uint32_t>::is_always_lock_free);
@@ -42,7 +44,7 @@ struct SiteState {
 };
 
 SRWLOCK lifecycle_lock = SRWLOCK_INIT;
-std::array<SiteState, 6> sites{};
+std::array<SiteState, 7> sites{};
 PVOID handler = nullptr;
 bool attempted = false;
 std::atomic<bool> active{false};
@@ -105,13 +107,27 @@ std::atomic<std::uint32_t> send_return_thread{0};
 std::atomic<bool> latest_send_return_matches_admission_storage{false};
 std::atomic<std::uint64_t> marshaler_return_hits{0};
 std::atomic<std::uint32_t> marshaler_return_thread{0};
+std::atomic<std::uint64_t> post_send_body_hits{0};
+std::atomic<std::uint32_t> post_send_body_thread{0};
+std::atomic<std::uint64_t> post_send_body_correlated_hits{0};
+std::atomic<std::uint64_t> latest_correlated_admission_invocation{0};
+std::atomic<std::uint64_t> latest_send_return_invocation{0};
+// A bounded seqlock publishes the whole pointer-free completion receipt.
+// Under writer contention the count still records the matched completion,
+// while this best-effort latest tuple remains the last completely published
+// receipt. Its token must match the requested invocation before qualification.
+std::atomic<std::uint64_t> post_receipt_version{0}, post_receipt_token{0}, post_receipt_payload{0};
+std::atomic<std::uint32_t> post_receipt_thread{0};
 // Same packed fields as latest_callback, plus bit 43 for callback storage match.
 std::atomic<std::uint64_t> latest_marshaler{0};
 struct SendInvocation {
-    // 0 free, 1 writer/consumer, 2 published. Never retains an owned object.
+    // 0 free, 1 writer/consumer, 2 admission, 4 send returned / awaiting cleanup.
+    // Retained addresses are comparison-only after admission, never owners.
     std::atomic<std::uint32_t> state{0};
     std::atomic<std::uint32_t> thread{0};
     std::atomic<std::uintptr_t> stack{0}, entry{0}, storage{0};
+    std::atomic<std::uintptr_t> caller_stack{0};
+    std::atomic<std::uint64_t> token{0}, payload{0};
 };
 std::array<SendInvocation, kPendingSlotCount> send_invocations{};
 
@@ -231,11 +247,19 @@ void RecordCallback(const CONTEXT* context) noexcept {
 
 void InvalidateSendFrame(const CONTEXT* context, DWORD thread) noexcept {
     for (auto& slot : send_invocations) {
-        if (slot.state.load(std::memory_order_acquire) != 2 ||
+        auto ready = slot.state.load(std::memory_order_acquire);
+        if ((ready != 2 && ready != 4) ||
             slot.thread.load(std::memory_order_relaxed) != thread ||
             slot.stack.load(std::memory_order_relaxed) != context->Rsp) continue;
-        std::uint32_t ready = 2;
+        const auto prior = ready;
+        const auto token = slot.token.load(std::memory_order_relaxed);
         if (slot.state.compare_exchange_strong(ready, 1, std::memory_order_acq_rel)) {
+            if (slot.thread.load(std::memory_order_relaxed) != thread ||
+                slot.stack.load(std::memory_order_relaxed) != context->Rsp ||
+                slot.token.load(std::memory_order_relaxed) != token) {
+                slot.state.store(prior, std::memory_order_release);
+                continue;
+            }
             // An exception may have bypassed the old normal continuation.
             slot.state.store(0, std::memory_order_release);
             IncrementSaturating(dropped_candidates);
@@ -243,7 +267,21 @@ void InvalidateSendFrame(const CONTEXT* context, DWORD thread) noexcept {
     }
 }
 
-void RecordSendInvocation(const CONTEXT* context, DWORD thread, std::uintptr_t storage) noexcept {
+std::uintptr_t SafeReadCallerStack(const CONTEXT* context) noexcept {
+    // e26870 pushes 7 qwords and subtracts 140h: entry RSP=S+178h;
+    // RET restores the e177d0 caller RSP to S+180h. Only this direct caller
+    // has the observed cleanup continuation. Read its live return slot now.
+    const auto stack = static_cast<std::uintptr_t>(context->Rsp);
+    if (stack < 0x10000 || stack > kMaximumUserPointer - 0x180) return 0;
+    __try {
+        return *reinterpret_cast<const std::uintptr_t*>(stack + 0x178) ==
+            sites[6].address.load(std::memory_order_acquire) ? stack + 0x180 : 0;
+    } __except (EXCEPTION_EXECUTE_HANDLER) { return 0; }
+}
+
+void RecordSendInvocation(const CONTEXT* context, DWORD thread, std::uintptr_t storage,
+                          std::uint64_t token, std::int32_t entity, std::uint8_t stopped) noexcept {
+    const auto caller_stack = SafeReadCallerStack(context);
     for (auto& slot : send_invocations) {
         std::uint32_t free = 0;
         if (!slot.state.compare_exchange_strong(free, 1, std::memory_order_acq_rel)) continue;
@@ -251,6 +289,10 @@ void RecordSendInvocation(const CONTEXT* context, DWORD thread, std::uintptr_t s
         slot.stack.store(context->Rsp, std::memory_order_relaxed);
         slot.entry.store(context->Rbx, std::memory_order_relaxed);
         slot.storage.store(storage, std::memory_order_relaxed);
+        slot.caller_stack.store(caller_stack, std::memory_order_relaxed);
+        slot.token.store(token, std::memory_order_relaxed);
+        slot.payload.store(static_cast<std::uint32_t>(entity) |
+            (static_cast<std::uint64_t>(stopped) << 32), std::memory_order_relaxed);
         slot.state.store(2, std::memory_order_release);
         return;
     }
@@ -266,14 +308,24 @@ void RecordSendReturn(const CONTEXT* context) noexcept {
             slot.stack.load(std::memory_order_relaxed) != context->Rsp ||
             slot.entry.load(std::memory_order_relaxed) != context->Rbx) continue;
         std::uint32_t ready = 2;
+        const auto token = slot.token.load(std::memory_order_relaxed);
         if (!slot.state.compare_exchange_strong(ready, 1, std::memory_order_acq_rel)) continue;
+        if (slot.thread.load(std::memory_order_relaxed) != thread ||
+            slot.stack.load(std::memory_order_relaxed) != context->Rsp ||
+            slot.entry.load(std::memory_order_relaxed) != context->Rbx ||
+            slot.token.load(std::memory_order_relaxed) != token) {
+            slot.state.store(2, std::memory_order_release);
+            continue;
+        }
         // RBX is the caller-owned entry, possibly moved-from by the adapter.
         // Use identity captured at admission; never read freed/moved storage.
         const auto storage = slot.storage.load(std::memory_order_relaxed);
-        slot.state.store(0, std::memory_order_release);
+        slot.state.store(slot.caller_stack.load(std::memory_order_relaxed) ? 4 : 0,
+                         std::memory_order_release);
         ObserveThread(thread);
         send_return_thread.store(thread, std::memory_order_release);
         latest_send_return_matches_admission_storage.store(MatchesLatestAdmission(storage), std::memory_order_release);
+        latest_send_return_invocation.store(token, std::memory_order_release);
         IncrementSaturating(send_return_hits);
         return;
     }
@@ -305,6 +357,49 @@ void RecordMarshalerReturn(const CONTEXT* context) noexcept {
         (static_cast<std::uint64_t>(MatchesIdentity(latest_callback_identity, storage)) << 43);
     latest_marshaler.store(packed, std::memory_order_release);
     IncrementSaturating(marshaler_return_hits);
+}
+
+void RecordPostSendBody(const CONTEXT* context) noexcept {
+    // e17838 is the NOP immediately following e17833 CALL e26870. Reaching
+    // it proves the whole send body, including its native cleanup, returned
+    // normally; no entry, callback, or progress pointer is retained here.
+    const DWORD thread = GetCurrentThreadId();
+    post_send_body_thread.store(thread, std::memory_order_release);
+    IncrementSaturating(post_send_body_hits);
+    for (auto& slot : send_invocations) {
+        if (slot.state.load(std::memory_order_acquire) != 4 ||
+            slot.thread.load(std::memory_order_relaxed) != thread ||
+            slot.caller_stack.load(std::memory_order_relaxed) != context->Rsp) continue;
+        const auto token = slot.token.load(std::memory_order_relaxed);
+        std::uint32_t ready = 4;
+        if (!slot.state.compare_exchange_strong(ready, 1, std::memory_order_acq_rel)) continue;
+        if (slot.thread.load(std::memory_order_relaxed) != thread ||
+            slot.caller_stack.load(std::memory_order_relaxed) != context->Rsp ||
+            slot.token.load(std::memory_order_relaxed) != token) {
+            slot.state.store(4, std::memory_order_release);
+            continue;
+        }
+        const auto payload = slot.payload.load(std::memory_order_relaxed);
+        slot.state.store(0, std::memory_order_release);
+        if (saturated.load(std::memory_order_acquire)) return;
+        ObserveThread(thread);
+        IncrementSaturating(post_send_body_correlated_hits);
+        auto version = post_receipt_version.load(std::memory_order_seq_cst);
+        for (unsigned attempt = 0; attempt != 4; ++attempt) {
+            if ((version & 1) == 0 && version <= (std::numeric_limits<std::uint64_t>::max)() - 2 &&
+                post_receipt_version.compare_exchange_strong(version, version + 1, std::memory_order_seq_cst)) {
+                post_receipt_token.store(token, std::memory_order_seq_cst);
+                post_receipt_payload.store(payload, std::memory_order_seq_cst);
+                post_receipt_thread.store(thread, std::memory_order_seq_cst);
+                post_receipt_version.store(version + 2, std::memory_order_seq_cst);
+                return;
+            }
+            version = post_receipt_version.load(std::memory_order_seq_cst);
+        }
+        // No borrowed state remains and a concurrent writer owns publication.
+        // Keep its coherent receipt; never wait inside an exception handler.
+        return;
+    }
 }
 
 bool SafeReadCallbackShape(const CONTEXT* context) noexcept {
@@ -533,7 +628,8 @@ void RecordAdmission(const CONTEXT* context) noexcept {
         latest_admission.state.store(2, std::memory_order_release);
     }
     latest_correlated_admission_thread.store(thread, std::memory_order_release);
-    RecordSendInvocation(context, thread, storage);
+    latest_correlated_admission_invocation.store(selected_sequence, std::memory_order_release);
+    RecordSendInvocation(context, thread, storage, selected_sequence, entity, stopped);
     IncrementSaturating(correlated_hits);
 }
 
@@ -549,6 +645,7 @@ LONG CALLBACK OnException(EXCEPTION_POINTERS* pointers) noexcept {
     const auto callback_tail = sites[3].address.load(std::memory_order_acquire);
     const auto send_return = sites[4].address.load(std::memory_order_acquire);
     const auto marshaler_return = sites[5].address.load(std::memory_order_acquire);
+    const auto post_send_body = sites[6].address.load(std::memory_order_acquire);
     if (address == factory && rip == factory) {
         // Preserve the replaced instruction exactly; MOV changes no flags.
         pointers->ContextRecord->Rbx = static_cast<std::uint32_t>(pointers->ContextRecord->R8);
@@ -575,14 +672,17 @@ LONG CALLBACK OnException(EXCEPTION_POINTERS* pointers) noexcept {
         return EXCEPTION_CONTINUE_EXECUTION;
     }
     if ((address == send_return && rip == send_return) ||
-        (address == marshaler_return && rip == marshaler_return)) {
-        // Both exact sites are a one-byte NOP after a normal CALL return,
-        // inside the primary function body, before native cleanup. Preserve
-        // every register/flag and keep emulating traps raised during Stop.
+        (address == marshaler_return && rip == marshaler_return) ||
+        (address == post_send_body && rip == post_send_body)) {
+        // Each exact site is a one-byte NOP after a normal CALL return. The
+        // send and marshaler sites are before their local native cleanup;
+        // e17838 is after e26870 has completed its cleanup. Preserve every
+        // register/flag and keep emulating traps raised during Stop.
         pointers->ContextRecord->Rip += kNormalReturnBytes.size();
         if (active.load(std::memory_order_acquire)) {
             if (address == send_return) RecordSendReturn(pointers->ContextRecord);
-            else RecordMarshalerReturn(pointers->ContextRecord);
+            else if (address == marshaler_return) RecordMarshalerReturn(pointers->ContextRecord);
+            else RecordPostSendBody(pointers->ContextRecord);
         }
         return EXCEPTION_CONTINUE_EXECUTION;
     }
@@ -677,7 +777,7 @@ Status ArmSite(SiteState& site, void* address, unsigned char expected) noexcept 
 }
 
 Status StartSites(void* factory, void* factory_post, void* admission, void* callback_tail,
-                  void* send_return, void* marshaler_return,
+                  void* send_return, void* marshaler_return, void* post_send_body,
                   HMODULE allocation_base, std::uintptr_t continuation, bool owned_callback_tail) noexcept {
     if (active.load()) return Status::already_started;
     if (attempted) return Status::restart_disallowed;
@@ -689,6 +789,8 @@ Status StartSites(void* factory, void* factory_post, void* admission, void* call
             ValidSite(send_return, kSendReturnWindow, allocation_base)) ||
         !(owned_callback_tail ? ValidSite(marshaler_return, kNormalReturnBytes, allocation_base) :
             ValidSite(marshaler_return, kMarshalerReturnWindow, allocation_base)) ||
+        !(owned_callback_tail ? ValidSite(post_send_body, kNormalReturnBytes, allocation_base) :
+            ValidSite(static_cast<unsigned char*>(post_send_body) - 5, kPostSendBodyWindow, allocation_base)) ||
         !(owned_callback_tail ? ValidOwnedCallbackTail(callback_tail, allocation_base) :
             ValidSite(callback_tail, kCallbackTailBytes, allocation_base))) return Status::invalid_site;
     image_base.store(reinterpret_cast<std::uintptr_t>(allocation_base), std::memory_order_release);
@@ -728,7 +830,8 @@ Status StartSites(void* factory, void* factory_post, void* admission, void* call
             third != Status::stopped ? third : fourth != Status::stopped ? fourth : result;
     }
     for (std::size_t index = 4; index != sites.size(); ++index) {
-        result = ArmSite(sites[index], index == 4 ? send_return : marshaler_return, kNormalReturnBytes[0]);
+        void* site = index == 4 ? send_return : index == 5 ? marshaler_return : post_send_body;
+        result = ArmSite(sites[index], site, kNormalReturnBytes[0]);
         if (result != Status::started) {
             for (std::size_t restore = index + 1; restore != 0; --restore) {
                 const auto restored = RestoreSite(sites[restore - 1]);
@@ -753,6 +856,7 @@ Status Start() noexcept {
         result = StartSites(base + kFactoryRva, base + kFactoryPostRva,
                             base + kAdmissionRva, base + kCallbackTailRva,
                             base + kSendReturnRva, base + kMarshalerReturnRva,
+                            base + kPostSendBodyRva,
                             GetModuleHandleW(nullptr), reinterpret_cast<std::uintptr_t>(base) + kCallbackContinuationRva, false);
     }
     ReleaseSRWLockExclusive(&lifecycle_lock);
@@ -775,6 +879,21 @@ Snapshot Read() noexcept {
     const auto packed = latest_action.load(std::memory_order_acquire);
     const auto callback = latest_callback.load(std::memory_order_acquire);
     const auto marshaler = latest_marshaler.load(std::memory_order_acquire);
+    std::uint64_t post_token = 0, post_payload = 0;
+    std::uint32_t post_thread = 0;
+    bool post_valid = false;
+    for (unsigned attempt = 0; attempt != 4; ++attempt) {
+        const auto version = post_receipt_version.load(std::memory_order_seq_cst);
+        if (version == 0 || (version & 1)) continue;
+        post_token = post_receipt_token.load(std::memory_order_seq_cst);
+        post_payload = post_receipt_payload.load(std::memory_order_seq_cst);
+        post_thread = post_receipt_thread.load(std::memory_order_seq_cst);
+        if (post_receipt_version.load(std::memory_order_seq_cst) == version) {
+            post_valid = !saturated.load(std::memory_order_acquire);
+            break;
+        }
+    }
+    if (!post_valid) { post_token = 0; post_payload = 0; post_thread = 0; }
     return {factory_hits.load(std::memory_order_acquire),
             admission_hits.load(std::memory_order_acquire),
             correlated_hits.load(std::memory_order_acquire),
@@ -799,12 +918,19 @@ Snapshot Read() noexcept {
             static_cast<std::uint8_t>((marshaler >> 32) & 1),
             static_cast<std::uint8_t>((marshaler >> 33) & 0xff),
             ((marshaler >> 41) & 1) != 0, ((marshaler >> 42) & 1) != 0,
-            ((marshaler >> 43) & 1) != 0};
+            ((marshaler >> 43) & 1) != 0,
+            post_send_body_hits.load(std::memory_order_acquire),
+            post_send_body_thread.load(std::memory_order_acquire),
+            post_send_body_correlated_hits.load(std::memory_order_acquire),
+            latest_correlated_admission_invocation.load(std::memory_order_acquire),
+            latest_send_return_invocation.load(std::memory_order_acquire), post_token,
+            static_cast<std::int32_t>(post_payload & 0xffffffffULL),
+            static_cast<std::uint8_t>((post_payload >> 32) & 1), post_valid, post_thread};
 }
 
 #ifdef TF3_VEHICLE_OBSERVER_OWNED_TEST
 Status StartOwnedFixture(void* factory, void* factory_post, void* admission, void* callback_tail,
-                         void* send_return, void* marshaler_return) noexcept {
+                         void* send_return, void* marshaler_return, void* post_send_body) noexcept {
     AcquireSRWLockExclusive(&lifecycle_lock);
     HMODULE base = nullptr;
     MEMORY_BASIC_INFORMATION memory{};
@@ -814,7 +940,7 @@ Status StartOwnedFixture(void* factory, void* factory_post, void* admission, voi
     std::memcpy(&displacement, static_cast<unsigned char*>(callback_tail) + 1, sizeof(displacement));
     const auto continuation = reinterpret_cast<std::uintptr_t>(callback_tail) + kCallbackTailBytes.size() + displacement;
     const auto result = StartSites(factory, factory_post, admission, callback_tail, send_return,
-                                   marshaler_return, base, continuation, true);
+                                   marshaler_return, post_send_body, base, continuation, true);
     ReleaseSRWLockExclusive(&lifecycle_lock);
     return result;
 }

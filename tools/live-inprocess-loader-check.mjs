@@ -187,7 +187,8 @@ try{
     // storage; the checker never invokes or replays that callback.
     while((BigInt(current.callbackHits)<=BigInt(baseline.callbackHits)||
         observeVehicleCompletion&&(BigInt(current.sendReturnHits)<=BigInt(baseline.sendReturnHits)||
-          BigInt(current.marshalerReturnHits)<=BigInt(baseline.marshalerReturnHits)))&&Date.now()<deadline){
+          BigInt(current.marshalerReturnHits)<=BigInt(baseline.marshalerReturnHits)||
+          BigInt(current.postSendBodyCorrelatedHits)<=BigInt(baseline.postSendBodyCorrelatedHits)))&&Date.now()<deadline){
       await new Promise(resolve=>setTimeout(resolve,LIVE_CONTROL_POLL_INTERVAL_MS));
       ping=await controlIds.issue(()=>client.control('ping'));
       current=client.passiveVehicleActionObservation(ping);
@@ -222,6 +223,20 @@ try{
         `PASSIVE_VEHICLE_SEND_RETURN_NOT_EXACTLY_ONCE:${actionCounters}`);
       assert.equal(BigInt(current.marshalerReturnHits),BigInt(baseline.marshalerReturnHits)+1n,
         `PASSIVE_VEHICLE_MARSHALER_RETURN_NOT_EXACTLY_ONCE:${actionCounters}`);
+      assert.equal(BigInt(current.postSendBodyCorrelatedHits),BigInt(baseline.postSendBodyCorrelatedHits)+1n,
+        `PASSIVE_VEHICLE_POST_SEND_BODY_NOT_CORRELATED_EXACTLY_ONCE:${actionCounters}`);
+      assert.equal(current.latestPostSendBodyValid,true,
+        `PASSIVE_VEHICLE_POST_SEND_BODY_RECEIPT_INVALID:${actionCounters}`);
+      assert.equal(current.latestPostSendBodyInvocation,current.latestCorrelatedAdmissionInvocation,
+        `PASSIVE_VEHICLE_POST_SEND_BODY_ADMISSION_MISMATCH:${actionCounters}`);
+      assert.equal(current.latestPostSendBodyInvocation,current.latestSendReturnInvocation,
+        `PASSIVE_VEHICLE_POST_SEND_BODY_SEND_RETURN_MISMATCH:${actionCounters}`);
+      assert.equal(current.latestPostSendBodyEntity,current.latestEntity,
+        `PASSIVE_VEHICLE_POST_SEND_BODY_ENTITY_MISMATCH:${actionCounters}`);
+      assert.equal(current.latestPostSendBodyStopped,current.latestStopped,
+        `PASSIVE_VEHICLE_POST_SEND_BODY_STOPPED_MISMATCH:${actionCounters}`);
+      assert.equal(current.latestPostSendBodyThread,current.latestCorrelatedAdmissionThread,
+        `PASSIVE_VEHICLE_POST_SEND_BODY_THREAD_MISMATCH:${actionCounters}`);
       assert.equal(current.latestSendReturnMatchesAdmissionStorage,true,
         `PASSIVE_VEHICLE_SEND_RETURN_STORAGE_MISMATCH:${actionCounters}`);
       assert.equal(current.latestMarshalerValid,true,
@@ -255,6 +270,15 @@ try{
         sendReturnMatchesAdmissionStorage:current.latestSendReturnMatchesAdmissionStorage,
         marshalerReturnHits:current.marshalerReturnHits,
         marshalerReturnThread:current.marshalerReturnThread,
+        postSendBodyHits:current.postSendBodyHits,
+        postSendBodyThread:current.postSendBodyThread,
+        postSendBodyBaselineHits:baseline.postSendBodyHits,
+        postSendBodyCorrelatedHits:current.postSendBodyCorrelatedHits,
+        postSendBodyCorrelatedBaselineHits:baseline.postSendBodyCorrelatedHits,
+        postSendBodyInvocation:current.latestPostSendBodyInvocation,
+        postSendBodyEntity:current.latestPostSendBodyEntity,
+        postSendBodyStopped:current.latestPostSendBodyStopped,
+        postSendBodyReceiptThread:current.latestPostSendBodyThread,
         marshalerEntity:current.latestMarshalerEntity,
         marshalerStopped:current.latestMarshalerStopped,
         marshalerResult:current.latestMarshalerResult,

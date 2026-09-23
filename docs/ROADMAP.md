@@ -1,5 +1,56 @@
 # TalCo TF3 multiplayer — current delivery plan
 
+## Correlated cleanup qualified once — 23 September 2026
+
+One fresh disposable-save Road Vehicle 1 Stop produced exactly one correlated
+post-send-body receipt tied to admission and send return by invocation token,
+thread and stack identity. The existing six receipts also remained one each;
+the UI reached Stopped, and the separate native gate held, released, re-held
+and detached. The generic send-body path fired thousands of times, so its raw
+count is diagnostic only. TF3 was closed without saving and the temporary
+loader removed. Owned correlation tests and focused IPC/client/checker tests
+passed. This is a single-game normal-path qualification; stage 6 still needs
+an exception-path assessment, bounded cancellation with UI recovery, host
+ordering and exactly-once application. Same-process world reload remains a
+separate lifecycle issue.
+
+## Seventh-site live finding — 23 September 2026
+
+The exact-build post-send-body NOP at `0xe17838` is reachable in TF3, but it
+is a busy generic scripting continuation. In one fresh disposable load, its
+raw count rose from 555 to 6,346 during the action window, while one stock
+Road Vehicle 1 Stop produced one each of the previously qualified six-site
+receipts and the UI displayed Stopped. The checker correctly rejected its
+new exactly-once assumption. The raw continuation count cannot prove that
+this vehicle invocation completed cleanup. The failed checker shut down the
+native runtime; TF3's Return to Desktop UI hung, so the exact verified test
+process was stopped without saving and the hash-matched loader removed.
+
+The next native increment is to bind the post-send-body continuation to the
+specific admitted invocation using its thread and caller stack identity, then
+repeat a fresh single-load trial. Keep cancellation disabled until the
+correlated cleanup receipt, exception path, UI recovery and one-use lifecycle
+are qualified. Stage 6 remains open.
+
+## Fresh six-site passive qualification — 23 September 2026
+
+One fresh-process, single-load disposable run observed exactly one stock Road
+Vehicle 1 Stop across all six native sites, including the new normal send and
+marshaler returns. The UI displayed Stopped; the separate gate held, released
+one boundary, re-held and detached; TF3 exited without saving. This is a
+single-game passive qualification, not stage 6. The TalCo bridge was inactive
+for that save, so no game-side clock correlation was claimed. The previous
+same-process reload failure remains unresolved at its lifecycle boundary;
+first-thread-only hit accounting is confirmed in code and owned tests, but
+the failed run did not record the two thread IDs needed to prove migration.
+
+After correlating cleanup, use the qualified normal-return evidence and
+independent ABI review to test one authenticated, expiring, atomically consumed
+cancellation for one exact reversible Stop. Require unchanged live userStopped,
+responsive UI and clean teardown before connecting the already guarded
+executeHeld route to host ordering. A safe same-process world reload requires
+an explicit quiescent epoch rebind; no owner reset has been added.
+
 ## Current stage-6 gate — 23 September 2026
 
 Still below **6/10**. Two normal-return observation sites are implemented and
@@ -15,8 +66,8 @@ failed run and exact safety cleanup.
 
 Integration builds passed. The final elevated full suite found **912 tests:
 906 passed, 5 failed, 1 skipped**; the five out-of-process native debugger
-teardown failures remain open. The full multiplayer goal is paused at the
-user's request, not complete.
+teardown failures remain open. The full multiplayer goal remains active and
+incomplete.
 
 ## Live callback and speed-qualified gate — 23 September 2026
 

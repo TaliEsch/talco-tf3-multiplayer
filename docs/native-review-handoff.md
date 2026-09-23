@@ -1,5 +1,84 @@
 # Native-integration review handoff — 23 September 2026
 
+## Invocation-correlated post-send receipt — 23 September 2026
+
+The observer now records a bounded per-invocation slot at admission with the
+thread, expected caller RSP (`S+0x180`) and a unique factory-sequence token.
+Normal send return advances that slot; `0xe17838` publishes a pointer-free
+receipt only when the same thread and caller RSP return. Every admission also
+invalidates a stale same-stack slot. Owned tests cover 512 concurrent
+completions, nesting, wrong-thread and generic hits, duplicate continuation,
+stale frame reuse, 17-slot overflow and teardown. Focused IPC/client/checker
+tests passed 31/31 and the native builds succeeded.
+
+In one fresh disposable TF3 process, the checker observed one stock Road
+Vehicle 1 Stop: factory/admission/correlated/callback/send-return/marshaler-
+return counts were each one. The correlated seventh-site receipt was also one,
+with admission/send-return/post-send invocation token 1, entity 102852,
+stopped 1 and thread 31916. The generic count advanced 579 to 4,700, showing
+why raw hits cannot serve as the receipt. The native gate held, released one
+boundary, re-held and detached; the checker exited zero. TF3 was closed
+without saving and the hash-matched loader removed.
+
+This qualifies one normal cleanup path after a stock Stop in one game. It does
+not qualify exception unwinding into that continuation, suppressed-entry UI
+recovery, one-use cancellation, host ordering or replay. Cancellation stays
+disabled. After rebuilding stale native fixtures, the elevated full suite
+found 912 tests: 906 passed, 5 failed, 1 skipped; the five older debugger
+teardown failures remain open.
+
+## Seventh-site generic-continuation finding — 23 September 2026
+
+`0xe17838` follows the exact-build `CALL 0xe26870` and is reachable after a
+normal send-body return. The owned fixture and PE-mapped audited bytes
+`E8 38 F0 00 00 90` qualified the passive NOP trap. Its raw counter is not a
+vehicle-specific receipt: in one fresh, single-load disposable run, the
+counter rose 555 to 6,346 over 80.7 seconds while the stock Road Vehicle 1
+Stop produced one each of the six previously qualified receipts. The latest
+generic continuation thread was 16028, whereas the vehicle admission,
+callback and two inner return receipts ran on thread 31816. The UI displayed
+Stopped. The checker rejected the unqualified exactly-once assumption and
+shut down the native runtime before its gate check. Return to Desktop hung;
+the exact verified game process was stopped without saving. The loader was
+hash-verified and removed, and the original save hash remained unchanged.
+This is a failed correlation trial, not cleanup proof for the vehicle Stop.
+
+Static decode suggests an invocation key: at the admission MOV the send-body
+RSP is `S`; its caller's post-return RSP should be `S+0x180`. A bounded
+thread + expected caller-RSP record can distinguish a vehicle send from
+unrelated sends at `0xe17838`, without reading the destroyed entry there.
+That design still needs owned nested/concurrent tests and fresh TF3 proof.
+Cancellation stays disabled. The elevated full suite still has the five
+legacy debugger teardown failures; focused authenticated IPC/client/checker
+tests passed 30/30 and all four native builds succeeded.
+
+## Fresh-process six-site passive result — 23 September 2026
+
+A fresh TF3 process loaded the named disposable save exactly once. The
+authenticated native runtime reached 128 world-boundary hits on thread 9824
+without a post-observer cross-thread fault. One stock Road Vehicle 1 Stop
+produced exactly one factory, admission, correlated admission, callback,
+send-return and marshaler-return observation. All three completion/admission
+storage identities matched; the entry result was zero, callback and marshaler
+result bytes were one, and the admission progress pair was empty. The entity
+was 102852, stopped value one. Admission, callback and both return sites ran
+on thread 5312. The GUI later displayed **Stopped**. The separate native
+gate held at hit 977, consumed one release at hit 978, re-held and detached;
+TF3 exited normally without saving. The original save hash remained
+`cbbc1a4642734600e9e9c994a6b0be7e014c20c097b418752642e5157f402f7c`.
+The three staged loader files were hash-verified and removed.
+
+This qualifies the two new normal-return sites for this one stock action in
+one game. It does not establish Lua success from the marshaler return alone,
+prove exception cleanup, suppress an action, order it through the host, or
+replay it. This run omitted the TalCo bridge because the save UI showed only
+the two DLC mods active; it makes no public-clock correlation claim. The
+earlier reload failure's thread-migration explanation remains plausible, not
+proven: post-observer code ignores new-thread hits after latching
+`cross_thread`, but the failed run did not record a before/after thread pair.
+An authenticated quiescent world/session epoch protocol is needed before any
+same-process rebind; clearing the owner in a trap would be unsafe.
+
 ## Six-site completion instrumentation and failed reload trial — 23 September 2026
 
 The exact-build passive observer now includes the normal send continuation

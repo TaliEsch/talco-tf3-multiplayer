@@ -34,6 +34,10 @@ test('live vehicle observation starts its action window at the reported world-re
   assert.match(vehicleBlock,/current\.latestSendReturnMatchesAdmissionStorage,true/);
   assert.match(vehicleBlock,/current\.latestMarshalerMatchesAdmissionStorage,true/);
   assert.match(vehicleBlock,/current\.latestMarshalerMatchesCallbackStorage,true/);
+  assert.match(vehicleBlock,/postSendBodyBaselineHits:baseline\.postSendBodyHits/);
+  assert.match(vehicleBlock,/BigInt\(current\.postSendBodyCorrelatedHits\),BigInt\(baseline\.postSendBodyCorrelatedHits\)\+1n/);
+  assert.match(vehicleBlock,/current\.latestPostSendBodyInvocation,current\.latestCorrelatedAdmissionInvocation/);
+  assert.match(vehicleBlock,/current\.latestPostSendBodyInvocation,current\.latestSendReturnInvocation/);
 });
 
 test('completion observation requires action observation before any launch',()=>{

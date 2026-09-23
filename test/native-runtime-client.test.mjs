@@ -34,7 +34,12 @@ test('passive vehicle diagnostics require a complete pointer-free lossless snaps
     passiveVehicleLatestMarshalerEntity:66005,passiveVehicleLatestMarshalerStopped:1,
     passiveVehicleLatestMarshalerResult:0,passiveVehicleLatestMarshalerValid:true,
     passiveVehicleLatestMarshalerMatchesAdmissionStorage:true,
-    passiveVehicleLatestMarshalerMatchesCallbackStorage:true};
+    passiveVehicleLatestMarshalerMatchesCallbackStorage:true,
+    passiveVehiclePostSendBodyHits:'8',passiveVehiclePostSendBodyThread:321,
+    passiveVehiclePostSendBodyCorrelatedHits:'8',passiveVehicleLatestCorrelatedAdmissionInvocation:'23',
+    passiveVehicleLatestSendReturnInvocation:'23',passiveVehicleLatestPostSendBodyInvocation:'23',
+    passiveVehicleLatestPostSendBodyEntity:66005,passiveVehicleLatestPostSendBodyStopped:1,
+    passiveVehicleLatestPostSendBodyValid:true,passiveVehicleLatestPostSendBodyThread:321};
   assert.deepEqual(validatePassiveVehicleActionObservation(valid),{
     factoryHits:valid.passiveVehicleFactoryHits,admissionHits:'9',correlatedHits:'8',droppedCandidates:'2',ownerThread:321,
     latestEntity:66005,latestStopped:1,latestValid:true,latestEntryResultZero:true,
@@ -45,7 +50,11 @@ test('passive vehicle diagnostics require a complete pointer-free lossless snaps
     latestSendReturnMatchesAdmissionStorage:true,marshalerReturnHits:'8',marshalerReturnThread:321,
     latestMarshalerEntity:66005,latestMarshalerStopped:1,latestMarshalerResult:0,
     latestMarshalerValid:true,latestMarshalerMatchesAdmissionStorage:true,
-    latestMarshalerMatchesCallbackStorage:true});
+    latestMarshalerMatchesCallbackStorage:true,postSendBodyHits:'8',postSendBodyThread:321,
+    postSendBodyCorrelatedHits:'8',latestCorrelatedAdmissionInvocation:'23',
+    latestSendReturnInvocation:'23',latestPostSendBodyInvocation:'23',
+    latestPostSendBodyEntity:66005,latestPostSendBodyStopped:1,
+    latestPostSendBodyValid:true,latestPostSendBodyThread:321});
   for(const change of [
     {passiveVehicleFactoryHits:18446744073709551615n},
     {passiveVehicleFactoryHits:'18446744073709551616'},
@@ -59,6 +68,13 @@ test('passive vehicle diagnostics require a complete pointer-free lossless snaps
     {passiveVehicleSendReturnThread:0x1_0000_0000},
     {passiveVehicleLatestSendReturnMatchesAdmissionStorage:1},
     {passiveVehicleMarshalerReturnHits:8},
+    {passiveVehiclePostSendBodyHits:'18446744073709551616'},
+    {passiveVehiclePostSendBodyThread:0x1_0000_0000},
+    {passiveVehiclePostSendBodyCorrelatedHits:'18446744073709551616'},
+    {passiveVehicleLatestPostSendBodyInvocation:23},
+    {passiveVehicleLatestPostSendBodyEntity:2147483648},
+    {passiveVehicleLatestPostSendBodyStopped:2},
+    {passiveVehicleLatestPostSendBodyValid:false},
     {passiveVehicleLatestMarshalerResult:256},
     {passiveVehicleLatestMarshalerValid:false,passiveVehicleLatestMarshalerMatchesCallbackStorage:true},
     {passiveVehicleLatestEntity:0,passiveVehicleLatestValid:false,passiveVehicleActive:false},

@@ -1,5 +1,74 @@
 # Completion audit against the build prompt
 
+## Invocation-correlated seventh-site trial — 23 September 2026
+
+**Implemented:** bounded passive admission-to-post-send-body correlation by
+thread, expected caller RSP and unique invocation token. Authenticated IPC
+exposes a copied scalar receipt; the generic post-send counter remains only a
+diagnostic. **Isolated/model-tested:** nested and concurrent frames, wrong
+thread, duplicate/generic hits, stale frame reuse, slot overflow and teardown;
+native builds and focused IPC/client/checker tests passed 31/31.
+**Single-game verified:** a fresh disposable load reached action readiness;
+one stock Road Vehicle 1 Stop produced one each of the six earlier receipts
+and exactly one correlated post-send-body receipt. Admission, send return and
+post-send tokens were all 1; the latter carried entity 102852, stopped 1 and
+thread 31916 matching the vehicle invocation. The generic seventh-site count
+rose from 579 to 4,700, as expected for a busy common path. The checker then
+held, released one boundary, re-held and detached the native gate and exited
+successfully. TF3 was closed without saving and the hash-matched loader was
+removed. Original `[R2] SV20.sav` retained SHA-256
+`cbbc1a4642734600e9e9c994a6b0be7e014c20c097b418752642e5157f402f7c`.
+After rebuilding stale native fixtures, the elevated full suite discovered
+912 tests: 906 passed, 5 failed, 1 skipped. The five failures are the same
+three controller and two observer out-of-process debugger teardown cases.
+**Limits:** this covers one normal completion in one game. Exception
+unwinding, cancellation, host ordering, replay, two-instance, cross-machine,
+four-player and Internet tests remain open. **Stage 6:** not achieved.
+
+## Seventh-site generic continuation trial — 23 September 2026
+
+**Implemented:** exact-build passive `0xe17838` post-send-body trap and raw
+count/thread over authenticated IPC. **Isolated/model-tested:** owned
+seven-site trap, byte-window and teardown smoke; four native builds passed;
+focused IPC/client/checker tests passed 30/30 with child-process permission.
+**Single-game verified:** fresh disposable load reached world observation hit
+132; one stock Road Vehicle 1 Stop gave factory/admission/correlated/callback/
+send-return/marshaler-return counts 1/1/1/1/1/1, with matching storage and
+expected entity 102852/stopped 1. The UI showed Stopped. The new generic
+post-send-body counter advanced **555 to 6,346** during the 80.7-second
+action window; its latest thread was not the vehicle admission thread. Thus
+the raw seventh-site observation is **not** correlated cleanup proof for that
+Stop. The checker failed `PASSIVE_VEHICLE_POST_SEND_BODY_NOT_EXACTLY_ONCE`;
+that assertion has been removed pending invocation correlation. The checker
+shut down the native runtime, the game's Return to Desktop UI hung, and the
+exact verified test process was stopped without saving. The loader was
+hash-verified and removed. The original save SHA-256 remained
+`cbbc1a4642734600e9e9c994a6b0be7e014c20c097b418752642e5157f402f7c`.
+The elevated full suite again reproduced the five older debugger teardown
+failures; it is not green. **Two-instance, cross-machine, four-player and
+Internet:** unperformed. **Stage 6:** not achieved.
+
+## Fresh-process six-site live evidence — 23 September 2026
+
+**Implemented:** unchanged six-site passive observer and authenticated native
+IPC. **Isolated/model-tested:** direct post- and vehicle-observer smoke builds
+passed. **Single-game verified:** a fresh TF3 process loaded the disposable
+save once; one stock Road Vehicle 1 Stop produced one each factory, admission,
+correlation, callback, normal send return and marshaler return. Storage
+identities matched; the admission progress was empty; the UI reached Stopped.
+The world observer reached 128 hits without its cross-thread flag; the gate
+subsequently held, released one boundary, re-held and detached. TF3 exited
+normally without saving. Original save SHA-256 stayed
+`cbbc1a4642734600e9e9c994a6b0be7e014c20c097b418752642e5157f402f7c`;
+the staged loader was hash-verified and removed. TalCo was not active in that
+save, so no game-side clock/bridge correlation was measured. **Two-instance,
+cross-machine, four-player and Internet:** unperformed. **Stage 6:** not
+achieved; the stock Stop was applied directly by TF3, without suppression,
+host ordering or replay. The earlier same-process reload failure remains a
+separate unproven thread-migration hypothesis, not contradicted by this fresh
+pass. The prior full-suite result was 906 passed, 5 failed, 1 skipped; no new
+full-suite claim is made here.
+
 ## Six-site qualification increment — 23 September 2026
 
 **Implemented:** passive normal-send and marshaler-return diagnostics, their

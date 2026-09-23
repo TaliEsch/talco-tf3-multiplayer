@@ -11,6 +11,8 @@ PUBLIC OwnedVehicleCallbackExecute
 PUBLIC OwnedVehicleSendReturnSite
 PUBLIC OwnedVehicleMarshalerReturnSite
 PUBLIC OwnedVehicleMarshalerExecute
+PUBLIC OwnedVehiclePostSendBodySite
+PUBLIC OwnedVehiclePostSendBodyExecute
 
 ; RCX is ignored, RDX ignored, R8D entity, R9B stopped. The observed MOV must
 ; leave RBX equal to zero-extended R8D without changing arithmetic flags.
@@ -37,8 +39,10 @@ OwnedVehicleFactoryExecute ENDP
 OwnedVehicleAdmissionExecute PROC FRAME
     push rbx
     .pushreg rbx
-    sub rsp, 20h
-    .allocstack 20h
+    ; Match the exact native body depth: seven pushes + 140h allocation.
+    ; One saved register + 170h is the same 178h below entry RSP.
+    sub rsp, 170h
+    .allocstack 170h
     .endprolog
     mov rbx, rcx
     mov rcx, rdx
@@ -47,10 +51,24 @@ OwnedVehicleAdmissionSite LABEL BYTE
     call OwnedVehicleAdmissionAdapter
 OwnedVehicleSendReturnSite LABEL BYTE
     nop
-    add rsp, 20h
+    add rsp, 170h
     pop rbx
     ret
 OwnedVehicleAdmissionExecute ENDP
+
+; Mirrors e17833 CALL e26870 followed by e17838 NOP. The observed NOP is
+; reached only when the complete send body, including its native cleanup,
+; returns normally.
+OwnedVehiclePostSendBodyExecute PROC FRAME
+    sub rsp, 28h
+    .allocstack 28h
+    .endprolog
+    call OwnedVehicleAdmissionExecute
+OwnedVehiclePostSendBodySite LABEL BYTE
+    nop
+    add rsp, 28h
+    ret
+OwnedVehiclePostSendBodyExecute ENDP
 
 OwnedVehicleAdmissionAdapter PROC
     mov rax, rdx
