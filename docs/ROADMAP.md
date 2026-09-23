@@ -1,6 +1,22 @@
 # TalCo TF3 multiplayer — current delivery plan
 
-## Current exact-build Stop checkpoint — 23 September 2026
+## Current checkpoint — 23 September 2026
+
+The one-game ordered Stop path now worked on exact UI build 40392. A moving
+owned vehicle's one-use native Stop was cancelled, host sequence 1 was applied
+at its scheduled update 3114, and TF3 showed the vehicle Stopped. The report
+has one real engine and one local receipt mirror; it is not two-game agreement.
+The native terminal gate subsequently timed out after the local pass and
+fail-stopped. Investigate that terminal event while preparing a second real
+instance with the same save/build/mod, then compare no-input checkpoints and
+one ordered action. Continue the separate-company road loop and Host/Join
+toward playable four-player LAN and port-forwarded Internet. See the top of
+`docs/completion-audit.md` for the exact evidence and test results.
+An unmodded no-save second launch on this Windows/Steam profile left only one
+TF3 process after 12 seconds. This rules out that simple same-profile launch
+as a two-instance test; it does not establish a multi-game result.
+
+## Previous exact-build Stop checkpoint — 23 September 2026
 
 On installed UI build 40392 (SHA-256 `cbd8092757e539a42f56c51e00eeb7671d967a9072838d7a5f47d2de88348716`), the rebuilt native loader started, the production Host passed its native capability gate, and the disposable save connected to the live bridge. Host company 3141 received a fresh owner/prestate receipt for moving Road Vehicle 1, entity 66005; company 55652 remained the second-company receipt mirror. The native Stop arm was issued after the control hold/release sequence. Two fresh runs clicked Stop within 284 ms and 319 ms of arm, respectively. The arm expired without a claim, host order, replay, or stopped vehicle. The second run's bounded native deltas were all zero: factory, admission, correlation, callback, send return, marshaler return, post-send body, and dropped candidates. Thus the immediate failure is the selected GUI action not entering the observed native command sites on this build. Trace the actual build-40392 UI-to-command path offline before another live run; preserve the fail-closed arm and do not retry an unknown mutation. The disposable save SHA-256 remained `ccbf4beb740e53323e06d20890fd029c8e174d3e85efb06801a8b4275c762fb5`; the loader was unstaged. Stage 6 remains open. After this one-game ordered Stop succeeds, resume the full two-instance multiplayer objective.
 
