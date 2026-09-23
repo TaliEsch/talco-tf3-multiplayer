@@ -15,6 +15,10 @@ was run and still exited with five previously recorded native controller and
 observer fixture failures; no new Join test failed. The real two-instance
 baseline and action remain open.
 
+The acceptance planner now emits the same explicit destination IP for Join
+save preparation and Join command traffic, with an explicit Host bind IP.
+Focused planner tests pass; no remote network or second TF3 run has occurred.
+
 ## Corrected ordered Stop and halt check — 23 September 2026
 
 **Single-game pass:** Exact TF3 build 40392 (SHA-256

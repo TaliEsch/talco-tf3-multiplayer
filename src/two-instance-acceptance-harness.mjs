@@ -1,4 +1,5 @@
 import path from 'node:path';
+import net from 'node:net';
 
 const hash = value => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
 const port = value => Number.isSafeInteger(value) && value >= 1024 && value <= 65535;
@@ -26,11 +27,15 @@ function saveIdentity(value) {
 // second transport here would make a dry-run look more complete than it is.
 export function createTwoInstanceAcceptancePlan({ sessionId, save, hostBridgeDirectory,
   joinBridgeDirectory, joinSaveDirectory, hostName = 'Host', joinName = 'Join',
+  hostBind = '127.0.0.1', joinHost = '127.0.0.1',
   hostPort, savePort, hostNativePipe, joinNativePipe, modManifestHash, hostSaveFile, exe } = {}) {
   if (!ident(sessionId) || !ident(hostName) || !ident(joinName) || hostName === joinName) {
     throw new TypeError('DISTINCT_SESSION_IDENTITIES_REQUIRED');
   }
   if (!port(hostPort) || !port(savePort) || hostPort === savePort) throw new TypeError('DISTINCT_HOST_SAVE_PORTS_REQUIRED');
+  if (!net.isIP(hostBind) || !net.isIP(joinHost) || joinHost === '0.0.0.0' || joinHost === '::') {
+    throw new TypeError('DIRECT_HOST_ADDRESS_REQUIRED');
+  }
   if (!ident(hostNativePipe) || !ident(joinNativePipe) || hostNativePipe === joinNativePipe) {
     throw new TypeError('DISTINCT_NATIVE_IDENTITIES_REQUIRED');
   }
@@ -51,17 +56,17 @@ export function createTwoInstanceAcceptancePlan({ sessionId, save, hostBridgeDir
     sessionId,
     expectedSave: verifiedSave,
     instances: Object.freeze({
-      host: Object.freeze({ identity: hostName, bridgeDirectory: hostBridge, nativePipe: hostNativePipe,
+      host: Object.freeze({ identity: hostName, bridgeDirectory: hostBridge, nativePipe: hostNativePipe, bind: hostBind,
         commandPort: hostPort, savePort,
-        command: Object.freeze(['node', 'src/cli.mjs', 'host', ...shared, '--port', String(hostPort), '--save-port', String(savePort),
+        command: Object.freeze(['node', 'src/cli.mjs', 'host', ...shared, '--bind', hostBind, '--port', String(hostPort), '--save-port', String(savePort),
           '--save', path.resolve(hostSaveFile), '--bridge-dir', hostBridge, '--host-local-name', hostName,
           '--native-pipe', hostNativePipe, '--native-token', '<from-TF3MP_HOST_NATIVE_TOKEN>']) }),
       join: Object.freeze({ identity: joinName, bridgeDirectory: joinBridge, saveDirectory: path.resolve(joinSaveDirectory), nativePipe: joinNativePipe,
-        connectsTo: Object.freeze({ host: '127.0.0.1', commandPort: hostPort, savePort }),
+        connectsTo: Object.freeze({ host: joinHost, commandPort: hostPort, savePort }),
         prepareCommand: Object.freeze(['node', 'src/cli.mjs', 'prepare-join', '--session', sessionId,
-          '--host', '127.0.0.1', '--save-port', String(savePort), '--save-dir', path.resolve(joinSaveDirectory),
+          '--host', joinHost, '--save-port', String(savePort), '--save-dir', path.resolve(joinSaveDirectory),
           '--bridge-dir', joinBridge]),
-        command: Object.freeze(['node', 'src/cli.mjs', 'join', ...shared, '--host', '127.0.0.1', '--port', String(hostPort), '--save-port', String(savePort),
+        command: Object.freeze(['node', 'src/cli.mjs', 'join', ...shared, '--host', joinHost, '--port', String(hostPort), '--save-port', String(savePort),
           '--name', joinName, '--save-dir', path.resolve(joinSaveDirectory), '--bridge-dir', joinBridge,
           '--prepared-save', '<path-from-prepare-join>',
           '--native-pipe', joinNativePipe, '--native-token', '<from-TF3MP_JOIN_NATIVE_TOKEN>']) }),

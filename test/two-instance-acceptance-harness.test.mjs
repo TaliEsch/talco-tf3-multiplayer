@@ -24,6 +24,11 @@ test('two-instance plan isolates identities, bridge directories, and host endpoi
   assert.ok(value.instances.host.command.includes(path.join(root, 'host', 'checkpoint.sav')));
   assert.ok(value.instances.join.prepareCommand.includes('prepare-join'));
   assert.ok(value.instances.join.command.includes('<path-from-prepare-join>'));
+  const lan=plan({hostBind:'0.0.0.0',joinHost:'192.168.1.22'});
+  assert.ok(lan.instances.host.command.includes('0.0.0.0'));
+  assert.ok(lan.instances.join.prepareCommand.includes('192.168.1.22'));
+  assert.ok(lan.instances.join.command.includes('192.168.1.22'));
+  assert.throws(() => plan({joinHost:'0.0.0.0'}),/DIRECT_HOST_ADDRESS_REQUIRED/);
   assert.throws(() => plan({ savePort: 38111 }), /DISTINCT_HOST_SAVE_PORTS/);
   assert.throws(() => plan({ joinBridgeDirectory: path.join(root, 'host', 'tf3mp_status_1') }), /SEPARATE_INSTANCE_DIRECTORIES/);
 });

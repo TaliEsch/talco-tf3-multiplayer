@@ -18,6 +18,7 @@ assert.ok(source.isFile() && source.size > 0, '--save must name a non-empty regu
 const save = Object.freeze({ bytes: source.size, sha256: await sha256File(opt.save) });
 const plan = createTwoInstanceAcceptancePlan({ sessionId: opt.session, save,
   hostBridgeDirectory: opt['host-bridge-dir'], joinBridgeDirectory: opt['join-bridge-dir'], joinSaveDirectory: opt['join-save-dir'],
+  hostBind: opt['host-bind'], joinHost: opt['join-host'],
   hostName: opt['host-name'] ?? 'Host', joinName: opt['join-name'] ?? 'Join', hostPort: Number(opt['host-port']), savePort: Number(opt['save-port']),
   hostNativePipe: opt['host-native-pipe'], joinNativePipe: opt['join-native-pipe'], modManifestHash: opt['mod-hash'],
   hostSaveFile: opt.save, exe: opt.exe });

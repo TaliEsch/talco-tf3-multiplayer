@@ -21,6 +21,9 @@ prepared file against Host admission before `save_ready`. A local encrypted
 transfer/CLI integration test passed; a Join TF3 load and second-engine
 checkpoint have not been observed. The full suite still exits with the five
 previous native controller/observer fixture failures; the new Join tests pass.
+The two-instance plan accepts explicit `--host-bind` and `--join-host` IP
+addresses for a second machine; its default remains local loopback. LAN and
+port-forwarded Internet have not been exercised.
 
 ## Earlier terminal-halt attempts — 23 September 2026
 
