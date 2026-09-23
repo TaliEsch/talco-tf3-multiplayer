@@ -1,5 +1,17 @@
 # Completion audit against the build prompt
 
+## Native cancelled Stop routed to host action path — 23 September 2026
+
+**Implemented and model tested:** a one-use explicit host command requires
+qualified native cancellation capability, matching invocation and passive
+completion evidence, and an unchanged engine Stop flag before sending one
+authenticated host-local `action_request`. It waits for matching coordinator
+completion and halts on uncertain submitted outcomes. Focused tests passed
+40/40. The full integration suite reported 932 cases: 926 passed, 5 failed,
+1 skipped; the failures are existing native controller/observer teardown cases.
+No loader-backed TF3 cancellation, host capture, held replay, or second game
+instance was tested with this path. **Stage 6:** open.
+
 ## Running owner proof — 23 September 2026
 
 **Single-game verified:** the read-only targeted owner request for entity

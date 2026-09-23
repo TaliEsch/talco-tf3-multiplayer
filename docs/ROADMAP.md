@@ -1,5 +1,22 @@
 # TalCo TF3 multiplayer — current delivery plan
 
+## One-use native Stop to host ordering path — 23 September 2026
+
+An explicit Host CLI command now arms one selected Stop through the qualified
+native IPC client after engine ownership and running prestate checks. The host
+accepts only a completed, invocation-correlated native cancellation with exact
+callback/send/post-send evidence and an unchanged engine Stop flag. It then
+sends one authenticated host-local `action_request` through the same authority
+and coordinator path as clients, and waits for the matching coordinated
+`command_completed` frame. Any uncertain submitted outcome halts the session;
+the helper never retries this arm or action. Focused native/host/network tests
+passed 40/40. The full integration suite reported 932 cases: 926 passed,
+5 failed, 1 skipped; the five failures are the existing native controller and
+observer teardown cases. This route has **not** been exercised with a native
+loader, TF3 action, or second game instance. Stage 6 remains open. The next
+critical test is a qualified two-instance disposable-save run through capture,
+native cancellation, host ordering, held replay and matching postconditions.
+
 ## Running-world owner receipt window — 23 September 2026
 
 The targeted owner receipt now tolerates bounded update advance while TF3 is

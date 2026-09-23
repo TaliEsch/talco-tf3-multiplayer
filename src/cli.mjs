@@ -23,6 +23,7 @@ import {connectHostLocalParticipant} from './host-local-participant.mjs';
 import {loadHostLocalEngineFactory} from './host-local-cli-seam.mjs';
 import {liveHostUpdateCount} from './live-host-clock.mjs';
 import {createTwoCompanyHostCapture} from './two-company-host-capture.mjs';
+import {createHostCancelledStop} from './host-cancelled-stop.mjs';
 import {createJoinEngineBootstrap} from './join-engine-bootstrap.mjs';
 import {fileURLToPath} from 'node:url';
 
@@ -111,6 +112,7 @@ const sessionSecret = opt.secret ?? process.env.TF3MP_SESSION_SECRET;
 let bridge;
 let hostInstance, nativeGate, vehicleTestActive = false;
 let hostCapture=null,hostCaptureAttempted=false;
+let hostCancelledStop=null;
 async function enableBridge() {
   if (opt["bridge-dir"]) {
     bridge = await startGameBridge({ directory: opt["bridge-dir"], logger: log });
@@ -149,6 +151,21 @@ if (command === "host" || command === "join") createInterface({ input: process.s
     replayLog(code,code==='CAPTURE_UNSUPPORTED'&&typeof error.issues==='string'?{issues:error.issues}:{});
   });
   else if(roadReplayWorkflow||roadReplayBusy)replayLog('REPLAY_OWNS_HELPER_STOP_TO_EXIT');
+  else if(line.trim().startsWith('multiplayer-arm-stop-confirmed')){
+    const parts=line.trim().split(/\s+/),entity=Number(parts[1]);
+    if(command!=='host'||parts.length!==2||parts[0]!=='multiplayer-arm-stop-confirmed'
+      ||!Number.isSafeInteger(entity)||entity<1
+      ||!hostCancelledStop||vehicleTestActive||integrationBatch||coordinatorRun||phase2Setup)
+      rawLog({level:'warn',event:'multiplayer_cancelled_stop',code:'FRESH_QUALIFIED_HOST_REQUIRED'});
+    else void hostCancelledStop.start(entity).then(({arm,completion})=>{
+      rawLog({level:'info',event:'multiplayer_cancelled_stop_armed',entity,
+        expectedInvocation:arm.expectedInvocation,ttlMs:5000,gameplayVerified:false});
+      completion.then(result=>rawLog({level:'info',event:'multiplayer_cancelled_stop_completed',...result,
+        gameplayVerified:false})).catch(error=>rawLog({level:'error',event:'multiplayer_cancelled_stop_failed',
+        code:error?.message??'UNKNOWN',noRetry:true,gameplayVerified:false}));
+    }).catch(error=>rawLog({level:'warn',event:'multiplayer_cancelled_stop_rejected',
+      code:error?.message??'UNKNOWN',gameplayVerified:false}));
+  }
   else if(line.trim()==='multiplayer-capture-two-confirmed'){
     if(command!=='host'||!hostCapture||hostCaptureAttempted||vehicleTestActive||integrationBatch||batchStarting
       ||coordinatorRun||coordinatorStarting||phase2Setup||phase2Starting||depotPreviewOwnsHelper)
@@ -375,6 +392,8 @@ if (command === "hash-game") {
         if(message.kind==='session_ended')log({level:'warn',event:'host_local_participant_ended',gameplayVerified:false});
       }});
     if(!nativeMode.diagnosticOnly)hostCapture=createTwoCompanyHostCapture({host:instance,bridge,nativeGate,hostLocal:local});
+    if(!nativeMode.diagnosticOnly)hostCancelledStop=createHostCancelledStop({host:instance,hostLocal:local,
+      bridge,nativeGate,logger:log});
     local.attachment.then(()=>{
       const accepted=local.ready;
       log({level:accepted?'info':'warn',event:accepted?'host_local_adapter_attached':'host_local_adapter_rejected',
