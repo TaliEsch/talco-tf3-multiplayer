@@ -14,6 +14,16 @@ vehicle intent through the existing coordinator and executeHeld path.
 The full suite still has the same five native controller/observer teardown
 failures seen before this clock change; no new test failure was observed.
 
+Composition audit: the first-party provider requires a `companies` Map with
+two to four distinct verified members when its adapter is constructed.
+`connectHostLocalParticipant` currently invokes that factory on admission
+without a companies map, while the production Host CLI never calls
+`bindCompanyEntity`. This blocks attachment before coordination. The existing
+read-only vehicle discovery receipt can prove a local owned vehicle, but the
+Node bridge does not consume it yet. Resolve verified membership and a fresh
+engine ownership receipt before enabling this path; a GUI vehicle selection
+alone does not prove ownership.
+
 ## One-use vehicle Stop cancellation — 23 September 2026
 
 The native arm now substitutes a distinct read-only failure-completion vtable
