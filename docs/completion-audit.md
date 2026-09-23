@@ -1,5 +1,32 @@
 # Completion audit against the build prompt
 
+## Qualified Host/Join launcher wiring — 23 September 2026
+
+The launcher Host/Join buttons previously omitted required native credentials.
+They now invoke an exact-build runner that checks the staged loader hashes,
+creates one native handoff, launches TF3, and passes the native pipe/token and
+selected save's bridge directory to the production CLI. Join first performs
+the authenticated save preparation. An existing TF3 process prevents another
+launch, and only pre-bind pipe connection refusals are retried. The launcher
+compiled and focused UI tests passed. In a disposable-save TF3 run on exact
+build 40392, the Host runner passed native capability binding, opened the
+authenticated save server on TCP 37334, connected the live bridge at update
+2846, reported `host_listening` for session `launch.check.2`, and received
+the host-local save-ready receipt for SHA-256
+`ccbf4beb740e53323e06d20890fd029c8e174d3e85efb06801a8b4275c762fb5`.
+TF3's HUD showed the bridge connected. No vehicle command or remote peer was
+attempted. Steam restarted the launched TF3 PID, so the first runner attempt
+mistook that PID exit for game exit; the runner now checks the actual process.
+The helper stopped; its wrapper then retained an open stdin listener, now
+closed in source after helper exit. That shutdown change is not retested in
+TF3. The game closed without saving, the staged loader was removed, and the
+disposable save hash stayed unchanged. This is one-game Host startup proof,
+not Join or multi-instance proof.
+The integration suite reported 947 tests: 941 passed, five failed and one
+skipped. The five failures are the previously recorded native controller and
+observer fixture cases; the launcher tests passed. The private full-suite log
+is `C:\Users\olihf\Downloads\Temp\tf3mp-check-20260923-2058.log`.
+
 ## Join save-before-launch path — 23 September 2026
 
 The Join CLI now offers `prepare-join`: it downloads the authenticated Host

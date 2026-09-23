@@ -34,3 +34,16 @@ test("confirmation is stage-gated, old prompts are suppressed and helper exit re
   assert.match(source,/helper = null; ResetBatchUi\(\); SetStatus/);
   assert.match(source,/guidedBatchOwnsHelper = false; batchControlsReady = false/);
 });
+
+test('Host and Join launch through the qualified native runner with save-specific bridges',()=>{
+  const host=source.slice(source.indexOf('private void HostClicked'),source.indexOf('private void JoinClicked'));
+  const join=source.slice(source.indexOf('private void JoinClicked'),source.indexOf('private void ShowHostReady'));
+  assert.match(host,/EnsureNativeLoaderStaged\(\)/);
+  assert.match(join,/EnsureNativeLoaderStaged\(\)/);
+  for(const section of [host,join]){
+    assert.match(section,/tools\/launch-qualified-session\.mjs/);
+    assert.match(section,/"--bridge-dir"/);
+    assert.match(section,/"--exe", GameExe/);
+  }
+  assert.doesNotMatch(source.slice(source.indexOf('private void ShowHostReady'),source.indexOf('private void DebugClicked')),/PrimaryButton\("START TF3"/);
+});

@@ -194,15 +194,16 @@ internal sealed class MainWindow : Window
         RunBusy("Preparing host...", delegate
         {
             modHash = ValidateAndGetModHash();
+            EnsureNativeLoaderStaged();
             secret = GenerateSecret();
             string session = Guid.NewGuid().ToString();
             long expiresAt = UnixNowMilliseconds() + (30L * 60L * 1000L);
             string code = CreateJoinCode(network.JoinAddress, session, secret, modHash, expiresAt);
             Dispatcher.Invoke(delegate
             {
-                StartHelper(new string[] { "src/cli.mjs", "host", "--session", session, "--mod-hash", modHash, "--bind", network.BindAddress, "--port", GamePort.ToString(), "--save-port", SavePort.ToString(), "--expires", expiresAt.ToString(), "--save", selectedSave }, "Host");
+                StartHelper(new string[] { "tools/launch-qualified-session.mjs", "host", "--session", session, "--mod-hash", modHash, "--exe", GameExe, "--bind", network.BindAddress, "--port", GamePort.ToString(), "--save-port", SavePort.ToString(), "--expires", expiresAt.ToString(), "--save", selectedSave, "--bridge-dir", Path.Combine(Directory.GetParent(Path.GetDirectoryName(selectedSave)).FullName, "tf3mp_status_1") }, "Host");
                 hostReady = delegate { ShowHostReady(code, Path.GetFileName(selectedSave), network, expiresAt); };
-                SetStatus("Starting host and preparing save…");
+                SetStatus("Launching qualified TF3 Host — load the selected save in TF3");
             });
         });
     }
@@ -225,10 +226,11 @@ internal sealed class MainWindow : Window
         {
             string localHash = ValidateAndGetModHash();
             if (!String.Equals(localHash, details.ModHash, StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Your TF3MP mod differs from the host. Update it before joining.");
+            EnsureNativeLoaderStaged();
             Dispatcher.Invoke(delegate
             {
                 secret = details.Secret;
-                StartHelper(new string[] { "src/cli.mjs", "join", "--host", details.Address, "--port", details.Port.ToString(), "--save-port", details.SavePort.ToString(), "--session", details.Session, "--name", Environment.UserName, "--mod-hash", details.ModHash, "--save-dir", destination }, "Client");
+                StartHelper(new string[] { "tools/launch-qualified-session.mjs", "join", "--host", details.Address, "--port", details.Port.ToString(), "--save-port", details.SavePort.ToString(), "--session", details.Session, "--name", Environment.UserName, "--mod-hash", details.ModHash, "--exe", GameExe, "--save-dir", destination, "--bridge-dir", Path.Combine(Directory.GetParent(destination).FullName, "tf3mp_status_1") }, "Client");
                 ShowJoinProgress(details.Address);
             });
         });
@@ -250,9 +252,9 @@ internal sealed class MainWindow : Window
             : "Local-network address: " + network.JoinAddress;
         content.Children.Add(new TextBlock { Text = "Save: " + saveName + "\n" + networkText, TextAlignment = TextAlignment.Center, TextWrapping = TextWrapping.Wrap, Foreground = mutedBrush, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 10, 0, 16) });
         StackPanel buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center };
-        buttons.Children.Add(PrimaryButton("START TF3", delegate { StartGameWithInstructions(saveName, true); }, Color.FromRgb(38, 166, 126)));
+        buttons.Children.Add(new TextBlock { Text = "TF3 was launched with the native handoff.", Foreground = mutedBrush, VerticalAlignment = VerticalAlignment.Center });
         Button stop = LinkButton("Stop and return", StopAndHomeClicked); stop.Margin = new Thickness(12, 0, 0, 0); buttons.Children.Add(stop); content.Children.Add(buttons);
-        content.Children.Add(new TextBlock { Text = "Next: load this save in TF3 with TF3MP enabled.\nThe game panel will confirm the helper connection. Gameplay sync is pending.", TextWrapping = TextWrapping.Wrap, TextAlignment = TextAlignment.Center, Foreground = mutedBrush, Margin = new Thickness(0, 20, 0, 12) });
+        content.Children.Add(new TextBlock { Text = "The game panel confirms the bridge connection. Wait for a matching Join checkpoint before gameplay.", TextWrapping = TextWrapping.Wrap, TextAlignment = TextAlignment.Center, Foreground = mutedBrush, Margin = new Thickness(0, 20, 0, 12) });
         content.Children.Add(LinkButton("Debug and connection details", DebugClicked));
         page.Children.Add(content); SetStatus("Hosting — waiting for a player");
     }
@@ -273,13 +275,12 @@ internal sealed class MainWindow : Window
     {
         page.Children.Clear(); page.RowDefinitions.Clear(); page.ColumnDefinitions.Clear();
         StackPanel content = new StackPanel { MaxWidth = 660, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
-        content.Children.Add(new TextBlock { Text = "Save downloaded", FontSize = 29, FontWeight = FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Center });
-        content.Children.Add(new TextBlock { Text = "The host save and required TF3MP mod were verified.", FontSize = 15, Foreground = mutedBrush, Margin = new Thickness(0, 9, 0, 22), HorizontalAlignment = HorizontalAlignment.Center });
+        content.Children.Add(new TextBlock { Text = "Join checkpoint ready", FontSize = 29, FontWeight = FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Center });
+        content.Children.Add(new TextBlock { Text = "The authenticated Host save was prepared before TF3 started.", FontSize = 15, Foreground = mutedBrush, Margin = new Thickness(0, 9, 0, 22), HorizontalAlignment = HorizontalAlignment.Center });
         Border instruction = new Border { Background = cardBrush, CornerRadius = new CornerRadius(12), Padding = new Thickness(24), BorderBrush = new SolidColorBrush(Color.FromRgb(43, 54, 72)), BorderThickness = new Thickness(1) };
-        instruction.Child = new TextBlock { Text = "In TF3 choose Load Game, then select:\n\n" + saveName + "\n\nTF3 will use the enabled-mod list carried by the host save.", TextAlignment = TextAlignment.Center, FontSize = 16, FontWeight = FontWeights.Medium };
+        instruction.Child = new TextBlock { Text = "Inspect the TF3 world and wait for the Host's matching checkpoint.\nThe session must halt if state differs.", TextAlignment = TextAlignment.Center, FontSize = 16, FontWeight = FontWeights.Medium };
         content.Children.Add(instruction);
-        Button start = PrimaryButton("START TF3", delegate { StartGameWithInstructions(saveName, false); }, Color.FromRgb(38, 166, 126)); start.Margin = new Thickness(0, 18, 0, 6); content.Children.Add(start);
-        content.Children.Add(LinkButton("Leave session", StopAndHomeClicked)); page.Children.Add(content); SetStatus("Save verified — ready to load in TF3");
+        content.Children.Add(LinkButton("Leave session", StopAndHomeClicked)); page.Children.Add(content); SetStatus("Join checkpoint ready — inspect TF3");
     }
 
     private void DebugClicked(object sender, RoutedEventArgs e)
@@ -646,7 +647,7 @@ internal sealed class MainWindow : Window
         StopHelper();
         sessionFailure = null;
         string saveDirectory = FindSaveDirectory();
-        if (saveDirectory != null) args = args.Concat(new string[] { "--bridge-dir", Path.Combine(Directory.GetParent(saveDirectory).FullName, "tf3mp_status_1") }).ToArray();
+        if (saveDirectory != null && !args.Contains("--bridge-dir")) args = args.Concat(new string[] { "--bridge-dir", Path.Combine(Directory.GetParent(saveDirectory).FullName, "tf3mp_status_1") }).ToArray();
         ProcessStartInfo info = new ProcessStartInfo("node.exe", JoinArguments(args)) { WorkingDirectory = projectRoot, UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true, RedirectStandardInput = true };
         info.EnvironmentVariables["TF3MP_SESSION_SECRET"] = secret;
         Process process = new Process { StartInfo = info, EnableRaisingEvents = true };
@@ -914,6 +915,13 @@ internal sealed class MainWindow : Window
         unauditedBuild = buildOutput.Contains("\"recommended\":false");
         string output = RunCaptured("node.exe", new string[] { "src/cli.mjs", "hash-mod", "--path", "mod" });
         Match match = Regex.Match(output, "(?i)\\b[0-9a-f]{64}\\b"); if (!match.Success) throw new InvalidOperationException("Could not calculate mod hash."); return match.Value.ToLowerInvariant();
+    }
+
+    private void EnsureNativeLoaderStaged()
+    {
+        string manifest = Path.Combine(Path.GetDirectoryName(GameExe), "TalCo-TF3MP-native-loader.json");
+        if (File.Exists(manifest)) return; // The qualified runner verifies every staged hash.
+        RunCaptured("powershell.exe", new string[] { "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", Path.Combine(projectRoot, "Stage-NativeLoader.ps1") });
     }
 
     private string RunCaptured(string file, string[] args)

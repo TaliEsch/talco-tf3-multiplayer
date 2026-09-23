@@ -24,6 +24,15 @@ previous native controller/observer fixture failures; the new Join tests pass.
 The two-instance plan accepts explicit `--host-bind` and `--join-host` IP
 addresses for a second machine; its default remains local loopback. LAN and
 port-forwarded Internet have not been exercised.
+Host/Join launcher buttons now use a qualified one-process runner: they stage
+the exact loader if absent, create one native credential handoff, launch TF3,
+and pass native credentials and the correct bridge directory to production
+Host/Join. Join prepares its authenticated save before launch. The launcher
+builds. A disposable-save TF3 check of the Host runner passed native bind,
+save-transfer listening, bridge connection, Host listening, and host-local
+save-ready. Steam restarted TF3 under a new PID; the runner now follows the
+actual process instead of treating the first PID exit as failure. Join launch
+and a second engine are still unverified; the UI is not yet playable co-op.
 
 ## Earlier terminal-halt attempts — 23 September 2026
 
