@@ -90,7 +90,7 @@ function M.prepare(api, input)
   local progress = {stage="input"}
   local ok, result = pcall(prepare, api, input, progress)
   if ok then return result end
-  if rawequal(result, REJECT) then return {code="rejected", stage=progress.stage} end
+  if result == REJECT then return {code="rejected", stage=progress.stage} end
   return {code="unknown", stage=progress.stage}
 end
 

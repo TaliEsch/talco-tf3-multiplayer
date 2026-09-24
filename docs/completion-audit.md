@@ -2,6 +2,15 @@
 
 ## Build-40396 read-only road command probe — 24 September 2026
 
+In a fourth paused disposable-save session, the production diagnostic passed
+preparer lookup and returned `code=unavailable, field=preparerCall` at
+observation 1, nonce `c4529558aea03f8031fe3766fe0a527b`. No command was
+sent and no stop was placed. The original save hash remained unchanged. An
+offline review found that the preparer's rejection handler called `rawequal`
+outside its protected call; a missing `rawequal` would escape there. The
+handler now uses table identity, with a focused regression test. This is a
+candidate explanation until checked in TF3.
+
 Three controlled paused disposable-save sessions attempted to qualify a simple
 Road Stop command value without submitting it. The first observed the untouched
 road and replacement factory shape but confirmed that the stock preview omits

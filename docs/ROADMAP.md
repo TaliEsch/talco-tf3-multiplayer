@@ -32,7 +32,8 @@ not submit a command. A controlled build-40396 run verified the untouched
 pre-action road shape and observed the placed stop's `.mdl` model resource in
 the same session; see `docs/completion-audit.md`. A further paused read-only
 probe passed the request, clock, player, road and replacement checks, then
-returned `unavailable` at the preparer handoff. No command value or engine
+returned `unavailable` at the preparer call. A candidate rejection-handler
+fix has offline coverage but awaits TF3 verification. No command value or engine
 acceptance is verified. Resolve that handoff, then qualify its command value
 and native engine acceptance behind
 the existing one-use execution gate, using the observed model and edge mapping.

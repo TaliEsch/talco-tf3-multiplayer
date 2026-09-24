@@ -69,3 +69,10 @@ test('unexpected native failures remain unknown and never submit a command',()=>
   assert.equal(result.calls,0);
   assert.equal(result.sends,0);
 });
+
+test('rejection stays classified when the game sandbox does not expose rawequal',()=>{
+  const result=run('rawequal=nil;input.companyEntity=11');
+  assert.equal(result.code,'rejected');
+  assert.equal(result.calls,0);
+  assert.equal(result.sends,0);
+});
