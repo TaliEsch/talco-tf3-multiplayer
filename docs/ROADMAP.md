@@ -11,6 +11,11 @@ command construction only. The next critical step is one guarded, host-ordered
 engine submission with correlated execution, stop and charge readback; road
 ordering and separate-company economy remain open.
 
+A read-only result adapter now checks the proposed command's callback against
+one new owned stop, replacement-road attachment, the native cost and all
+company balances. Its tests are mock-only; the adapter is not yet connected
+to a one-use ordered executor or verified in TF3.
+
 At the user's direction, defer the two-instance TF3 run until they say to
 resume it; a second launch from this Windows/Steam profile produced only one
 game process. Continue the one-game separate-company road/economy path and
@@ -43,13 +48,10 @@ the same session; see `docs/completion-audit.md`. A further paused read-only
 probe passed the request, clock, player, road and replacement checks, then
 returned `unavailable` at the preparer call. The rejection-handler fix was
 verified in TF3: the preparer now returns `rejected` at its factory checks.
-The next read-only check passed the replacement segment, node and edge-object
-guards and rejected `nodeConfigsToAdd`; inspect that field's actual TF3 shape
-before adjusting the preparer. No command value or engine acceptance is
-verified. Resolve that handoff, then qualify its command value
-and native engine acceptance behind
-the existing one-use execution gate, using the observed model and edge mapping.
-Then submit one owned construction through Host ordering,
+The subsequent factory-field check found two added node configs and two removed
+endpoint IDs. Preserving those fields produced a `prepared` command value in
+TF3. Engine acceptance remains unverified. Connect the guarded readback to a
+one-use execution gate, then submit one owned construction through Host ordering,
 execute once under the game hold, and verify the resulting stop and native
 charge. Separate-company ownership, balances, income and spending still need
 real-game evidence. The existing capture codec remains unsupported because its

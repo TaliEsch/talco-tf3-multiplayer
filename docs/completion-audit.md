@@ -2,6 +2,13 @@
 
 ## Build-40396 road command value qualified — 24 September 2026
 
+The subsequent `tf3mp_road_stop_simple_result.lua` adapter is offline code
+only. Focused Fengari tests cover a successful callback with one owned new
+stop, replacement road, native cost and exact company debit, plus mismatched
+callback, ownership, road, model, clock and balance outcomes. It has not been
+connected to engine submission or checked in TF3; these tests cannot establish
+construction or economy behavior.
+
 Two controlled paused, read-only Road Stop previews used the disposable save,
 company 3141 and untouched road 53417. The first receipt (nonce
 `9e2e170acffb289d8a1c40a5c9270a69`, update 2987) showed the factory's

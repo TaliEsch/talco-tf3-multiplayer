@@ -1,0 +1,72 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
+import fengari from 'fengari';
+
+const {lua,lauxlib,lualib,to_luastring}=fengari;
+const source=await readFile(new URL('../mod/content/tf3mp_road_stop_simple_result.lua',import.meta.url),'utf8');
+function run(change='',preChange=''){
+  const script=`local result=(function() ${source} end)()
+local input={edgeEntity=24,companyEntity=10,model='models/stop.mdl',left=true,param=.5}
+local players={10,11};local stops={80};local balances={[10]=100000,[11]=70000}
+local exists={[24]=true,[80]=true};local update=50;local calls=0
+local components={PLAYER={ [10]={},[11]={} },BASE_EDGE={ [24]={objects={}},[25]={objects={{81,1}}} },
+  PLAYER_OWNED={ [81]={player=10} },EDGE_OBJECT={ [81]={param=.5} },
+  MODEL_INSTANCE_LIST={ [81]={fatInstances={{modelId=7}}} }}
+local api={type={ComponentType={PLAYER='PLAYER',BASE_EDGE='BASE_EDGE',EDGE_OBJECT='EDGE_OBJECT',
+  PLAYER_OWNED='PLAYER_OWNED',MODEL_INSTANCE_LIST='MODEL_INSTANCE_LIST',GAME_SPEED='GAME_SPEED',GAME_TIME='GAME_TIME'},
+  enum={EdgeObjectType={STOP_LEFT=1,STOP_RIGHT=2}}},
+  res={modelRep={find=function()return 7 end}},
+  engine={entityExists=function(id)return exists[id]==true end,
+    getComponent=function(id,kind)if kind=='GAME_SPEED'then return{speedup=0}end
+      if kind=='GAME_TIME'then return{updateCount=update}end
+      return components[kind] and components[kind][id] end,
+    getEntitiesWithComponent=function(kind)if kind=='PLAYER'then return players end
+      if kind=='EDGE_OBJECT'then return stops end end,
+    system={streetSystem={getEdgeForEdgeObject=function(id)assert(id==81);return 25 end}},
+    util={getWorld=function()return 0 end,getPlayer=function()return 10 end,
+      finance={getPlayersBalance=function(id)return balances[id] end}}}}
+${preChange}
+local before=result.before(api,input)
+exists[24]=nil;exists[25]=true;exists[81]=true;stops={80,81};balances[10]=32500
+local data={resultProposalData={costs=67500}};local success=true;local entities={}
+${change}
+local after=result.after(api,before,input,data,success,entities)
+return before.code,after.code,after.stopEntity or 0,after.chargedCost or 0,calls`;
+  const L=lauxlib.luaL_newstate();lualib.luaL_openlibs(L);
+  try{
+    lua.lua_sethook(L,()=>lauxlib.luaL_error(L,to_luastring('TEST_INSTRUCTION_LIMIT')),lua.LUA_MASKCOUNT,1_000_000);
+    assert.equal(lauxlib.luaL_loadstring(L,to_luastring(script)),lua.LUA_OK,lua.lua_tojsstring(L,-1));
+    assert.equal(lua.lua_pcall(L,0,5,0),lua.LUA_OK,lua.lua_tojsstring(L,-1));
+    return {before:lua.lua_tojsstring(L,-5),after:lua.lua_tojsstring(L,-4),stop:lua.lua_tonumber(L,-3),cost:lua.lua_tonumber(L,-2),calls:lua.lua_tonumber(L,-1)};
+  }finally{lua.lua_close(L);}
+}
+
+test('correlates one owned stop, replaced road and native debit under the same hold',()=>{
+  assert.deepEqual(run(),{before:'observed',after:'verified',stop:81,cost:67500,calls:0});
+});
+test('callback and state discrepancies remain unknown, without a mutation',()=>{
+  for(const change of [
+    'success=false','balances[10]=100000','balances[11]=69999','balances[10]=-1',
+    'components.PLAYER_OWNED[81].player=11','components.BASE_EDGE[25].objects={{81,2}}',
+    'components.MODEL_INSTANCE_LIST[81].fatInstances={{modelId=8}}',
+    'components.EDGE_OBJECT[81].param=.3','stops={80,81,82}','stops={81}',
+    'exists[24]=true','update=51','data.resultProposalData.costs=0',
+  ]){
+    const observed=run(change);
+    assert.equal(observed.after,'unknown',change);
+    assert.equal(observed.calls,0,change);
+  }
+});
+test('changing the bound road or company between snapshots leaves the outcome unknown',()=>{
+  for(const change of ['input.companyEntity=11','input.edgeEntity=25',
+    "api.engine.getComponent=function()return nil end"]){
+    const observed=run(change);
+    assert.equal(observed.after,'unknown',change);
+  }
+});
+test('invalid or moving preconditions cannot form a readback baseline',()=>{
+  for(const change of ['input.param=0/0','update=0/0','components.BASE_EDGE[24].objects={{80,1}}']){
+    assert.equal(run('',change).before,'unknown',change);
+  }
+});
