@@ -1,5 +1,25 @@
 # Completion audit against the build prompt
 
+## Build-40396 read-only road command probe — 24 September 2026
+
+Three controlled paused disposable-save sessions attempted to qualify a simple
+Road Stop command value without submitting it. The first observed the untouched
+road and replacement factory shape but confirmed that the stock preview omits
+the model identity. The second used the model resource observed from one normal
+placed stop on this same save; the pre-action receipt was only `unavailable`.
+A bounded-stage diagnostic in the third session recorded
+`code=unavailable, field=preparer` at observation 1, nonce
+`11e2b1b2616190569b83b8cf73ca7ee5`. Request, paused clock, player,
+unoccupied road and replacement-shape checks all preceded that stage and passed.
+This localizes the current failure to the handoff to the simple command
+preparer; it does not show that TF3 accepted or executed a command. No stop was
+placed in these preview sessions. TF3 exited without saving, the disposable
+save SHA-256 remains
+`ccbf4beb740e53323e06d20890fd029c8e174d3e85efb06801a8b4275c762fb5`,
+and the temporary exact-build native loader was removed. The next step is to
+split preparer lookup, call and result diagnostics, resolve that boundary
+offline where possible, then qualify command construction in one game.
+
 ## Build-40396 pre-action road and model identity — 24 September 2026
 
 One controlled, paused disposable-save run connected the production bridge and

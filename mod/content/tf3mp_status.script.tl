@@ -114,9 +114,10 @@ local record Tf3MpStopReadback
   collect : function(any, table) : table
   copyApply : function(any, any, integer) : table
   copyPreview : function(any, integer) : any
-  preActionProbe : function(any, table) : table
+  preActionProbe : function(any, table, any) : table
 end
 local stopReadback = ug_require "tf3mp_status_1::/tf3mp_stop_readback.lua" as Tf3MpStopReadback
+local roadStopSimplePrepare = ug_require "tf3mp_status_1::/tf3mp_road_stop_simple_prepare.lua" as table
 local function roadCaptureModelName(modelId : integer) : string
   return api.res.modelRep.getName(modelId)
 end
@@ -1960,7 +1961,7 @@ local ret : GameScriptWithGui<Tf3MpState, Tf3MpGuiState> = {
           or not validInteger(request.observationId) or request.observationId < 1 or request.observationId > 16 then return nil end
         local previous = current.roadStopPreActionReceipt or {}
         if previous.nonce == request.nonce and previous.observationId == request.observationId then return nil end
-        local ok, result = pcall(function() : table return stopReadback.preActionProbe(api, request) end)
+        local ok, result = pcall(function() : table return stopReadback.preActionProbe(api, request, roadStopSimplePrepare) end)
         local receipt : table = {nonce=request.nonce, observationId=request.observationId, code="unavailable"}
         if ok and type(result) == "table" and result.code == "shape"
           and result.nonce == request.nonce and result.observationId == request.observationId
@@ -1970,6 +1971,20 @@ local ret : GameScriptWithGui<Tf3MpState, Tf3MpGuiState> = {
           receipt = {nonce=request.nonce, observationId=request.observationId, code="shape",
             edgeEntity=result.edgeEntity, companyEntity=result.companyEntity, updateCount=result.updateCount,
             added=1, removed=1, temporaryEdgeEntity=-1, firstAddedObjectCount=0}
+          if result.commandCode == "prepared" or result.commandCode == "rejected"
+            or result.commandCode == "unknown" or result.commandCode == "notRequested" then
+            receipt.commandCode = result.commandCode
+          end
+          if result.commandStage == "none" or result.commandStage == "input"
+            or result.commandStage == "world" or result.commandStage == "model"
+            or result.commandStage == "factory" or result.commandStage == "constructor"
+            or result.commandStage == "command" then receipt.commandStage = result.commandStage end
+        elseif ok and type(result) == "table" and result.code == "unavailable"
+          and (result.field == "request" or result.field == "clock" or result.field == "player"
+            or result.field == "road" or result.field == "replacement" or result.field == "commandInput"
+            or result.field == "preparerLookup" or result.field == "preparerCall"
+            or result.field == "preparerResult") then
+          receipt.field = result.field
         end
         current.roadStopPreActionReceipt = receipt
         state:set(current)

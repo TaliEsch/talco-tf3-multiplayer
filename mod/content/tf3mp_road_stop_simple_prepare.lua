@@ -23,7 +23,8 @@ local function resource(v)
   return v
 end
 
-local function prepare(api, input)
+local function prepare(api, input, progress)
+  progress.stage = "input"
   if not native(api) or not native(api.type) or not native(api.engine) or not native(api.cmd)
     or type(input) ~= "table" or getmetatable(input) ~= nil then fail() end
   local allowed = {edgeEntity=true, companyEntity=true, param=true, left=true, oneWay=true, model=true, name=true}
@@ -34,6 +35,7 @@ local function prepare(api, input)
     or type(input.left) ~= "boolean" or type(input.oneWay) ~= "boolean"
     or type(input.name) ~= "string" or #input.name > 1024 or input.name:find("\0", 1, true) then fail() end
   resource(input.model)
+  progress.stage = "world"
   local types = api.type.ComponentType
   if not native(types) or types.PLAYER == nil or types.BASE_EDGE == nil or types.GAME_SPEED == nil then fail() end
   if api.engine.entityExists(input.edgeEntity) ~= true or api.engine.entityExists(input.companyEntity) ~= true then fail() end
@@ -43,11 +45,13 @@ local function prepare(api, input)
   local world = api.engine.util.getWorld()
   local speed = api.engine.getComponent(world, types.GAME_SPEED)
   if not native(speed) or speed.speedup ~= 0 then fail() end
+  progress.stage = "model"
   local rep = api.res and api.res.modelRep
   if not native(rep) then fail() end
   local modelId = rep.find(input.model)
   if not integer(modelId) or modelId < 0 then fail() end
 
+  progress.stage = "factory"
   local factory = api.engine.util.proposal
   if not native(factory) or factory.replaceSegment == nil then fail() end
   local replacement = factory.replaceSegment(input.edgeEntity)
@@ -61,6 +65,7 @@ local function prepare(api, input)
   if not native(added) or not native(removed) or added.entity ~= -1 or removed.entity ~= input.edgeEntity
     or not native(added.comp) or not array(added.comp.objects, 0) then fail() end
 
+  progress.stage = "constructor"
   local simple = api.type.SimpleProposal.new()
   local simpleStreet = api.type.SimpleStreetProposal.new()
   local object = api.type.SimpleStreetProposal.EdgeObject.new()
@@ -73,6 +78,8 @@ local function prepare(api, input)
   local context = api.type.Context.new()
   if not native(context) then fail() end
   context.player = input.companyEntity
+
+  progress.stage = "command"
   local command = api.cmd.makeWorldBuildProposalCmd(simple, context, false, true, false)
   if command == nil then fail() end
   return {code="prepared", command=command, edgeEntity=input.edgeEntity, companyEntity=input.companyEntity,
@@ -80,10 +87,11 @@ local function prepare(api, input)
 end
 
 function M.prepare(api, input)
-  local ok, result = pcall(prepare, api, input)
+  local progress = {stage="input"}
+  local ok, result = pcall(prepare, api, input, progress)
   if ok then return result end
-  if rawequal(result, REJECT) then return {code="rejected"} end
-  return {code="unknown"}
+  if rawequal(result, REJECT) then return {code="rejected", stage=progress.stage} end
+  return {code="unknown", stage=progress.stage}
 end
 
 return M

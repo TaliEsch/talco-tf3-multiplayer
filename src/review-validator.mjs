@@ -78,7 +78,7 @@ export async function validateReviewPackage(root) {
     || /app\.saveGame\s*\(|api\.cmd|sendCommand|setGameSpeedup/.test(startupLoadSource))
     throw new Error('startup disposable loader differs from reviewed one-shot source');
   const stopReadbackSource=await readFile(path.join(absoluteRoot,'content','tf3mp_stop_readback.lua'),'utf8');
-  if(createHash('sha256').update(stopReadbackSource.replace(/\r\n/g,'\n')).digest('hex')!=='2d447a8b65540ddf8296d62863c95bd7fe23726106279e3f6b9ace2b105a36af')
+  if(createHash('sha256').update(stopReadbackSource.replace(/\r\n/g,'\n')).digest('hex')!=='8f1179ab2befe2ed7b55c91ab2741bb910289d9f7998e2c4c76ad10b7712cc2e')
     throw new Error('stop readback differs from reviewed read-only source');
   for(const event of ['tf3mp_stop_readback','tf3mp_get_stop_readback',
     'tf3mp_road_preaction_probe','tf3mp_get_road_preaction_probe'])
@@ -100,7 +100,7 @@ export async function validateReviewPackage(root) {
     ['tf3mp_road_replay_prepare.lua', 'b6738a73e3306ca6aa734c63438c91ed5b54ade321eede31c920103eab67ab25'],
     ['tf3mp_road_replay_rebuild.lua', 'f6de6ff3edff7f05199bf34dfeb699bbb81147e26d4f9257e0f81110a24ae028'],
     ['tf3mp_road_replay_result.lua', '201bd6cc15b2cf137e63a557f8e23254bee19e449d4bf57c2b363f5f37b428fa'],
-    ['tf3mp_road_stop_simple_prepare.lua', 'efb07c3182862daa1f0a2260e8013d41c8678380b8092f8579db552b6a72b376'],
+    ['tf3mp_road_stop_simple_prepare.lua', 'aa98490038bb689a5bd8b739060acff77c5e1b22e68152c94932f3e4bcc132d0'],
   ]) {
     const source = await readFile(path.join(absoluteRoot, 'content', file), 'utf8');
     if (createHash('sha256').update(source.replace(/\r\n/g, '\n')).digest('hex') !== digest)

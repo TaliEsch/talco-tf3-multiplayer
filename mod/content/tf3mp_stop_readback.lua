@@ -365,34 +365,64 @@ function M.copyPreview(proposal, observationId)
 end
 
 -- Read-only pre-click qualification. The factory value never leaves this call.
-function M.preActionProbe(api, request)
+function M.preActionProbe(api, request, preparer)
+  local field = "request"
   local ok, value = pcall(function()
     if type(request) ~= "table" or getmetatable(request) ~= nil then fail() end
     local count = 0
     for key in pairs(request) do
-      if key ~= "nonce" and key ~= "observationId" and key ~= "edgeEntity" and key ~= "companyEntity" then fail() end
+      if key ~= "nonce" and key ~= "observationId" and key ~= "edgeEntity" and key ~= "companyEntity"
+        and key ~= "model" and key ~= "left" then fail() end
       count = count + 1
     end
-    if count ~= 4 or type(request.nonce) ~= "string" or #request.nonce ~= 32
+    if (count ~= 4 and count ~= 6) or type(request.nonce) ~= "string" or #request.nonce ~= 32
       or not request.nonce:match("^[a-f0-9]+$") or not entity(request.observationId)
       or request.observationId > 16 or not entity(request.edgeEntity) or not entity(request.companyEntity) then fail() end
+    field = "clock"
     local updateCount = clock(api, function() end)
+    field = "player"
     if api.engine.util.getPlayer() ~= request.companyEntity
       or api.engine.entityExists(request.companyEntity) ~= true
       or api.engine.entityExists(request.edgeEntity) ~= true
       or not native(component(api, request.companyEntity, "PLAYER")) then fail() end
+    field = "road"
     local edge = component(api, request.edgeEntity, "BASE_EDGE")
     if not native(edge) or not dense(edge.objects, 64) or #edge.objects ~= 0 then fail() end
+    field = "replacement"
     local probe = replacementProbe(api, request.edgeEntity)
     if probe.code ~= "shape" or probe.added ~= 1 or probe.removed ~= 1 or probe.edgeObjects ~= 0
       or probe.firstAddedEntity ~= -1 or probe.firstAddedObjectCount ~= 0
       or probe.firstRemovedEntity ~= request.edgeEntity then fail() end
+    local commandCode, commandStage = "notRequested", "none"
+    if count == 6 then
+      field = "commandInput"
+      if type(request.left) ~= "boolean" or type(request.model) ~= "string" then fail() end
+      resource(request.model)
+      field = "preparerLookup"
+      if preparer == nil or preparer.prepare == nil then fail() end
+      -- Construct only: this synthetic centre position checks TF3's native
+      -- command value without spending, changing the road, or sending it.
+      field = "preparerCall"
+      local prepared = preparer.prepare(api, {edgeEntity=request.edgeEntity,
+        companyEntity=request.companyEntity, param=0.5, left=request.left,
+        oneWay=false, model=request.model, name="TalCo Road Stop"})
+      field = "preparerResult"
+      if type(prepared) ~= "table" or (prepared.code ~= "prepared" and prepared.code ~= "rejected"
+        and prepared.code ~= "unknown") then fail() end
+      commandCode = prepared.code
+      if type(prepared.stage) == "string" and (prepared.stage == "input" or prepared.stage == "world"
+        or prepared.stage == "model" or prepared.stage == "factory"
+        or prepared.stage == "constructor" or prepared.stage == "command") then
+        commandStage = prepared.stage
+      end
+    end
     return {code="shape", nonce=request.nonce, observationId=request.observationId,
       edgeEntity=request.edgeEntity, companyEntity=request.companyEntity, updateCount=updateCount,
-      added=1, removed=1, temporaryEdgeEntity=-1, firstAddedObjectCount=0}
+      added=1, removed=1, temporaryEdgeEntity=-1, firstAddedObjectCount=0,
+      commandCode=commandCode, commandStage=commandStage}
   end)
   if ok then return value end
-  return {code="unavailable"}
+  return {code="unavailable", field=field}
 end
 
 function M.collect(api, request)

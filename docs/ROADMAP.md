@@ -30,8 +30,11 @@ segment and binds one stop object to that temporary edge. It rejects an occupied
 or stale road, wrong company, moving game, or unexpected factory shape and does
 not submit a command. A controlled build-40396 run verified the untouched
 pre-action road shape and observed the placed stop's `.mdl` model resource in
-the same session; see `docs/completion-audit.md`. The preparer itself has not
-run in TF3. Next qualify its command value and native engine acceptance behind
+the same session; see `docs/completion-audit.md`. A further paused read-only
+probe passed the request, clock, player, road and replacement checks, then
+returned `unavailable` at the preparer handoff. No command value or engine
+acceptance is verified. Resolve that handoff, then qualify its command value
+and native engine acceptance behind
 the existing one-use execution gate, using the observed model and edge mapping.
 Then submit one owned construction through Host ordering,
 execute once under the game hold, and verify the resulting stop and native

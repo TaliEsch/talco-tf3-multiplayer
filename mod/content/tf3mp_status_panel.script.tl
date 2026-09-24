@@ -179,6 +179,11 @@ local function exchangeRoadPreAction() : nil
     end
     preActionSent = {nonce=bridgeNonce, observationId=candidate.observationId,
       edgeEntity=candidate.edgeEntity, companyEntity=candidate.companyEntity}
+    -- Build 40396 omits modelInstance from the preview. These synthetic
+    -- stop fields were observed after an ordinary placement on this save.
+    -- The probe only constructs a command value; it cannot submit one.
+    preActionSent.model = "::/stations/street/small_stops/small_mid.mdl"
+    preActionSent.left = true
     api.cmd.sendCommand(api.cmd.makeScriptingSendEventCmd("tf3mp_status_1::/tf3mp_status.gs",
       "tf3mp_engine_bridge", "tf3mp_road_preaction_probe", preActionSent))
     return nil
@@ -196,17 +201,31 @@ local function exchangeRoadPreAction() : nil
     and receipt.updateCount >= 0 and receipt.updateCount <= 2147483647
     and receipt.added == 1 and receipt.removed == 1
     and receipt.temporaryEdgeEntity == -1 and receipt.firstAddedObjectCount == 0 then
-    app.saveUserdata("tf3mp_status_1", "road_stop_preaction_probe", {
+    local saved : table = {
       schemaVersion=1, kind="road_stop_preaction_probe", nonce=preActionSent.nonce,
       observationId=preActionSent.observationId, code="shape", edgeEntity=receipt.edgeEntity,
       companyEntity=receipt.companyEntity, updateCount=receipt.updateCount,
       added=1, removed=1, temporaryEdgeEntity=-1, firstAddedObjectCount=0,
-    })
+    }
+    if receipt.commandCode == "prepared" or receipt.commandCode == "rejected"
+      or receipt.commandCode == "unknown" or receipt.commandCode == "notRequested" then
+      saved.commandCode = receipt.commandCode
+    end
+    if receipt.commandStage == "none" or receipt.commandStage == "input"
+      or receipt.commandStage == "world" or receipt.commandStage == "model"
+      or receipt.commandStage == "factory" or receipt.commandStage == "constructor"
+      or receipt.commandStage == "command" then saved.commandStage = receipt.commandStage end
+    app.saveUserdata("tf3mp_status_1", "road_stop_preaction_probe", saved)
   else
-    app.saveUserdata("tf3mp_status_1", "road_stop_preaction_probe", {
+    local saved : table = {
       schemaVersion=1, kind="road_stop_preaction_probe", nonce=preActionSent.nonce,
       observationId=preActionSent.observationId, code="unavailable",
-    })
+    }
+    if receipt.field == "request" or receipt.field == "clock" or receipt.field == "player"
+      or receipt.field == "road" or receipt.field == "replacement" or receipt.field == "commandInput"
+      or receipt.field == "preparerLookup" or receipt.field == "preparerCall"
+      or receipt.field == "preparerResult" then saved.field = receipt.field end
+    app.saveUserdata("tf3mp_status_1", "road_stop_preaction_probe", saved)
   end
   return nil
 end
