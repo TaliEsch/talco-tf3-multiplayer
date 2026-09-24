@@ -1,5 +1,41 @@
 # Completion audit against the build prompt
 
+## Saved road Stop world readback — 25 September 2026
+
+The preserved outcome save entered the TF3 build-40396 world on a second
+read-only load. TF3 logged `Game is ready` and initialized in 26.58 seconds;
+the GUI showed the paused world, company balance $40,346,746, and TF3MP
+update 2914. The nonce-bound outcome probe ran once and returned `unknown`
+at its combined `world` check. This is a genuine game-side refusal, not a
+save-load stall or proof of stop placement. No construction command was sent.
+The save SHA-256 stayed
+`acdf349b352dc3ab4687dc152410aa9a11c00f84b7eb773880af4205dd55a1d0`.
+TF3 exited without saving, and the one-time request was archived.
+
+The read-only verifier now names the exact refusal point among world identity,
+selected company, original road presence, paused clock, native balance and
+original road conflict. A second one-use probe returned `unknown` at
+`world_original_road`: entity 53417 still exists in the loaded save. A third
+one-use probe continued through the checks and returned `unknown` at
+`original_road_conflict`. It found one matching Stop with the expected owner,
+model, parameters, road attachment, paused clock and native balance, but its
+attached road was not entity 53417. The road ID may have changed or been
+reused across save/load; that remains a hypothesis. The Stop cannot yet be
+tied to the selected pre-action road, so this is not accepted construction
+evidence. Compare stable road geometry and Stop presence in the untouched
+source and outcome saves using read-only checks. Do not repeat the purchase.
+The verifier fails closed and returns no raw world values. Focused tests
+passed (4/4) and mod review passed. TF3 exited without saving after each
+readback; the one-use requests were archived and the original bridge restored.
+
+The full Node suite, run outside the sandbox with forced test-runner exit,
+reported 989 tests, 982 passed and five failed. The same five native debugger
+fixture tests failed when isolated: two multithread teardown cases, unowned
+trap shutdown, four-thread action pairing, and stress detach. Earlier sandbox
+`spawn EPERM` failures were environmental: the focused capture-file test
+passed 7/7 outside the sandbox. The five debugger failures remain open and are
+not road Stop acceptance evidence.
+
 ## Saved road Stop readback attempt — 25 September 2026
 
 The strict result verifier now accepts the exact resulting stop ID from a

@@ -2,6 +2,17 @@
 
 ## Current direction — 25 September 2026
 
+The preserved road Stop outcome save loads into the TF3 build-40396 world.
+Read-only probes narrowed the refusal from `world` to `world_original_road`
+and then `original_road_conflict`. The final probe found one Stop matching the
+expected owner, model, parameters and road attachment, with the paused clock
+and native balance debit, but road entity 53417 still exists and is different
+from the Stop's attached road. The result remains `unknown`: compare stable
+road geometry and Stop presence in the untouched source and outcome saves
+before claiming the purchase succeeded. Never retry that uncertain purchase.
+The full suite has five reproducible native debugger fixture failures; see
+the completion audit. Readiness remains about 6.3/10.
+
 The saved road Stop outcome has a focused read-only probe and the callback
 verifier can use the exact resulting stop ID from TF3's completed proposal.
 Offline tests and mod review pass. A build-40396 read-only load of the

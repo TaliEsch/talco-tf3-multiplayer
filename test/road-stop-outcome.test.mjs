@@ -49,3 +49,16 @@ test('rejects missing, ambiguous, wrong company and wrong attachment',()=>{
     'request.expectedBalance=100000',
   ]) assert.equal(run(change).code,'unknown',change);
 });
+test('world refusal identifies the exact check without returning untrusted values',()=>{
+  for(const [change,stage] of [
+    ['api.engine.util.getWorld=function()return nil end','world_identity'],
+    ['api.engine.util.getPlayer=function()return 11 end','world_company'],
+    ['api.engine.entityExists=function(id)if id==24 then return nil end return exists[id]==true end','world_original_road'],
+    ['api.engine.getComponent=function(id,kind)if kind=="GAME_SPEED"then return{speedup=1}end if kind=="GAME_TIME"then return{updateCount=50}end return components[kind] and components[kind][id] end','world_clock'],
+    ['api.engine.util.finance.getPlayersBalance=function()return 1 end','world_balance'],
+  ]) assert.deepEqual(run(change),{code:'unknown',stage,stop:0,cost:0},change);
+});
+test('accepts a replacement road assigned the original ID only when it carries the stop',()=>{
+  assert.equal(run('exists[24]=true;map[81]=24;components.BASE_EDGE[24]={objects={{81,1}}}').code,'observed');
+  assert.deepEqual(run('exists[24]=true'),{code:'unknown',stage:'original_road_conflict',stop:0,cost:0});
+});

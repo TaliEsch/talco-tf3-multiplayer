@@ -35,14 +35,20 @@ local function probe(api, request, progress)
     or not integer(request.priorBalance) or not integer(request.expectedBalance)
     or request.expectedBalance < 0 or request.priorBalance <= request.expectedBalance
     or not integer(request.expectedUpdateCount) or request.expectedUpdateCount < 0 then fail() end
-  progress.stage = "world"
+  progress.stage = "world_identity"
   local world = api.engine.util.getWorld()
-  if not integer(world) or api.engine.util.getPlayer() ~= request.companyEntity
-    or api.engine.entityExists(request.originalEdgeEntity) ~= false then fail() end
+  if not integer(world) then fail() end
+  progress.stage = "world_company"
+  if api.engine.util.getPlayer() ~= request.companyEntity then fail() end
+  progress.stage = "world_original_road"
+  local originalIdPresent = api.engine.entityExists(request.originalEdgeEntity)
+  if type(originalIdPresent) ~= "boolean" then fail() end
+  progress.stage = "world_clock"
   local speed, time = component(api, world, "GAME_SPEED"), component(api, world, "GAME_TIME")
   if not native(speed) or speed.speedup ~= 0 or not native(time)
-    or time.updateCount ~= request.expectedUpdateCount
-    or api.engine.util.finance.getPlayersBalance(request.companyEntity) ~= request.expectedBalance then fail() end
+    or time.updateCount ~= request.expectedUpdateCount then fail() end
+  progress.stage = "world_balance"
+  if api.engine.util.finance.getPlayersBalance(request.companyEntity) ~= request.expectedBalance then fail() end
   progress.stage = "model"
   local modelId = api.res.modelRep.find(request.model)
   if not integer(modelId) or modelId < 0 or modelId > 2147483647 then fail() end
@@ -87,9 +93,13 @@ local function probe(api, request, progress)
   end
   progress.stage = "unique"
   if candidates ~= 1 then fail() end
+  -- A present original ID is acceptable only when it is the road carrying
+  -- this verified stop. Its meaning after save/load needs separate evidence.
+  progress.stage = "original_road_conflict"
+  if originalIdPresent and edgeId ~= request.originalEdgeEntity then fail() end
   return {code="observed", nonce=request.nonce, stopEntity=stop, edgeEntity=edgeId,
     companyEntity=request.companyEntity, balance=request.expectedBalance,
-    updateCount=request.expectedUpdateCount,
+    updateCount=request.expectedUpdateCount, originalIdPresent=originalIdPresent,
     chargedCost=request.priorBalance - request.expectedBalance}
 end
 function M.probe(api, request)
