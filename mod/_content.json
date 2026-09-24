@@ -16,6 +16,7 @@
     "tf3mp_road_replay_prepare.lua",
     "tf3mp_road_replay_rebuild.lua",
     "tf3mp_road_replay_result.lua",
+    "tf3mp_road_stop_outcome.lua",
     "tf3mp_road_stop_simple_dispatch.lua",
     "tf3mp_road_stop_simple_prepare.lua",
     "tf3mp_road_stop_simple_result.lua",

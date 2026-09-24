@@ -174,7 +174,7 @@ test("review rejects unsupported log.info in the engine script", async () => {
 test("source mod package passes controlled-load review validation", async () => {
   const result = await validateReviewPackage(new URL("../mod", import.meta.url));
   assert.equal(result.modId, "tf3mp_status_1");
-  assert.equal(result.contentFiles, 32);
+  assert.equal(result.contentFiles, 33);
   assert.equal(result.executableFiles, 0);
   assert.equal(result.readyForControlledLoadReview, true);
 });

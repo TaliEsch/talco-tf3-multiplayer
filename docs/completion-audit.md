@@ -1,5 +1,95 @@
 # Completion audit against the build prompt
 
+## Saved road Stop readback attempt — 25 September 2026
+
+The strict result verifier now accepts the exact resulting stop ID from a
+completed TF3 `Proposal.EdgeObject` when the callback's changed-entity vector
+omits the stop; it still requires owner, model, road attachment, paused clock
+and native debit postconditions. A separate read-only outcome probe checks the
+preserved save against the original road ID, company, model, balance and
+update count, then requires one unambiguous attached stop in TF3's street map.
+Focused result/probe tests passed (7/7), and mod review passed. These are
+model-tested changes, not yet real-game acceptance.
+
+The outcome save was loaded in build 40396 for read-only inspection. The log
+reached game UI recipe registration but stopped updating at `push() default
+tool`; the loading screen remained visible, no fresh telemetry or probe receipt
+was written, and the launcher session ended. The TF3 process was closed after
+remaining active without a world view. No command was submitted. The one-time
+read-only request was archived, the temporary native loader removed, and the
+outcome save SHA-256 remained
+`acdf349b352dc3ab4687dc152410aa9a11c00f84b7eb773880af4205dd55a1d0`.
+Stop placement remains unverified. Diagnose the saved-world load and obtain
+the read-only receipt before another purchase attempt.
+
+## Build-40396 one-use road Stop engine outcome — 24 September 2026
+
+The preparer now uses temporary object ID `-400000000` in the replacement
+edge's `comp.objects`, matching the exact-build TF3 assertion range. Focused
+preparer/result/dispatch/executor tests passed (15/15), and mod review passed.
+In a fresh paused disposable-save run, the read-only receipt returned
+`commandCode=prepared` for company 3141, road 53417, update 2914 and nonce
+`6797d47bcfb914a31c4be3098378a7f4`. The road Stop GUI preview cost was
+$67,500. One guarded local engine request was then submitted; this trial did
+not exercise host ordering. Its receipt was `ENGINE_OUTCOME_UNKNOWN` at
+`result_entities` (request 1, tick 58330, update 2914). Callback checks before
+that stage passed: success, removal of the original road, positive native cost,
+stable owner/clock, and balance matching the callback cost. Observed company
+balance changed from $40,393,094 to $40,346,746, a $46,348 debit. The result
+entity list did not qualify the expected new EDGE_OBJECT, so stop attachment
+and ownership remain unverified. The one-use request was not retried.
+
+The mutated world was preserved in a new disposable outcome save
+`tf3mp_roadstop_outcome_6797d47bcfb914a31c4be3098378a7f4.sav` (SHA-256
+`acdf349b352dc3ab4687dc152410aa9a11c00f84b7eb773880af4205dd55a1d0`).
+The untouched source save still hashes to
+`ccbf4beb740e53323e06d20890fd029c8e174d3e85efb06801a8b4275c762fb5`.
+TF3 exited and the temporary native loader was removed. Next inspect the
+preserved poststate read-only and qualify the callback entity-list semantics;
+do not repeat this uncertain purchase.
+
+## Build-40396 read-only road command conversion — 24 September 2026
+
+After the prior `.mdl` resource lookup failure, the guarded preparer validated
+the visual model and passed the observed placed construction resource
+`::/stations/street/small_stops/small_mid.con` to TF3's edge-object converter.
+Focused preparer/result/dispatch/executor/review tests passed (38/38), as did
+`node src/cli.mjs review --path mod`. In a fresh paused disposable-save TF3
+run, company 3141, road 53417 and nonce
+`f30e600d671bd7e6fc1d554f705cbb2f` reached read-only command preparation
+at update 3026. The receipt returned `code=unknown`, `stage=command`; no
+guarded request was submitted. The game log twice reported the exact assertion
+`EdgeObjectEntityToIndex: entity.GetId() <= -400000000 &&
+entity.GetId() > -500000000`. The preparer had used TF2's `-1` object
+reference in the replacement edge; TF3 rejected that temporary object ID.
+This does not verify that the `.con` resource is accepted after the ID is fixed.
+The preview cost was $67,500, but no stop or native charge was observed. TF3
+was closed without saving, the source save SHA-256 remained
+`ccbf4beb740e53323e06d20890fd029c8e174d3e85efb06801a8b4275c762fb5`,
+and the temporary native loader was removed. Qualify the temporary object-ID
+mapping before another TF3 run; road placement and economy remain unverified.
+
+## Build-40396 replacement-edge linkage trial — 24 September 2026
+
+The TF2 implementation adds `{-1, stop side}` to the replacement edge's
+`comp.objects` as well as declaring the new edge object. We adapted that
+linkage in the TF3 simple road Stop preparer, with no copied TF2 code.
+Focused preparer/result/dispatch/executor/review tests passed (38/38), and
+package review passed. This is a shape correction, not gameplay proof.
+
+One fresh paused disposable-save TF3 request for company 3141, road 53417,
+nonce `1c0916288d2a9bc553aaeb185c1f997f`, and update 2973 reached the
+callback. It returned `ENGINE_OUTCOME_UNKNOWN`, `stage=result_road` at tick
+57867. The original road remained, the balance stayed $40,393,094, and no
+stop was visible after closing the preview. The game log reported `Couldn't
+find resource for edge object`, naming
+`::/stations/street/small_stops/small_mid.mdl` at 22:14:54 UTC. The request
+was not retried. TF3 exited without saving, the source save SHA-256 remained
+`ccbf4beb740e53323e06d20890fd029c8e174d3e85efb06801a8b4275c762fb5`,
+and the temporary native loader was removed. The model/resource conversion
+in the TF3 command is the next concrete failure to isolate. Road placement,
+charge, and host ordering remain unverified.
+
 ## Build-40396 guarded road Stop result — 24 September 2026
 
 One paused disposable-save command attempt reached TF3 with a qualified

@@ -29,7 +29,7 @@ local api={type={ComponentType={PLAYER='PLAYER',BASE_EDGE='BASE_EDGE',EDGE_OBJEC
 ${preChange}
 local before=result.before(api,input,players)
 exists[24]=nil;exists[25]=true;exists[81]=true;stops={80,81};balances[10]=32500
-local data={resultProposalData={costs=67500}};local success=true;local entities={{25,1},{81,1}}
+local data={resultProposalData={costs=67500},proposal={streetProposal={edgeObjectsToAdd={{resultEntity=81}}}}};local success=true;local entities={{25,1},{81,1}}
 ${change}
 local after=result.after(api,before,input,data,success,entities)
 return before.code,after.code,after.stopEntity or 0,after.chargedCost or 0,calls`;
@@ -45,12 +45,18 @@ return before.code,after.code,after.stopEntity or 0,after.chargedCost or 0,calls
 test('correlates one owned stop, replaced road and native debit under the same hold',()=>{
   assert.deepEqual(run(),{before:'observed',after:'verified',stop:81,cost:67500,calls:0});
 });
+test('accepts the completed proposal exact stop ID when the callback omits that object',()=>{
+  assert.deepEqual(run('entities={{25,1}}'),{before:'observed',after:'verified',stop:81,cost:67500,calls:0});
+});
 test('callback and state discrepancies remain unknown, without a mutation',()=>{
   for(const change of [
     'success=false','balances[10]=100000','balances[11]=69999','balances[10]=-1',
     'components.PLAYER_OWNED[81].player=11','components.BASE_EDGE[25].objects={{81,2}}',
     'components.MODEL_INSTANCE_LIST[81].fatInstances={{modelId=8}}',
-    'components.EDGE_OBJECT[81].param=.3','entities={{25,1}}','entities={{25,1},{81,1},{82,1}};components.EDGE_OBJECT[82]={param=.5}',
+    'components.EDGE_OBJECT[81].param=.3',
+    'entities={{25,1}};data.proposal.streetProposal.edgeObjectsToAdd[1].resultEntity=82',
+    'entities={{25,1}};data.proposal.streetProposal.edgeObjectsToAdd={}',
+    'entities={{25,1},{81,1},{82,1}};components.EDGE_OBJECT[82]={param=.5}',
     'exists[24]=true','update=51','data.resultProposalData.costs=0',
   ]){
     const observed=run(change);

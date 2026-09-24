@@ -1,6 +1,45 @@
 # TalCo TF3 multiplayer — current delivery plan
 
-## Current direction — 24 September 2026
+## Current direction — 25 September 2026
+
+The saved road Stop outcome has a focused read-only probe and the callback
+verifier can use the exact resulting stop ID from TF3's completed proposal.
+Offline tests and mod review pass. A build-40396 read-only load of the
+preserved outcome save reached UI recipe registration but did not enter the
+world or produce telemetry; the save remained unchanged and the temporary
+loader was removed. Diagnose that load before using the probe. Road Stop
+ownership and attachment, then host-ordered road/economy play, remain the
+next stage-7 checks. Readiness remains about 6.3/10.
+
+The latest paused, one-use TF3 road Stop request reached engine execution on
+build 40396. Read-only preparation passed after using TF3's qualified
+temporary edge-object ID range. The callback reached `result_entities`, and
+the company balance fell $46,348, matching its reported native cost. The
+original road was removed, but the returned entity list did not qualify the
+new stop, so the receipt remains `ENGINE_OUTCOME_UNKNOWN`. The changed world
+is saved separately for read-only inspection; do not retry the request.
+Verify the stop and replacement-road attachment from that poststate, then
+adapt the strict result readback if TF3's callback entity-list semantics
+require it. Host ordering of road/economy actions remains open. Overall
+readiness is about 6.3/10; two-instance testing remains deferred by the user.
+
+The latest paused, read-only TF3 trial exposed a concrete TF3-specific
+proposal mismatch before command submission: its `EdgeObjectEntityToIndex`
+converter requires a temporary edge-object ID in `(-500000000, -400000000]`,
+whereas the TF2-derived replacement-edge reference used `-1`. The receipt was
+`code=unknown`, `stage=command`; no placement request was submitted. The
+disposable save hash stayed unchanged and the temporary loader was removed.
+Qualify the TF3 temporary object-ID mapping offline before another game run.
+Stage 7 road placement, native charge and host ordering remain open; readiness
+remains about 6.3/10.
+
+The latest one-use road Stop trial adapted TF2's replacement-edge object
+linkage and passed focused tests, but real TF3 still returned
+`ENGINE_OUTCOME_UNKNOWN` at `result_road`. The balance and source save stayed
+unchanged, no stop appeared, and the game log identified an unresolved edge
+object model resource. Isolate TF3's required model string/identity in the
+proposal before spending another game run. Overall readiness remains around
+6.3/10; stage 7 road/economy acceptance is still open.
 
 Latest guarded single-game road Stop attempt reached the callback but returned
 `ENGINE_OUTCOME_UNKNOWN` at `result_road`: the original road still existed,

@@ -1,6 +1,11 @@
 -- Prepare a TF3 SimpleProposal for one stop on an untouched road. This module
 -- constructs a command value only; it never sends or executes that command.
 local M = {}
+local STOP_MODEL = "::/stations/street/small_stops/small_mid.mdl"
+local STOP_CONSTRUCTION = "::/stations/street/small_stops/small_mid.con"
+-- Build 40396's EdgeObjectEntityToIndex accepts (-500000000, -400000000].
+-- Index zero is the first newly added edge object in this one-object recipe.
+local FIRST_TEMP_EDGE_OBJECT = -400000000
 local REJECT = {}
 local function fail() error(REJECT, 0) end
 local function integer(v) return type(v) == "number" and v == math.floor(v) and v >= -2147483647 and v <= 2147483647 end
@@ -48,13 +53,14 @@ local function prepare(api, input, progress)
   if not native(speed) or speed.speedup ~= 0 then fail() end
   progress.stage = "model"
   local rep = api.res and api.res.modelRep
-  if not native(rep) then fail() end
+  local constructions = api.res and api.res.constructionRep
+  if not native(rep) or not native(constructions) or input.model ~= STOP_MODEL then fail() end
   local modelId = rep.find(input.model)
   if not integer(modelId) or modelId < 0 then fail() end
-  -- The repository lookup accepts the UI's ::/ alias. The proposal
-  -- converter expects the relative resource name without that prefix.
-  local modelName = input.model:sub(1, 3) == "::/" and input.model:sub(4) or input.model
-  resource(modelName)
+  -- TF3's placed edge object readback names this construction resource. The
+  -- .mdl is its visual model and the converter rejected it as an edge object.
+  local constructionId = constructions.find(STOP_CONSTRUCTION)
+  if not integer(constructionId) or constructionId < 0 then fail() end
 
   progress.stage = "factory"
   local factory = api.engine.util.proposal
@@ -99,8 +105,17 @@ local function prepare(api, input, progress)
   local simpleStreet = api.type.SimpleStreetProposal.new()
   local object = api.type.SimpleStreetProposal.EdgeObject.new()
   if not native(simple) or not native(simpleStreet) or not native(object) then fail() end
+  -- The replacement edge must reference its new object as well as declaring
+  -- that object in edgeObjectsToAdd. The original factory edge is untouched.
+  local kinds = api.type.enum and api.type.enum.EdgeObjectType
+  local side
+  if kinds then
+    if input.left then side = kinds.STOP_LEFT else side = kinds.STOP_RIGHT end
+  end
+  if side == nil then fail() end
+  added.comp.objects = {{FIRST_TEMP_EDGE_OBJECT, side}}
   object.edgeEntity, object.param, object.oneWay = added.entity, input.param, input.oneWay
-  object.left, object.model, object.playerEntity, object.name = input.left, modelName, input.companyEntity, input.name
+  object.left, object.model, object.playerEntity, object.name = input.left, STOP_CONSTRUCTION, input.companyEntity, input.name
   simpleStreet.edgesToAdd, simpleStreet.edgesToRemove = {added}, {input.edgeEntity}
   simpleStreet.edgeObjectsToAdd = {object}
   simpleStreet.nodeConfigsToAdd = street.nodeConfigsToAdd

@@ -113,6 +113,19 @@ local function verify(api, before, input, data, success, resultEntities, progres
     affected[id] = true
     if native(component(api, id, "EDGE_OBJECT")) then stop, count = id, count + 1 end
   end
+  if count == 0 then
+    -- TF3 may omit the new object from the callback's changed-entity vector.
+    -- Its completed Proposal exposes the exact resulting edge-object entity.
+    -- Never infer an ID from a world scan or accept a contradictory callback.
+    local completed = native(data) and data.proposal
+    local street = native(completed) and completed.streetProposal
+    local objects = native(street) and street.edgeObjectsToAdd
+    if not dense(objects, 1) or #objects ~= 1 or not native(objects[1])
+      or not entity(objects[1].resultEntity) or affected[objects[1].resultEntity]
+      or api.engine.entityExists(objects[1].resultEntity) ~= true
+      or not native(component(api, objects[1].resultEntity, "EDGE_OBJECT")) then fail() end
+    stop, count = objects[1].resultEntity, 1
+  end
   if count ~= 1 then fail() end
   progress.stage = "result_stop"
   local owner = component(api, stop, "PLAYER_OWNED")

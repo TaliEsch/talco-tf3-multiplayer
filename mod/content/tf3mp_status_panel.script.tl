@@ -8,6 +8,10 @@ local record Tf3MpCaptureEncoding
   toHex : function(string) : string
 end
 local roadCapture = ug_require "tf3mp_status_1::/tf3mp_road_capture.lua" as Tf3MpCaptureEncoding
+local record Tf3MpRoadStopOutcome
+  probe : function(any, table) : table
+end
+local roadStopOutcome = ug_require "tf3mp_status_1::/tf3mp_road_stop_outcome.lua" as Tf3MpRoadStopOutcome
 
 local record Tf3MpPanelState
   tickCount : integer
@@ -376,7 +380,21 @@ local function exchangeStopReadback() : nil
   log.message("{\"event\":\"native_stop_readback\",\"code\":\"COPIED_PLACED_OBJECT_ONLY\",\"gameplayVerified\":false}")
   return nil
 end
+local outcomeFinished = false
+local outcomeSteps : integer = 0
+local function exchangeRoadOutcome() : nil
+  if outcomeFinished or #bridgeNonce ~= 32 then return nil end
+  outcomeSteps = outcomeSteps + 1
+  if outcomeSteps % 60 ~= 0 then return nil end
+  local request = app.loadUserdata("tf3mp_status_1", "road_stop_outcome_request")
+  if type(request) ~= "table" or request.nonce ~= bridgeNonce then return nil end
+  outcomeFinished = true
+  local result = roadStopOutcome.probe(api, request as table)
+  app.saveUserdata("tf3mp_status_1", "road_stop_outcome_receipt", result)
+  return nil
+end
 local function flushRoadCapture() : nil
+  pcall(exchangeRoadOutcome)
   if not preActionFinished then
     local probeOk = pcall(exchangeRoadPreAction)
     if not probeOk then preActionFinished = true end
