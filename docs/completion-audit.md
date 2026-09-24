@@ -1,5 +1,26 @@
 # Completion audit against the build prompt
 
+## Host roster inspection — 24 September 2026
+
+Production Host capture now checks two to four distinct claimed company IDs
+against one nonce-bound, paused game-side inspection before it binds players.
+The Host's live player must match the chosen host company; each requested
+company entity must exist with a `PLAYER` component. The launcher supports
+the corresponding roster capture for two to four save-ready participants.
+Focused tests passed 35/35, mod review passed with manifest SHA-256
+`3503c5e70956e6056f95097e12d534cbee806a490b6da15339f02f2628b0d7c4`,
+and the launcher built. A read-only disposable-save TF3 build-40392 run
+returned `VERIFIED` for host company 3141 and second company 55652 at game
+update 3063, tick 57442. The bridge recorded `gameplayVerified=false`;
+no remote peer or action was exercised. TF3 closed without saving. The source
+save SHA-256 remained
+`ccbf4beb740e53323e06d20890fd029c8e174d3e85efb06801a8b4275c762fb5`.
+Three/four-company evidence is model-only. Two-instance baseline and ordered
+action agreement remain open. The full suite reported 954 tests: 948 passed,
+five previously recorded native controller/observer fixture failures remained,
+and one was skipped. No new roster test failed. Its private log is
+`C:\Users\olihf\Downloads\Temp\tf3mp-check-20260924-roster.log`.
+
 ## Join company proposal to two-company capture — 23 September 2026
 
 The Join helper now sends one authenticated selected-company proposal only

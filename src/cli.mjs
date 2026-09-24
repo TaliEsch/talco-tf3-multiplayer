@@ -25,6 +25,7 @@ import {connectHostLocalParticipant} from './host-local-participant.mjs';
 import {loadHostLocalEngineFactory} from './host-local-cli-seam.mjs';
 import {liveHostUpdateCount} from './live-host-clock.mjs';
 import {createTwoCompanyHostCapture} from './two-company-host-capture.mjs';
+import {createHostRosterCapture} from './host-roster-capture.mjs';
 import {createHostCancelledStop} from './host-cancelled-stop.mjs';
 import {createJoinEngineBootstrap} from './join-engine-bootstrap.mjs';
 import {fileURLToPath} from 'node:url';
@@ -114,6 +115,7 @@ const sessionSecret = opt.secret ?? process.env.TF3MP_SESSION_SECRET;
 let bridge;
 let hostInstance, nativeGate, vehicleTestActive = false;
 let hostCapture=null,hostCaptureAttempted=false;
+let hostRosterCapture=null;
 let hostCancelledStop=null;
 let hostLocalParticipant=null;
 let joinConnection=null,joinSessionReady=false,joinCompanyClaimed=false;
@@ -191,13 +193,14 @@ if (command === "host" || command === "join") createInterface({ input: process.s
     }).catch(error=>rawLog({level:'warn',event:'multiplayer_cancelled_stop_rejected',
       code:error?.message??'UNKNOWN',gameplayVerified:false}));
   }
-  else if(line.trim()==='multiplayer-capture-two-confirmed'){
-    if(command!=='host'||!hostCapture||hostCaptureAttempted||vehicleTestActive||integrationBatch||batchStarting
+  else if(['multiplayer-capture-two-confirmed','multiplayer-capture-roster-confirmed'].includes(line.trim())){
+    const capture=line.trim()==='multiplayer-capture-two-confirmed'?hostCapture:hostRosterCapture;
+    if(command!=='host'||!capture||hostCaptureAttempted||vehicleTestActive||integrationBatch||batchStarting
       ||coordinatorRun||coordinatorStarting||phase2Setup||phase2Starting||depotPreviewOwnsHelper)
       rawLog({level:'warn',event:'multiplayer_capture',code:'FRESH_QUALIFIED_HOST_REQUIRED'});
     else {
       hostCaptureAttempted=true;
-      hostCapture.start().then(result=>rawLog({level:'info',event:'multiplayer_capture',
+      capture.start().then(result=>rawLog({level:'info',event:'multiplayer_capture',
         code:'CAPTURE_SENT_AWAIT_ENGINE_RECEIPTS',...result,gameplayVerified:false}))
         .catch(error=>rawLog({level:'warn',event:'multiplayer_capture',
           code:error?.code??error?.message??'CAPTURE_FAILED_STOP_HELPER',gameplayVerified:false}));
@@ -444,7 +447,10 @@ if (command === 'prepare-join') {
         if(message.kind==='session_ended')log({level:'warn',event:'host_local_participant_ended',gameplayVerified:false});
       }});
     hostLocalParticipant=local;
-    if(!nativeMode.diagnosticOnly)hostCapture=createTwoCompanyHostCapture({host:instance,bridge,nativeGate,hostLocal:local});
+    if(!nativeMode.diagnosticOnly){
+      hostCapture=createTwoCompanyHostCapture({host:instance,bridge,nativeGate,hostLocal:local});
+      hostRosterCapture=createHostRosterCapture({host:instance,bridge,nativeGate,hostLocal:local});
+    }
     if(!nativeMode.diagnosticOnly)hostCancelledStop=createHostCancelledStop({host:instance,hostLocal:local,
       bridge,nativeGate,logger:log});
     local.attachment.then(()=>{

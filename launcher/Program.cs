@@ -255,8 +255,8 @@ internal sealed class MainWindow : Window
             ? "Before they join: forward TCP ports 37333–37334 to " + network.LocalAddress + ".\nPublic endpoint in code: " + network.JoinAddress
             : "Local-network address: " + network.JoinAddress;
         content.Children.Add(new TextBlock { Text = "Save: " + saveName + "\n" + networkText, TextAlignment = TextAlignment.Center, TextWrapping = TextWrapping.Wrap, Foreground = mutedBrush, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 10, 0, 16) });
-        captureTwoButton = PrimaryButton("BEGIN 2-COMPANY CHECKPOINT", CaptureTwoClicked, Color.FromRgb(67, 118, 232));
-        captureTwoButton.IsEnabled = saveReadyPlayers.Count == 2 && companyClaimPlayers.Count == 1 && !hostCaptureRequested;
+        captureTwoButton = PrimaryButton("BEGIN COMPANY CHECKPOINT", CaptureTwoClicked, Color.FromRgb(67, 118, 232));
+        RefreshCaptureButton();
         captureTwoButton.Margin = new Thickness(0, 4, 0, 10);
         content.Children.Add(captureTwoButton);
         StackPanel buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center };
@@ -269,13 +269,22 @@ internal sealed class MainWindow : Window
 
     private void CaptureTwoClicked(object sender, RoutedEventArgs e)
     {
-        if (hostCaptureRequested || saveReadyPlayers.Count != 2 || companyClaimPlayers.Count != 1 || helper == null || helper.HasExited) return;
-        if (MessageBox.Show(this, "Use a disposable save with the two verified companies. Both TF3 instances must have loaded the same Host save and be paused. This starts a one-attempt checkpoint; a failed or unknown attempt requires a fresh session. Continue?", "Two-company checkpoint", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No) != MessageBoxResult.Yes) return;
+        int count = saveReadyPlayers.Count;
+        if (hostCaptureRequested || count < 2 || count > 4 || companyClaimPlayers.Count != count - 1 || helper == null || helper.HasExited) return;
+        if (MessageBox.Show(this, "Use a disposable save with " + count + " distinct verified companies. Every TF3 instance must have loaded the same Host save and be paused. This starts a one-attempt checkpoint; a failed or unknown attempt requires a fresh session. Continue?", "Company checkpoint", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No) != MessageBoxResult.Yes) return;
         hostCaptureRequested = true;
         captureTwoButton.IsEnabled = false;
-        helper.StandardInput.WriteLine("multiplayer-capture-two-confirmed");
+        helper.StandardInput.WriteLine(count == 2 ? "multiplayer-capture-two-confirmed" : "multiplayer-capture-roster-confirmed");
         helper.StandardInput.Flush();
-        SetStatus("Two-company checkpoint requested — waiting for engine receipts");
+        SetStatus(count + "-company checkpoint requested — waiting for engine receipts");
+    }
+
+    private void RefreshCaptureButton()
+    {
+        if (captureTwoButton == null) return;
+        int count = saveReadyPlayers.Count;
+        captureTwoButton.Content = count >= 2 ? "BEGIN " + count + "-COMPANY CHECKPOINT" : "BEGIN COMPANY CHECKPOINT";
+        captureTwoButton.IsEnabled = count >= 2 && count <= 4 && companyClaimPlayers.Count == count - 1 && !hostCaptureRequested;
     }
 
     private void ShowJoinProgress(string address)
@@ -850,23 +859,23 @@ internal sealed class MainWindow : Window
             if (eventName == "host_listening" && hostReady != null) { Action ready = hostReady; hostReady = null; ready(); }
             if (eventName == "peer_save_ready" && message.TryGetValue("playerId", out value) && value is string) {
                 saveReadyPlayers.Add((string)value);
-                if (captureTwoButton != null) captureTwoButton.IsEnabled = saveReadyPlayers.Count == 2 && companyClaimPlayers.Count == 1 && !hostCaptureRequested;
-                SetStatus(saveReadyPlayers.Count == 2 ? "Both players verified the Host save — waiting for Join company proposal" : "Host save verified for one player — waiting for Join");
+                RefreshCaptureButton();
+                SetStatus(saveReadyPlayers.Count >= 2 ? "Players verified the Host save — waiting for each Join company proposal" : "Host save verified for one player — waiting for Join");
             }
             if (eventName == "peer_company_claim" && message.TryGetValue("playerId", out value) && value is string) {
                 companyClaimPlayers.Add((string)value);
-                if (captureTwoButton != null) captureTwoButton.IsEnabled = saveReadyPlayers.Count == 2 && companyClaimPlayers.Count == 1 && !hostCaptureRequested;
-                SetStatus("Join company proposed — inspect both TF3 worlds, then begin the checkpoint");
+                RefreshCaptureButton();
+                SetStatus("Join company proposed — inspect every TF3 world, then begin the checkpoint");
             }
             if (eventName == "peer_left" && message.TryGetValue("playerId", out value) && value is string) {
                 saveReadyPlayers.Remove((string)value);
                 companyClaimPlayers.Remove((string)value);
-                if (captureTwoButton != null) captureTwoButton.IsEnabled = false;
+                RefreshCaptureButton();
                 SetStatus("A player left — checkpoint requires a fresh qualified roster");
             }
             if (eventName == "multiplayer_capture") SetStatus(code == "CAPTURE_SENT_AWAIT_ENGINE_RECEIPTS"
-                ? "Two-company checkpoint sent — waiting for both engine receipts"
-                : "Two-company checkpoint stopped: " + code + " • start a fresh session after inspection");
+                ? "Company checkpoint sent — waiting for engine receipts"
+                : "Company checkpoint stopped: " + code + " • start a fresh session after inspection");
             if (eventName == "join_company_claim") SetStatus(code == "CLAIM_SENT_AWAIT_HOST_ENGINE_PROOF"
                 ? "Company proposal sent — Host and TF3 must verify it before gameplay"
                 : "Company proposal unavailable: " + code + " • inspect Debug");

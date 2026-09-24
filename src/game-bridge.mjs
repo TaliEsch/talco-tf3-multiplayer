@@ -22,6 +22,7 @@ import { createHaltProbe } from "./halt-probe.mjs";
 import { createWatchdogProbe } from "./watchdog-probe.mjs";
 import { createEngineLease } from "./engine-lease.mjs";
 import { parseCompanyInspection, companyInspectionRows } from "./company-inspection.mjs";
+import {parseRosterInspection,validateCompanyRoster} from './roster-inspection.mjs';
 import {createRoadStopReplayRequest} from './road-stop-replay-request.mjs';
 import {checkRoadStopReplayIdentity} from './road-stop-replay-case.mjs';
 import {publishRoadStopReplayRequest,readRoadStopReplayReceipt} from './road-stop-replay-mailbox.mjs';
@@ -141,6 +142,7 @@ export async function startGameBridge({ directory, logger = () => {}, intervalMs
   let phase2FundedContext = null;
   let companyInspection = null;
   let hostCompanyPairBusy = false;
+  let rosterInspection=null,rosterInspectionBusy=false;
   let depotPreview = false;
   let phase2Setup = null;
   let companyInspectionResult = null, coordinatorSelection = null, selectionId = null;
@@ -251,6 +253,32 @@ export async function startGameBridge({ directory, logger = () => {}, intervalMs
         logger({ level: receipt?.outcome === "inspected" ? "info" : "warn", event: "company_inspection_result", code: code ?? receipt.outcome, gameplayVerified: false });
         if (receipt) for (const row of companyInspectionRows(receipt)) logger({ level: "info", event: "company_snapshot", ...row,
           tickCount: receipt.tickCount, updateCount: receipt.updateCount, gameplayVerified: false });
+      }
+    }
+    if(rosterInspection){
+      let receipt=null,code=null;
+      if(Date.now()>=rosterInspection.deadline||!connected)code='ROSTER_INSPECTION_UNAVAILABLE';
+      else try{
+        receipt=parseRosterInspection(await readBounded(directory,'roster_inspection.lua'),{
+          nonce,requestId:rosterInspection.requestId,companies:rosterInspection.companies,
+          issuedUpdate:rosterInspection.updateCount});
+      }catch{ /* Partial, stale and malformed receipts cannot prove a roster. */ }
+      if(receipt||code){
+        const request=rosterInspection,observation=observations.status;
+        rosterInspection=null;
+        await unlink(path.join(directory,'roster_inspect_request.lua')).catch(()=>{});
+        if(receipt?.outcome==='verified'&&observation.available&&observation.sample?.speedup===0
+          &&observation.sample.companyEntity===request.companies[0]
+          &&observation.sample.updateCount===request.updateCount
+          &&receipt.tickCount>=request.issuedTick){
+          request.resolve(receipt);
+          logger({level:'info',event:'host_roster_inspection',code:'VERIFIED',
+            companyCount:receipt.companies.length,updateCount:receipt.updateCount,gameplayVerified:false});
+        }else{
+          const failure=code??receipt?.outcome??'ROSTER_INSPECTION_UNVERIFIED';
+          request.reject(new Error(failure));
+          logger({level:'warn',event:'host_roster_inspection',code:failure,gameplayVerified:false});
+        }
       }
     }
     if(stationProbe){
@@ -711,7 +739,7 @@ export async function startGameBridge({ directory, logger = () => {}, intervalMs
         const observation=observations.status;
         if(stopped||!connected||!observation.available||observation.sample?.speedup!==0)
           throw new Error('PAUSED_FRESH_BRIDGE_OBSERVATION_REQUIRED');
-        if(selectionId||haltTest||pauseTest||vehicleTest||probe||companyProbe||companyInspection||companyTestUsed)
+        if(selectionId||haltTest||pauseTest||vehicleTest||probe||companyProbe||companyInspection||rosterInspection||companyTestUsed)
           throw new Error('HOST_COMPANY_PAIR_BUSY');
         const requestId=++requestSequence;
         await publish(directory,'company_inspect_request.lua',{schemaVersion:1,kind:'company_inspect',nonce,requestId});
@@ -722,6 +750,33 @@ export async function startGameBridge({ directory, logger = () => {}, intervalMs
       pending=operation.catch(()=>{});
       operation.catch(reject);
       return completed.finally(()=>{hostCompanyPairBusy=false;});
+    },
+    discoverHostCompanyRoster(companies){
+      let roster;
+      try{roster=validateCompanyRoster(companies);}catch(error){return Promise.reject(error);}
+      if(rosterInspectionBusy)return Promise.reject(new Error('HOST_ROSTER_INSPECTION_BUSY'));
+      rosterInspectionBusy=true;
+      let resolve,reject;
+      const completed=new Promise((yes,no)=>{resolve=yes;reject=no;});
+      const operation=pending.then(async()=>{
+        const observation=observations.status;
+        if(stopped||!connected||!observation.available||observation.sample?.speedup!==0
+          ||observation.sample.companyEntity!==roster[0])
+          throw new Error('PAUSED_HOST_COMPANY_OBSERVATION_REQUIRED');
+        if(selectionId||haltTest||pauseTest||vehicleTest||probe||companyProbe
+          ||companyInspection||rosterInspection||hostCompanyPairBusy||companyTestUsed)
+          throw new Error('HOST_ROSTER_INSPECTION_BUSY');
+        const requestId=++requestSequence;
+        await publish(directory,'roster_inspect_request.lua',{schemaVersion:1,kind:'roster_inspect',nonce,
+          requestId,issuedUpdate:observation.sample.updateCount,companyCount:roster.length,
+          hostCompany:roster[0],companyA:roster[0],companyB:roster[1],
+          companyC:roster[2]??0,companyD:roster[3]??0});
+        rosterInspection={requestId,companies:roster,updateCount:observation.sample.updateCount,
+          issuedTick:observation.sample.tickCount,deadline:Date.now()+15000,resolve,reject};
+      });
+      pending=operation.catch(()=>{});
+      operation.catch(reject);
+      return completed.finally(()=>{rosterInspectionBusy=false;});
     },
     beginCoordinatorSelection() {
       const operation=pending.then(async()=>{
@@ -1115,6 +1170,8 @@ export async function startGameBridge({ directory, logger = () => {}, intervalMs
       if (pauseTest) await pauseTest.close();
       await unlink(path.join(directory, "company_inspect_request.lua")).catch(() => {});
       if(companyInspection?.hostPair)companyInspection.hostPair.reject(new Error('HOST_COMPANY_PAIR_CLOSED'));
+      await unlink(path.join(directory,'roster_inspect_request.lua')).catch(()=>{});
+      if(rosterInspection)rosterInspection.reject(new Error('HOST_ROSTER_INSPECTION_CLOSED'));
       await unlink(path.join(directory, "depot_preview.lua")).catch(() => {});
       for(const name of ['phase2_setup.lua','phase2_plan.lua'])await unlink(path.join(directory,name)).catch(()=>{});
       await unlink(path.join(directory, "company_request.lua")).catch(() => {});

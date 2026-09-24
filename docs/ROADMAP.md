@@ -1,5 +1,22 @@
 # TalCo TF3 multiplayer — current delivery plan
 
+## Current checkpoint — 24 September 2026
+
+The Host capture path now accepts two to four distinct company claims. Before
+binding any player, a fresh nonce-bound read-only TF3 inspection checks that
+the selected host and remote company entities exist and that the live player
+is the host company. The launcher exposes the roster capture control once all
+claims and save-ready receipts are present. Focused roster, capture, network
+and launcher tests passed 35/35, and the launcher compiled. The full suite
+reported 954 tests: 948 passed, the same five native controller/observer
+fixtures failed, and one was skipped. In build 40392, a
+paused disposable TF3 run verified the new inspection for companies 3141 and
+55652 at update 3063. The game closed without saving, and the source save
+retained its original SHA-256. Three/four-company real-game admission, remote
+Join startup, and two-instance checkpoint/action agreement remain unverified.
+The next critical action is the two-instance synchronized baseline and one
+ordered Stop, followed by the separate-company road/economy loop.
+
 ## Current checkpoint — 23 September 2026
 
 The Join launcher can now propose its selected in-game company after save

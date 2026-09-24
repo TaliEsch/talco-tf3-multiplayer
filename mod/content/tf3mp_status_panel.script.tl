@@ -88,6 +88,7 @@ local stationProbeSent : integer = 0
 local stationProbeReported : integer = 0
 local companyProbeReported : integer = 0
 local companyInspectionSent : integer = 0
+local rosterInspectionSent : integer = 0
 -- Per-session replay barrier. Set before the command is submitted, including
 -- if the command path throws, so a road-stop construction is never retried.
 local roadReplaySent : integer = 0
@@ -1545,6 +1546,68 @@ local function exchangeCompanyInspection() : nil
   return nil
 end
 
+-- Read-only Host roster preflight. A network claim is never ownership proof:
+-- this observes actual PLAYER entities while the Host game is held. The
+-- game-side bindSession repeats the checks on every participant afterward.
+local function exchangeRosterInspection() : nil
+  if not userdataExists("roster_inspect_request") then return nil end
+  local request = app.loadUserdata("tf3mp_status_1", "roster_inspect_request")
+  if request.schemaVersion ~= 1 or request.kind ~= "roster_inspect" or request.nonce ~= bridgeNonce then return nil end
+  if type(request.requestId) ~= "number" or request.requestId < 1 or request.requestId > 2147483647
+    or request.requestId % 1 ~= 0 or request.requestId <= rosterInspectionSent then return nil end
+  rosterInspectionSent = request.requestId as integer
+  local result : table = { schemaVersion=1, kind="roster_inspection", nonce=bridgeNonce,
+    requestId=rosterInspectionSent, outcome="invalid", tickCount=0, updateCount=0,
+    companyCount=0, hostCompany=0, companyA=0, companyB=0, companyC=0, companyD=0 }
+  local ok = pcall(function()
+    local clock = api.engine.getComponent(api.engine.util.getWorld(), api.type.ComponentType.GAME_TIME) as Engine.Component.GameTime
+    local speed = api.engine.getComponent(api.engine.util.getWorld(), api.type.ComponentType.GAME_SPEED) as Engine.Component.GameSpeed
+    result.tickCount = clock.tickCount; result.updateCount = clock.updateCount
+    local allowed : table = { schemaVersion=true, kind=true, nonce=true, requestId=true,
+      issuedUpdate=true, companyCount=true, hostCompany=true,
+      companyA=true, companyB=true, companyC=true, companyD=true }
+    local count : integer = 0
+    for key, _ in pairs(request) do if allowed[key] ~= true then return end; count = count + 1 end
+    if count ~= 11 or type(request.companyCount) ~= "number" or request.companyCount < 2
+      or request.companyCount > 4 or request.companyCount % 1 ~= 0
+      or type(request.issuedUpdate) ~= "number" or request.issuedUpdate < 0
+      or request.issuedUpdate > 2147483647 or request.issuedUpdate % 1 ~= 0 then return end
+    result.companyCount = request.companyCount
+    for index, key in ipairs({ "companyA", "companyB", "companyC", "companyD" }) do
+      local value = request[key]
+      if type(value) ~= "number" or value % 1 ~= 0 or value < 0 or value > 2147483647 then return end
+      result[key] = value
+      if index <= request.companyCount and value < 1 then return end
+      if index > request.companyCount and value ~= 0 then return end
+    end
+    if request.hostCompany ~= request.companyA or request.hostCompany < 1 then return end
+    result.hostCompany = request.hostCompany
+    if api.engine.util.getPlayer() ~= request.hostCompany then result.outcome = "company_changed"; return end
+    if speed == nil or speed.speedup ~= 0 then result.outcome = "not_paused"; return end
+    if clock.updateCount ~= request.issuedUpdate then result.outcome = "clock_changed"; return end
+    local seen : table = {}
+    for _, key in ipairs({ "companyA", "companyB", "companyC", "companyD" }) do
+      local entity = request[key]
+      if entity ~= 0 then
+        if seen[entity] == true or not api.engine.entityExists(entity as integer)
+          or api.engine.getComponent(entity as integer, api.type.ComponentType.PLAYER) == nil then
+          result.outcome = "company_missing"; return
+        end
+        seen[entity] = true
+      end
+    end
+    local afterClock = api.engine.getComponent(api.engine.util.getWorld(), api.type.ComponentType.GAME_TIME) as Engine.Component.GameTime
+    local afterSpeed = api.engine.getComponent(api.engine.util.getWorld(), api.type.ComponentType.GAME_SPEED) as Engine.Component.GameSpeed
+    if afterClock.updateCount ~= request.issuedUpdate or afterSpeed == nil or afterSpeed.speedup ~= 0 then
+      result.outcome = "clock_changed"; return
+    end
+    result.outcome = "verified"
+  end)
+  if not ok then result.outcome = "read_failed" end
+  app.saveUserdata("tf3mp_status_1", "roster_inspection", result)
+  return nil
+end
+
 -- Delay only in GUI memory. Recheck the live request immediately before the
 -- send; the engine independently refuses early/late delivery before pausing.
 local function dispatchPauseAtUpdate() : nil
@@ -1715,6 +1778,7 @@ local function exchangeTelemetry(tickCount : integer, updateCount : integer) : s
     stationProbeReported = 0
     companyProbeReported = 0
     companyInspectionSent = 0
+    rosterInspectionSent = 0
     roadReplaySent = 0
     roadReplayReported = 0
     pausePhaseSent = ""
@@ -1804,6 +1868,8 @@ local function exchangeTelemetry(tickCount : integer, updateCount : integer) : s
   end
   local inspectionOk = pcall(exchangeCompanyInspection)
   if not inspectionOk then return "company inspection unavailable / see launcher" end
+  local rosterOk = pcall(exchangeRosterInspection)
+  if not rosterOk then return "roster inspection unavailable / see launcher" end
   local discoveryOk = pcall(exchangeVehicleDiscovery)
   if not discoveryOk then return "vehicle discovery error / see launcher" end
   if config.mode == "company_test" then
