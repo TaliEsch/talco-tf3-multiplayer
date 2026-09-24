@@ -3,7 +3,8 @@ param(
     [Parameter(Mandatory)] [string] $ImagePath,
     [Parameter(Mandatory)] [string] $ExpectedSha256,
     [Parameter(Mandatory)] [UInt64] $StartRva,
-    [Parameter(Mandatory)] [UInt64] $EndRva
+    [Parameter(Mandatory)] [UInt64] $EndRva,
+    [switch] $IncludeBytes
 )
 
 # Static qualification helper only. EndRva is exclusive. This tool neither
@@ -121,7 +122,8 @@ try {
 
     $startVa = $imageBase + $StartRva
     $endVaInclusive = $imageBase + $lastRva
-    $arguments = @('/nologo', '/disasm:nobytes', ('/range:0x{0:X},0x{1:X}' -f $startVa, $endVaInclusive), $resolvedPath)
+    $disassemblyMode = if ($IncludeBytes) { '/disasm' } else { '/disasm:nobytes' }
+    $arguments = @('/nologo', $disassemblyMode, ('/range:0x{0:X},0x{1:X}' -f $startVa, $endVaInclusive), $resolvedPath)
     & $dumpbin @arguments
     if ($LASTEXITCODE -ne 0) { throw "dumpbin failed with exit code $LASTEXITCODE." }
 } finally {

@@ -32,6 +32,30 @@ closed, the hash-checked native loader was unstaged, and the save retained SHA
 `ccbf4beb740e53323e06d20890fd029c8e174d3e85efb06801a8b4275c762fb5`.
 Native offsets and hooks for the previous executable must not be used on 40396.
 
+### Read-only build-40396 native-site sweep
+
+The hash-pinned PE disassembler inspected the new executable without loading or
+modifying it. It found matching instruction shapes and, where checked, matching
+bytes at these **candidate** RVAs:
+
+| Site | Build-40392 RVA | Build-40396 candidate RVA | Static evidence |
+| --- | ---: | ---: | --- |
+| Stop factory capture | `0x9ef122` | `0x9ef132` | `mov ebx,r8d`, followed by the `0x32` Stop tag and construction call |
+| Stop factory post | `0x9ef198` | `0x9ef1a8` | NOP after the construction call |
+| Admission | `0xe2ad4c` | `0xe2ad3c` | `mov rdx,rbx` before indirect callback call |
+| Send return | `0xe2ad52` | `0xe2ad42` | NOP after indirect callback call |
+| Callback tail | `0xe3e824` | `0xe3e814` | Same `E9 C7 BB FE FF` jump to continuation |
+| Callback continuation | `0xe2a3f0` | `0xe2a3e0` | Continuation function entry |
+| Marshaler return | `0xe11a27` | `0xe11a17` | NOP after call; following `rdx` load matches old window |
+| Post-send body | `0xe1bb58` | `0xe1bb48` | NOP after send call; call bytes match old window |
+| Post-iteration observer | `0x159571` | `0x159561` | Complete 12-byte increment, compare and backward branch window matches |
+
+These are location leads, not exact-build qualification. The new executable
+still needs callback/vtable and adapter identity checks, complete controller
+and gate-site review, executable-specific guard updates, owned fixture checks,
+and a controlled single-game readback before any hook is enabled. The stage and
+loader remain pinned to the old SHA and reject 40396.
+
 ## Four-company Host/Join socket integration — 24 September 2026
 
 A focused real-socket test now admits the authenticated Host-local participant
