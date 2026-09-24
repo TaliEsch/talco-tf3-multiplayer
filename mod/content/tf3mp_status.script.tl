@@ -1904,7 +1904,8 @@ local ret : GameScriptWithGui<Tf3MpState, Tf3MpGuiState> = {
             and validInteger(probe.added) and probe.added >= 0 and probe.added <= 64
             and validInteger(probe.removed) and probe.removed >= 0 and probe.removed <= 64
             and validInteger(probe.edgeObjects) and probe.edgeObjects >= 0 and probe.edgeObjects <= 64
-            and validInteger(probe.firstAddedEntity) and probe.firstAddedEntity >= -2147483647 and probe.firstAddedEntity <= 2147483647
+            and type(probe.firstAddedEntity) == "number" and probe.firstAddedEntity % 1 == 0
+            and probe.firstAddedEntity >= -2147483647 and probe.firstAddedEntity <= 2147483647
             and validInteger(probe.firstAddedObjectCount) and probe.firstAddedObjectCount >= 0 and probe.firstAddedObjectCount <= 64 then
             receipt.replacementProbeCode = "shape"
             receipt.replacementAdded = probe.added; receipt.replacementRemoved = probe.removed

@@ -20,9 +20,12 @@ complete owned post-placement readback through the production mod bridge;
 the host-side strict parser accepted it as evidence only. The original save
 was unchanged and the temporary loader removed. See `docs/completion-audit.md`.
 
-The next stage-7 action is to build a supported road-stop replay recipe from
-the observed post-placement edge and stop, or qualify the missing native
-proposal fields. Then submit one owned construction through Host ordering,
+The read-only `replaceSegment` factory now returned its real TF3 shape in one
+paused disposable run: one added and one removed segment, with a temporary
+added segment ID of -1 and one attached object. The next stage-7 action is to
+turn that observed shape into a supported road-stop replay recipe against the
+untouched pre-action road, or qualify the missing native proposal fields.
+Then submit one owned construction through Host ordering,
 execute once under the game hold, and verify the resulting stop and native
 charge. Separate-company ownership, balances, income and spending still need
 real-game evidence. The existing capture codec remains unsupported because its

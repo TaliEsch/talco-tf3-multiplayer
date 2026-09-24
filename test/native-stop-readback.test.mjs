@@ -70,6 +70,8 @@ test('read-only replacement factory probe names the owned stop road and does not
   assert.equal(result[8],'shape:1:-1');
   assert.equal(run('api.engine.util.proposal={replaceSegment=function()error("private native failure")end}')[8],'factoryFailed:-1:0');
   assert.match(gameScript,/receipt\.replacementProbeCode = "shape"/);
+  assert.match(gameScript,/type\(probe\.firstAddedEntity\) == "number" and probe\.firstAddedEntity % 1 == 0[\s\S]*?probe\.firstAddedEntity >= -2147483647/);
+  assert.doesNotMatch(gameScript,/validInteger\(probe\.firstAddedEntity\)/);
   assert.match(gameScript,/receipt\.replacementProbeCode = "sourceMissing"/);
   assert.match(panelScript,/receipt\.replacementProbeCode/);
   assert.match(panelScript,/code = "bridgeMissing"/);

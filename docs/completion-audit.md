@@ -1,5 +1,24 @@
 # Completion audit against the build prompt
 
+## Build-40396 replacement factory confirmation — 24 September 2026
+
+Two further paused disposable-save runs placed one $67,500 Road Stop each,
+without saving either result. In the first, the production bridge wrote an
+explicit `sourceMissing` probe diagnostic. Inspection showed that the bridge
+rejected TF3's valid negative temporary proposal entity ID. After correcting
+that signed-ID validation, the second run wrote the production road-stop
+readback and a matching read-only `replaceSegment` diagnostic at observation 5:
+one segment added, one removed, zero top-level edge objects, temporary added
+segment ID -1, and one object on that added segment. The account visibly fell
+from $40,393,094 to $40,325,594 for the one placed stop. This confirms the
+factory's shape in one real TF3 process; it does not establish a replay recipe,
+host ordering, duplicate suppression for construction, or synchronized economy.
+The original save still has SHA-256
+`ccbf4beb740e53323e06d20890fd029c8e174d3e85efb06801a8b4275c762fb5`.
+TF3 exited and the temporary native loader was removed. Focused readback tests
+passed 20/20, mod review and `git diff --check` passed. The full suite was not
+run because this is a diagnostic checkpoint rather than an integration milestone.
+
 ## Replacement-proposal diagnostic checkpoint — 24 September 2026
 
 A further paused build-40396 disposable run returned a production road-stop
