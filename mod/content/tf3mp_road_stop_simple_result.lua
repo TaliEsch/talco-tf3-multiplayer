@@ -43,30 +43,38 @@ local function held(api)
     or not integer(time.updateCount) or time.updateCount < 0 then fail() end
   return time.updateCount
 end
-local function snapshot(api, input)
+local function snapshot(api, input, progress)
+  progress.stage = "input"
   if type(input) ~= "table" or getmetatable(input) ~= nil or not entity(input.edgeEntity)
     or not entity(input.companyEntity) or type(input.model) ~= "string"
     or type(input.left) ~= "boolean" or type(input.param) ~= "number" or input.param ~= input.param
     or input.param < 0 or input.param > 1 then fail() end
+  progress.stage = "held"
   local update = held(api)
+  progress.stage = "road"
   if api.engine.util.getPlayer() ~= input.companyEntity or api.engine.entityExists(input.edgeEntity) ~= true then fail() end
   local edge = component(api, input.edgeEntity, "BASE_EDGE")
   if not native(edge) or not dense(edge.objects, 0) then fail() end
+  progress.stage = "model"
   local model = api.res.modelRep.find(input.model)
   if not integer(model) or model < 0 or model > 2147483647 then fail() end
+  progress.stage = "players"
   local players = members(api, "PLAYER", 64)
+  progress.stage = "objects"
   local objects = members(api, "EDGE_OBJECT", 100000)
   if not players[input.companyEntity] then fail() end
   local balances = {}
+  progress.stage = "balances"
   for company in pairs(players) do balances[company] = balance(api, company) end
   return {code="observed", updateCount=update, companyEntity=input.companyEntity,
     edgeEntity=input.edgeEntity, model=input.model, modelId=model, left=input.left,
     param=input.param, players=players, objects=objects, balances=balances}
 end
 function M.before(api, input)
-  local ok, value = pcall(snapshot, api, input)
+  local progress = {stage="input"}
+  local ok, value = pcall(snapshot, api, input, progress)
   if ok then return value end
-  return {code="unknown"}
+  return {code="unknown", stage=progress.stage}
 end
 local function verify(api, before, input, data, success, resultEntities)
   if type(before) ~= "table" or before.code ~= "observed" or success ~= true

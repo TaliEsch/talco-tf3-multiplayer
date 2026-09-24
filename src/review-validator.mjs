@@ -20,6 +20,7 @@ const EXPECTED_CONTENT = Object.freeze([
   "tf3mp_road_replay_prepare.lua",
   "tf3mp_road_replay_rebuild.lua",
   "tf3mp_road_replay_result.lua",
+  "tf3mp_road_stop_simple_dispatch.lua",
   "tf3mp_road_stop_simple_prepare.lua",
   "tf3mp_road_stop_simple_result.lua",
   "tf3mp_service_command.lua",
@@ -102,7 +103,8 @@ export async function validateReviewPackage(root) {
     ['tf3mp_road_replay_rebuild.lua', 'f6de6ff3edff7f05199bf34dfeb699bbb81147e26d4f9257e0f81110a24ae028'],
     ['tf3mp_road_replay_result.lua', '201bd6cc15b2cf137e63a557f8e23254bee19e449d4bf57c2b363f5f37b428fa'],
     ['tf3mp_road_stop_simple_prepare.lua', 'b758d1e158037a665fae233fb964d73ad73606e2b6f5fe033ac5aedd00a18096'],
-    ['tf3mp_road_stop_simple_result.lua', '98304be4f4b7614bfa725fe4a6ac9eb60185274c81d684d95680bf9777a24912'],
+    ['tf3mp_road_stop_simple_dispatch.lua', 'c8184d3383868e77fe4973905841fa482d9aad4751d4ae51a7996bb984c59743'],
+    ['tf3mp_road_stop_simple_result.lua', '521747e01f05e92985df010126fee83dc77a9af992e9b3a87f16cf1665311932'],
   ]) {
     const source = await readFile(path.join(absoluteRoot, 'content', file), 'utf8');
     if (createHash('sha256').update(source.replace(/\r\n/g, '\n')).digest('hex') !== digest)
@@ -172,6 +174,12 @@ export async function validateReviewPackage(root) {
   for (const event of ['tf3mp_native_road_stop_replay', 'tf3mp_get_native_road_stop_replay']) {
     if (!gameScript.includes(`state:subscribeToEvent("${event}")`)) throw new Error('missing road replay subscription');
   }
+  for (const event of ['tf3mp_road_stop_simple_probe', 'tf3mp_get_road_stop_simple_probe']) {
+    if (!gameScript.includes(`state:subscribeToEvent("${event}")`)) throw new Error('missing simple road probe subscription');
+  }
+  if (!gameScript.includes('current.readbackEventVersion ~= 3')
+    || !gameScript.includes('pcall(function() : table return roadStopSimple.handle(state, request) end)'))
+    throw new Error('missing guarded simple road event');
   const roadReplayHeader = 'if src == "tf3mp_status_1::/tf3mp_status.gs" and id == "tf3mp_engine_bridge" and name == "tf3mp_native_road_stop_replay" and type(param) == "table" then';
   const roadReplayStart = gameScript.indexOf(roadReplayHeader);
   if (roadReplayStart < 0) throw new Error('missing same-script road replay admission');
@@ -303,6 +311,12 @@ export async function validateReviewPackage(root) {
     throw new Error("update must discard saved vehicle work, not execute it");
   }
   const panelScript = await readFile(path.join(absoluteRoot, "content", "tf3mp_status_panel.script.tl"), "utf8");
+  const simpleProbe = panelScript.slice(panelScript.indexOf('local function exchangeRoadStopSimpleProbe() : nil'),
+    panelScript.indexOf('local function exchangeHalt() : nil'));
+  for (const marker of ['config.mode ~= "company_test"', 'roadSimpleSent = requestId',
+    '"tf3mp_road_stop_simple_probe", payload', 'native_road_stop_simple_receipt',
+    'roadSimpleReported = roadSimpleSent'])
+    if (!simpleProbe.includes(marker)) throw new Error('simple road probe must consume before delivery and copy its receipt');
   // The route probe must use the panel's regular GUI step callback, the same
   // context as receipt reads. It is deliberately not a game-script guiUpdate
   // dispatch, and its acknowledgement is a local scalar diagnostic only. A

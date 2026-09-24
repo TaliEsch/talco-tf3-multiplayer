@@ -93,6 +93,8 @@ local rosterInspectionSent : integer = 0
 -- if the command path throws, so a road-stop construction is never retried.
 local roadReplaySent : integer = 0
 local roadReplayReported : integer = 0
+local roadSimpleSent : integer = 0
+local roadSimpleReported : integer = 0
 local pausePhaseSent = ""
 local snapshotSent : integer = 0
 local haltSent : integer = 0
@@ -507,6 +509,74 @@ local function exchangeNativeRoadStopReplay() : nil
   end
   app.saveUserdata("tf3mp_status_1", "native_road_stop_replay_receipt", result)
   roadReplayReported = roadReplaySent
+  return nil
+end
+
+local function exchangeRoadStopSimpleProbe() : nil
+  if missedAcks > 10 or lastAck < 0 or not userdataExists("bridge")
+    or not userdataExists("native_road_stop_simple_request") then return nil end
+  local config = app.loadUserdata("tf3mp_status_1", "bridge")
+  if config.mode ~= "company_test" or config.nonce ~= bridgeNonce then return nil end
+  local request = app.loadUserdata("tf3mp_status_1", "native_road_stop_simple_request")
+  if request.schemaVersion ~= 1 or request.kind ~= "native_road_stop_simple_probe"
+    or request.nonce ~= bridgeNonce or request.confirmed ~= 1 then return nil end
+  if type(request.requestId) ~= "number" or request.requestId < 1
+    or request.requestId > 2147483647 or request.requestId % 1 ~= 0 then return nil end
+  local requestId = request.requestId as integer
+  if requestId > roadSimpleSent then
+    local payload = copyRoadReplayData(request) as table
+    if payload.schemaVersion ~= 1 or payload.kind ~= "native_road_stop_simple_probe"
+      or payload.nonce ~= bridgeNonce or payload.requestId ~= requestId
+      or payload.confirmed ~= 1 then return nil end
+    roadSimpleSent = requestId -- Never redeliver an uncertain engine event.
+    api.cmd.sendCommand(api.cmd.makeScriptingSendEventCmd("tf3mp_status_1::/tf3mp_status.gs",
+      "tf3mp_engine_bridge", "tf3mp_road_stop_simple_probe", payload))
+  end
+  if requestId ~= roadSimpleSent or roadSimpleReported == roadSimpleSent then return nil end
+  local value = api.gui.fireGuiScriptEvent("tf3mp_engine_bridge", "tf3mp_get_road_stop_simple_probe", {})
+  if type(value) ~= "table" then return nil end
+  local receipt = value as table
+  if receipt.kind ~= "native_road_stop_simple_receipt" or receipt.nonce ~= bridgeNonce
+    or receipt.requestId ~= roadSimpleSent then
+    local checked : integer = 0
+    for _, candidate in pairs(receipt) do
+      checked = checked + 1
+      if checked > 64 then break end
+      if type(candidate) == "table" then
+        local item = candidate as table
+        if item.kind == "native_road_stop_simple_receipt" and item.nonce == bridgeNonce
+          and item.requestId == roadSimpleSent then receipt = item; break end
+      end
+    end
+  end
+  if receipt.schemaVersion ~= 1 or receipt.kind ~= "native_road_stop_simple_receipt"
+    or receipt.nonce ~= bridgeNonce or receipt.requestId ~= roadSimpleSent then return nil end
+  local result : table = {schemaVersion=1,kind="native_road_stop_simple_receipt",
+    nonce=bridgeNonce,requestId=roadSimpleSent}
+  for _, field in ipairs({"tickCount","updateCount"}) do
+    local numberValue = receipt[field]
+    if type(numberValue) ~= "number" or numberValue < 0 or numberValue > 9007199254740991
+      or numberValue % 1 ~= 0 then return nil end
+    result[field] = numberValue
+  end
+  if type(receipt.code) ~= "string" or #receipt.code < 1 or #receipt.code > 128
+    or not string.match(receipt.code as string,"^[A-Z_]+$") then return nil end
+  if type(receipt.outcome) ~= "string" or #receipt.outcome < 1 or #receipt.outcome > 32
+    or not string.match(receipt.outcome as string,"^[a-z_]+$") then return nil end
+  result.code, result.outcome = receipt.code, receipt.outcome
+  if receipt.code == "BEFORE_SNAPSHOT_UNQUALIFIED" then
+    local stages : table = {input=true,held=true,road=true,model=true,players=true,objects=true,balances=true}
+    if type(receipt.stage) == "string" and stages[receipt.stage] == true then result.stage = receipt.stage end
+  end
+  if receipt.stopEntity ~= nil or receipt.chargedCost ~= nil then
+    if type(receipt.stopEntity) ~= "number" or receipt.stopEntity < 1 or receipt.stopEntity > 2147483647
+      or receipt.stopEntity % 1 ~= 0 or type(receipt.chargedCost) ~= "number"
+      or receipt.chargedCost < 1 or receipt.chargedCost > 9007199254740991
+      or receipt.chargedCost % 1 ~= 0 then return nil end
+    result.stopEntity, result.chargedCost = receipt.stopEntity, receipt.chargedCost
+  end
+  app.saveUserdata("tf3mp_status_1", "native_road_stop_simple_receipt", result)
+  roadSimpleReported = roadSimpleSent
   return nil
 end
 
@@ -1935,6 +2005,8 @@ local function exchangeTelemetry(tickCount : integer, updateCount : integer) : s
     rosterInspectionSent = 0
     roadReplaySent = 0
     roadReplayReported = 0
+    roadSimpleSent = 0
+    roadSimpleReported = 0
     pausePhaseSent = ""
     snapshotSent = 0
     haltSent = 0
@@ -2029,6 +2101,8 @@ local function exchangeTelemetry(tickCount : integer, updateCount : integer) : s
   if config.mode == "company_test" then
     local roadReplayOk = pcall(exchangeNativeRoadStopReplay)
     if not roadReplayOk then return "road replay outcome unknown / do not retry" end
+    local roadSimpleOk = pcall(exchangeRoadStopSimpleProbe)
+    if not roadSimpleOk then return "road stop command outcome unknown / do not retry" end
     local stationOk = pcall(exchangeStationTemplate)
     if not stationOk then return "station inspection unavailable / do not retry" end
     local depotOk = pcall(exchangePhase2Depot)

@@ -1,5 +1,27 @@
 # Completion audit against the build prompt
 
+## Build-40396 guarded road Stop admission — 24 September 2026
+
+A new disposable-save command bridge accepts one nonce-bound, confirmed
+simple Road Stop request and routes it through the existing one-use replay
+executor. Focused tests and package review pass (23/23). Two paused TF3 runs
+on the same untouched save returned `commandCode=prepared` for company 3141,
+road 53417, and a $67,500 GUI preview. The first engine-side request returned
+`REPLAY_PREPARATION_UNQUALIFIED` before command submission. A second run with
+bounded pre-send diagnostics returned `BEFORE_SNAPSHOT_UNQUALIFIED`,
+`stage=players` at update 2998. Neither request submitted a world-build
+command or placed a stop; company balance remained $40,393,094. The second
+receipt used nonce `ce138d66336833add53915e78039591a`. TF3 exited without
+saving; the source save SHA-256 remains
+`ccbf4beb740e53323e06d20890fd029c8e174d3e85efb06801a8b4275c762fb5`.
+The temporary native loader was removed. Player enumeration in the read-only
+before-snapshot is the next failing link. Focused tests passed 24/24. The full
+suite ran with native-fixture process permissions: 977 passed, 5 native
+controller/observer fixture tests failed, and 2 were skipped (984 total).
+Those failures are outside the changed road path. No host ordering,
+construction, native charge or separate-company economy is proven by these
+runs.
+
 ## Build-40396 road command value qualified — 24 September 2026
 
 The subsequent `tf3mp_road_stop_simple_result.lua` adapter is offline code

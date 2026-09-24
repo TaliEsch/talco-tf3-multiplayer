@@ -25,6 +25,7 @@ local record Tf3MpState
   nativeRoadReplayAttempted : boolean
   nativeRoadReplayReceipt : table
   roadReplayWireReceipt : table
+  roadStopSimpleWireReceipt : table
   roadStopReadbackReceipt : table
   roadStopPreActionReceipt : table
   readbackEventVersion : integer
@@ -110,6 +111,7 @@ local record Tf3MpRoadReplay
   handle : function(GameScriptState<Tf3MpState>, table): table
 end
 local roadReplay = ug_require "tf3mp_status_1::/tf3mp_road_replay_dispatch.lua" as Tf3MpRoadReplay
+local roadStopSimple = ug_require "tf3mp_status_1::/tf3mp_road_stop_simple_dispatch.lua" as Tf3MpRoadReplay
 local record Tf3MpStopReadback
   collect : function(any, table) : table
   copyApply : function(any, any, integer) : table
@@ -1365,6 +1367,7 @@ local ret : GameScriptWithGui<Tf3MpState, Tf3MpGuiState> = {
     if current.nativeRoadReplayAttempted == nil then current.nativeRoadReplayAttempted = false end
     if current.nativeRoadReplayReceipt == nil then current.nativeRoadReplayReceipt = {} end
     if current.roadReplayWireReceipt == nil then current.roadReplayWireReceipt = {} end
+    if current.roadStopSimpleWireReceipt == nil then current.roadStopSimpleWireReceipt = {} end
     if current.roadStopReadbackReceipt == nil then current.roadStopReadbackReceipt = {} end
     if current.roadStopPreActionReceipt == nil then current.roadStopPreActionReceipt = {} end
     local subscriptionsMissing = not state:hasEventSubscriptions()
@@ -1429,12 +1432,14 @@ local ret : GameScriptWithGui<Tf3MpState, Tf3MpGuiState> = {
       state:subscribeToEvent("tf3mp_get_station_template")
       current.eventSubscriptionsVersion = 20
     end
-    if subscriptionsMissing or current.readbackEventVersion ~= 2 then
+    if subscriptionsMissing or current.readbackEventVersion ~= 3 then
       state:subscribeToEvent("tf3mp_stop_readback")
       state:subscribeToEvent("tf3mp_get_stop_readback")
       state:subscribeToEvent("tf3mp_road_preaction_probe")
       state:subscribeToEvent("tf3mp_get_road_preaction_probe")
-      current.readbackEventVersion = 2
+      state:subscribeToEvent("tf3mp_road_stop_simple_probe")
+      state:subscribeToEvent("tf3mp_get_road_stop_simple_probe")
+      current.readbackEventVersion = 3
     end
     current.tickCount = clock.tickCount
     current.updateCount = clock.updateCount
@@ -2026,6 +2031,24 @@ local ret : GameScriptWithGui<Tf3MpState, Tf3MpGuiState> = {
       end
       return nil
     end
+    if src == "tf3mp_status_1::/tf3mp_status.gs" and id == "tf3mp_engine_bridge" and name == "tf3mp_road_stop_simple_probe" and type(param) == "table" then
+      local current = state:get()
+      if current ~= nil and current.schemaVersion ~= nil then
+        local request = param as table
+        local previous = current.roadStopSimpleWireReceipt or {}
+        if previous.nonce == request.nonce and previous.requestId == request.requestId then return nil end
+        local ok, receipt = pcall(function() : table return roadStopSimple.handle(state, request) end)
+        local saved = state:get() or current
+        if ok and type(receipt) == "table" then
+          saved.roadStopSimpleWireReceipt = receipt as table
+        else
+          saved.phase2CompanyFault = true
+          saved.roadStopSimpleWireReceipt = {}
+        end
+        state:set(saved)
+      end
+      return nil
+    end
     if src == "tf3mp_status_1::/tf3mp_status.gs" and id == "tf3mp_engine_bridge" and name == "tf3mp_phase2_depot" and type(param) == "table" then
       local current = state:get()
       if current ~= nil and current.schemaVersion ~= nil then
@@ -2351,6 +2374,11 @@ local ret : GameScriptWithGui<Tf3MpState, Tf3MpGuiState> = {
     if id == "tf3mp_engine_bridge" and name == "tf3mp_get_native_road_stop_replay" then
       local current = state:get()
       if current ~= nil then return current.roadReplayWireReceipt end
+      return nil
+    end
+    if id == "tf3mp_engine_bridge" and name == "tf3mp_get_road_stop_simple_probe" then
+      local current = state:get()
+      if current ~= nil then return current.roadStopSimpleWireReceipt end
       return nil
     end
     if id == "tf3mp_engine_bridge" and name == "tf3mp_get_phase2_depot" then

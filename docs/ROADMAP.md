@@ -2,6 +2,15 @@
 
 ## Current direction — 24 September 2026
 
+The guarded simple Road Stop request is now wired into the disposable-save
+game bridge and one-use executor. Two build-40396 attempts rejected before
+engine submission; bounded diagnostics place the current failure at player
+enumeration in the read-only before-snapshot. The save and balance were
+unchanged. Next, qualify that enumeration against TF3's actual player API,
+then repeat one guarded command and inspect stop ownership and native debit.
+Host ordering follows successful local acceptance. This is still stage 7
+work, around 6.2/10 overall readiness.
+
 Two further paused, read-only previews on the same disposable save exposed the
 remaining factory shape: `nodeConfigsToAdd` and `nodeConfigsToRemove` are both
 dense arrays of two, matching the road endpoints. The preparer now carries
