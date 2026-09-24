@@ -20,6 +20,7 @@ const EXPECTED_CONTENT = Object.freeze([
   "tf3mp_road_replay_prepare.lua",
   "tf3mp_road_replay_rebuild.lua",
   "tf3mp_road_replay_result.lua",
+  "tf3mp_road_stop_simple_prepare.lua",
   "tf3mp_service_command.lua",
   "tf3mp_service_observation.lua",
   "tf3mp_startup_load.script.lua",
@@ -98,6 +99,7 @@ export async function validateReviewPackage(root) {
     ['tf3mp_road_replay_prepare.lua', 'b6738a73e3306ca6aa734c63438c91ed5b54ade321eede31c920103eab67ab25'],
     ['tf3mp_road_replay_rebuild.lua', 'f6de6ff3edff7f05199bf34dfeb699bbb81147e26d4f9257e0f81110a24ae028'],
     ['tf3mp_road_replay_result.lua', '201bd6cc15b2cf137e63a557f8e23254bee19e449d4bf57c2b363f5f37b428fa'],
+    ['tf3mp_road_stop_simple_prepare.lua', 'efb07c3182862daa1f0a2260e8013d41c8678380b8092f8579db552b6a72b376'],
   ]) {
     const source = await readFile(path.join(absoluteRoot, 'content', file), 'utf8');
     if (createHash('sha256').update(source.replace(/\r\n/g, '\n')).digest('hex') !== digest)

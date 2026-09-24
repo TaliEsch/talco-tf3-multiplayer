@@ -1,5 +1,16 @@
 # Completion audit against the build prompt
 
+## Offline simple road-stop preparation — 24 September 2026
+
+A guarded command preparer now uses the declared TF3 `SimpleProposal` records
+with the segment from `replaceSegment`, one `SimpleStreetProposal.EdgeObject`,
+and company-bound command context. It checks a paused game, existing player and
+empty road, exact one-segment replacement, valid model resource, and consistent
+temporary and removed edge IDs. It creates a command value but never submits it.
+Focused preparer and review tests pass 19/19, and mod review passes. This is
+offline model evidence only: pre-action factory shape, actual model resource,
+engine command acceptance, Host ordering, charge and postcondition are unverified.
+
 ## Build-40396 replacement factory confirmation — 24 September 2026
 
 Two further paused disposable-save runs placed one $67,500 Road Stop each,

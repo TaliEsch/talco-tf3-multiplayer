@@ -25,6 +25,11 @@ paused disposable run: one added and one removed segment, with a temporary
 added segment ID of -1 and one attached object. The next stage-7 action is to
 turn that observed shape into a supported road-stop replay recipe against the
 untouched pre-action road, or qualify the missing native proposal fields.
+An offline guarded `SimpleProposal` preparer now reuses the factory's one new
+segment and binds one stop object to that temporary edge. It rejects an occupied
+or stale road, wrong company, moving game, or unexpected factory shape and does
+not submit a command. This candidate has not run in TF3; the next game check
+must verify the pre-action factory shape and model resource before execution.
 Then submit one owned construction through Host ordering,
 execute once under the game hold, and verify the resulting stop and native
 charge. Separate-company ownership, balances, income and spending still need
