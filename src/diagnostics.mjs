@@ -42,6 +42,22 @@ export function diagnosticLogger(stream = process.stdout) {
       "originalBeforeNegative", "originalAfterNegative", "targetBeforeNegative", "targetAfterNegative"]) allowed.add(field);
     for (const field of ["slot", "stationEntity", "stationOwner", "constructionOwner", "lineEntity", "lineOwner",
       "stationA", "stationB", "stationAOwner", "stationBOwner", "constructionMembershipPreserved", "stationMembershipPreserved"]) allowed.add(field);
+    // These fields are only exposed for the bounded Host/Join Stop evidence
+    // events. Never serialize a raw receipt, snapshot, path, or error object.
+    const stopEvidenceEvents=new Set(['peer_checkpoint_ready','peer_command_applied','peer_barrier_released',
+      'engine_operation_receipt','engine_checkpoint_evidence','engine_execution_evidence',
+      'engine_operation_fault','command_proposed']);
+    if(stopEvidenceEvents.has(record.event)){
+      for(const field of ['roundId','operationId','role','operation','phase','fault'])
+        if(typeof record[field]==='string'&&/^[A-Za-z0-9_.:-]{1,128}$/.test(record[field]))safe[field]=record[field];
+      for(const field of ['checkpointHash','stateHash'])
+        if(typeof record[field]==='string'&&/^[a-f0-9]{64}$/.test(record[field]))safe[field]=record[field];
+      for(const field of ['entity','ownerCompanyEntity','releaseUpdate','admissionUpdate',
+        'scheduleLeadUpdates','unavailableCount','expectedUpdate','observedUpdate'])
+        if(Number.isSafeInteger(record[field])&&record[field]>=0&&record[field]<=2147483647)safe[field]=record[field];
+      for(const field of ['held','stopped','comparisonReady'])
+        if(typeof record[field]==='boolean')safe[field]=record[field];
+    }
     for (const [key, value] of Object.entries(record)) {
       if (allowed.has(key) && ["string", "number", "boolean"].includes(typeof value)) safe[key] = value;
     }

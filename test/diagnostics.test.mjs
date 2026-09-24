@@ -77,3 +77,32 @@ test("purchase diagnostics preserve ownership and signed balance evidence but no
   assert.equal(record.nonce,undefined);
   assert.equal(record.balances,undefined);
 });
+
+test('Stop evidence logger retains bounded correlation fields and redacts raw receipts',()=>{
+  const records=[];
+  const log=diagnosticLogger({write:text=>records.push(JSON.parse(text))});
+  const hash='a'.repeat(64);
+  log({event:'engine_execution_evidence',role:'host',roundId:'round-1',operationId:'op-1',
+    hostSequence:1,updateCount:160,entity:42,ownerCompanyEntity:7,stopped:true,stateHash:hash,
+    nonce:'private',receipt:{nonce:'private'},path:'C:\\private'});
+  assert.deepEqual(Object.fromEntries(Object.entries(records[0]).filter(([key])=>key!=='timestamp')),
+    {event:'engine_execution_evidence',role:'host',roundId:'round-1',operationId:'op-1',
+      hostSequence:1,updateCount:160,entity:42,ownerCompanyEntity:7,stopped:true,stateHash:hash});
+  log({event:'peer_command_applied',roundId:'round-1',playerId:'join-1',hostSequence:1,
+    updateCount:160,stateHash:hash});
+  assert.equal(records[1].roundId,'round-1');
+  assert.equal(records[1].stateHash,hash);
+  log({event:'command_proposed',admissionUpdate:100,scheduledUpdate:160,scheduleLeadUpdates:60});
+  assert.equal(records[2].admissionUpdate,100);
+  assert.equal(records[2].scheduleLeadUpdates,60);
+  log({event:'engine_checkpoint_evidence',roundId:'round-1',checkpointHash:hash,
+    comparisonReady:true,unavailableCount:1});
+  assert.equal(records[3].comparisonReady,true);
+  assert.equal(records[3].unavailableCount,1);
+  log({event:'engine_execution_evidence',roundId:'C:\\private',stateHash:'secret',entity:-1,
+    operationId:'x'.repeat(129),stopped:'true'});
+  for(const field of ['roundId','stateHash','entity','operationId','stopped'])
+    assert.equal(records[4][field],undefined);
+  log({event:'unrelated',roundId:'round-1',stateHash:hash,entity:42});
+  for(const field of ['roundId','stateHash','entity'])assert.equal(records[5][field],undefined);
+});

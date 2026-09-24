@@ -173,7 +173,7 @@ export async function createEngineSessionAdapter({directory,bridge,playerId,comp
             logEngine({level:'info',event:'engine_checkpoint_evidence',role:nativeRuntime?.role??'local',
               roundId:receipt.roundId,operationId:receipt.operationId,updateCount:receipt.updateCount,
               checkpointHash:receipt.checkpointHash,comparisonReady:checkpointEvidence.coverage.comparisonReady,
-              unavailable:checkpointEvidence.coverage.unavailable,gameplayVerified:false});
+              unavailableCount:checkpointEvidence.coverage.unavailable.length,gameplayVerified:false});
           }
           if(accepted&&receipt.operation==='executeHeld'
             &&executionEvidence?.receipt.operationId===receipt.operationId
@@ -190,7 +190,9 @@ export async function createEngineSessionAdapter({directory,bridge,playerId,comp
           else if(participant.phase==='halted'&&!faultLogged){
             faultLogged=true;
             logEngine({level:'error',event:'engine_operation_fault',role:nativeRuntime?.role??'local',
-              fault:participant.fault,evidence:participant.faultEvidence,gameplayVerified:false});
+              fault:participant.fault,
+              expectedUpdate:participant.faultEvidence?.expectedUpdate,
+              observedUpdate:participant.faultEvidence?.observedUpdate,gameplayVerified:false});
           }
           return accepted;
         }});} catch {participant.halt('ENGINE_MAILBOX_UNAVAILABLE');return false;}

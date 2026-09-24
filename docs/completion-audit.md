@@ -26,7 +26,10 @@ adapter logs only accepted engine operation receipts; checkpoint evidence
 includes update, hash and coverage, while execution evidence includes the
 actual observed vehicle entity, owner, Stop state and state hash. An engine
 receipt that arrives before the held observation is confirmed is not logged as
-accepted. Focused socket and adapter tests passed. No new real-game or
+accepted. The diagnostic serializer was found to drop several new correlation
+fields; its bounded event-specific allowlist now preserves them and a focused
+serialization test verifies the emitted JSON. Focused socket and adapter tests
+passed. No new real-game or
 two-instance result is claimed; the trace is prepared for that run. The full
 suite again reported 954 tests: 948 passed, the same five native controller/
 observer fixture failures remained, and one was skipped. Its private log is

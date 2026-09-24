@@ -17,7 +17,9 @@ timing change is offline-tested, not yet verified across two real TF3 games.
 The production Host now logs each accepted peer checkpoint, applied state hash
 and barrier release. Each real engine adapter logs its accepted checkpoint and
 operation receipts, including the decoded vehicle Stop postcondition after a
-held execution. This gives one bounded Host/Join run enough correlated fields
+held execution. The diagnostic serializer now retains bounded round, operation,
+entity, update and hash fields for these events; its earlier allowlist silently
+dropped several of them. This gives one bounded Host/Join run enough correlated fields
 to identify the first mismatching link. Focused two/four-player socket and
 adapter tests pass. These are logging and model results; two real TF3 instances
 still have not been compared.

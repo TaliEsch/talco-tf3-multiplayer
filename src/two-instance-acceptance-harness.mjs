@@ -75,12 +75,14 @@ export function createTwoInstanceAcceptancePlan({ sessionId, save, hostBridgeDir
       'host CLI reports the expected save bytes and SHA-256 before Join admission',
       'Join prepares the authenticated downloaded save before TF3 launch and save_ready matches the admitted identity',
       'both TF3 instances emit held checkpoint receipts for one round/update count with the same checkpoint hash',
-      'the native gate and adapter report a correlated command receipt and observed postcondition on both instances',
+      'the host native arm confirms exactly one cancelled Stop with unchanged prestate before ordering',
+      'both engines accept the same Host sequence and scheduled update, each with one execution receipt and observed stopped vehicle',
+      'the Host accepts matching applied state hashes and both barrier-release receipts',
     ]),
     limitations: Object.freeze([
       'This plan does not launch Transport Fever 3, a debugger, the native runtime, Host, or Join.',
       'The prepared file and a live bridge alone do not prove TF3 loaded that exact save; observe the game world and compare checkpoints.',
-      'Separate native pipe identities are planned, but the current native gate is not production-qualified for engine control.',
+      'Separate native pipe identities are planned; each live launch must independently confirm exact-build native binding and engine control.',
       'A matching checkpoint proves only the observed checkpoint scope; it is not proof of whole-world determinism.',
     ]),
   });
