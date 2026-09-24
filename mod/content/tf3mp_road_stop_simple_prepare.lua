@@ -54,13 +54,25 @@ local function prepare(api, input, progress)
   progress.stage = "factory"
   local factory = api.engine.util.proposal
   if not native(factory) or factory.replaceSegment == nil then fail() end
+  progress.stage = "factoryCall"
   local replacement = factory.replaceSegment(input.edgeEntity)
   if not native(replacement) or not native(replacement.proposal) then fail() end
   local street = replacement.proposal
-  if not array(street.addedSegments, 1) or not array(street.removedSegments, 1)
-    or not array(street.addedNodes, 0) or not array(street.removedNodes, 0)
-    or not array(street.edgeObjectsToAdd, 0) or not array(street.nodeConfigsToAdd, 0)
-    or not array(street.nodeConfigsToRemove, 0) then fail() end
+  progress.stage = "factoryAddedSegments"
+  if not array(street.addedSegments, 1) then fail() end
+  progress.stage = "factoryRemovedSegments"
+  if not array(street.removedSegments, 1) then fail() end
+  progress.stage = "factoryAddedNodes"
+  if not array(street.addedNodes, 0) then fail() end
+  progress.stage = "factoryRemovedNodes"
+  if not array(street.removedNodes, 0) then fail() end
+  progress.stage = "factoryEdgeObjects"
+  if not array(street.edgeObjectsToAdd, 0) then fail() end
+  progress.stage = "factoryNodeConfigsAdd"
+  if not array(street.nodeConfigsToAdd, 0) then fail() end
+  progress.stage = "factoryNodeConfigsRemove"
+  if not array(street.nodeConfigsToRemove, 0) then fail() end
+  progress.stage = "factoryFirstSegment"
   local added, removed = street.addedSegments[1], street.removedSegments[1]
   if not native(added) or not native(removed) or added.entity ~= -1 or removed.entity ~= input.edgeEntity
     or not native(added.comp) or not array(added.comp.objects, 0) then fail() end

@@ -412,6 +412,11 @@ function M.preActionProbe(api, request, preparer)
       commandCode = prepared.code
       if type(prepared.stage) == "string" and (prepared.stage == "input" or prepared.stage == "world"
         or prepared.stage == "model" or prepared.stage == "factory"
+        or prepared.stage == "factoryCall" or prepared.stage == "factoryAddedSegments"
+        or prepared.stage == "factoryRemovedSegments" or prepared.stage == "factoryAddedNodes"
+        or prepared.stage == "factoryRemovedNodes" or prepared.stage == "factoryEdgeObjects"
+        or prepared.stage == "factoryNodeConfigsAdd" or prepared.stage == "factoryNodeConfigsRemove"
+        or prepared.stage == "factoryFirstSegment"
         or prepared.stage == "constructor" or prepared.stage == "command") then
         commandStage = prepared.stage
       end

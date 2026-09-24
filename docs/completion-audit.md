@@ -1,6 +1,32 @@
 # Completion audit against the build prompt
 
+## Build-40396 factory-field diagnostic — 24 September 2026
+
+A paused, read-only Road Stop preview on the disposable save returned
+`code=shape, commandCode=rejected, commandStage=factoryNodeConfigsAdd` at
+update 2957 for company 3141 and untouched road 53417 (nonce
+`be81e28bca9c8df9c92dfb9db1e557f6`, observation 1). The replacement
+factory reported one added segment, one removed segment and temporary edge
+-1. Its segment, node and edge-object array checks passed before the
+`nodeConfigsToAdd` guard rejected the value. The receipt does not establish
+whether that field was absent, wrapped or nonempty. No command was sent, stop
+placed or charge incurred. TF3 exited without saving; the source save SHA-256
+remained `ccbf4beb740e53323e06d20890fd029c8e174d3e85efb06801a8b4275c762fb5`.
+The temporary exact-build native loader was removed.
+
 ## Build-40396 read-only road command probe — 24 September 2026
+
+The next paused disposable-save session verified the rejection-handler fix in
+TF3. At update 2922, company 3141 and untouched road 53417 produced a
+nonce-bound shape receipt (`8fa3a7330eb146ecaeb1c1fe9a4df292`, observation
+1) with one added segment, one removed segment and temporary edge -1. The
+preparer returned `commandCode=rejected, commandStage=factory`, so the handoff
+no longer throws. The normal Road Stop preview showed $67,500, but no stop was
+placed and no command was sent. The save hash remained
+`ccbf4beb740e53323e06d20890fd029c8e174d3e85efb06801a8b4275c762fb5`;
+TF3 exited without saving and the temporary native loader was removed. The
+factory rejection now has bounded per-field diagnostics for the next controlled
+read-only run. Engine command acceptance and ordered replay remain unverified.
 
 In a fourth paused disposable-save session, the production diagnostic passed
 preparer lookup and returned `code=unavailable, field=preparerCall` at

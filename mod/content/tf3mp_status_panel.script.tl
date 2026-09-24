@@ -214,6 +214,11 @@ local function exchangeRoadPreAction() : nil
     if receipt.commandStage == "none" or receipt.commandStage == "input"
       or receipt.commandStage == "world" or receipt.commandStage == "model"
       or receipt.commandStage == "factory" or receipt.commandStage == "constructor"
+      or receipt.commandStage == "factoryCall" or receipt.commandStage == "factoryAddedSegments"
+      or receipt.commandStage == "factoryRemovedSegments" or receipt.commandStage == "factoryAddedNodes"
+      or receipt.commandStage == "factoryRemovedNodes" or receipt.commandStage == "factoryEdgeObjects"
+      or receipt.commandStage == "factoryNodeConfigsAdd" or receipt.commandStage == "factoryNodeConfigsRemove"
+      or receipt.commandStage == "factoryFirstSegment"
       or receipt.commandStage == "command" then saved.commandStage = receipt.commandStage end
     app.saveUserdata("tf3mp_status_1", "road_stop_preaction_probe", saved)
   else

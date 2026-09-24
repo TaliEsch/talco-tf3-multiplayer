@@ -1978,6 +1978,11 @@ local ret : GameScriptWithGui<Tf3MpState, Tf3MpGuiState> = {
           if result.commandStage == "none" or result.commandStage == "input"
             or result.commandStage == "world" or result.commandStage == "model"
             or result.commandStage == "factory" or result.commandStage == "constructor"
+            or result.commandStage == "factoryCall" or result.commandStage == "factoryAddedSegments"
+            or result.commandStage == "factoryRemovedSegments" or result.commandStage == "factoryAddedNodes"
+            or result.commandStage == "factoryRemovedNodes" or result.commandStage == "factoryEdgeObjects"
+            or result.commandStage == "factoryNodeConfigsAdd" or result.commandStage == "factoryNodeConfigsRemove"
+            or result.commandStage == "factoryFirstSegment"
             or result.commandStage == "command" then receipt.commandStage = result.commandStage end
         elseif ok and type(result) == "table" and result.code == "unavailable"
           and (result.field == "request" or result.field == "clock" or result.field == "player"

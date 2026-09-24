@@ -31,20 +31,20 @@ local object=command and command.proposal.streetProposal.edgeObjectsToAdd[1]
 return result.code,calls,sends,result.temporaryEdgeEntity or 0,
   object and object.edgeEntity or 0,object and object.playerEntity or 0,
   command and command.proposal.streetProposal.edgesToRemove[1] or 0,
-  command and command.context.player or 0`;
+  command and command.context.player or 0,result.stage or 'none'`;
   const L=lauxlib.luaL_newstate();lualib.luaL_openlibs(L);
   try{
     lua.lua_sethook(L,()=>lauxlib.luaL_error(L,to_luastring('TEST_INSTRUCTION_LIMIT')),lua.LUA_MASKCOUNT,1_000_000);
     assert.equal(lauxlib.luaL_loadstring(L,to_luastring(script)),lua.LUA_OK,lua.lua_tojsstring(L,-1));
-    assert.equal(lua.lua_pcall(L,0,8,0),lua.LUA_OK,lua.lua_tojsstring(L,-1));
-    return {code:lua.lua_tojsstring(L,-8),calls:lua.lua_tonumber(L,-7),sends:lua.lua_tonumber(L,-6),
-      newEdge:lua.lua_tonumber(L,-5),objectEdge:lua.lua_tonumber(L,-4),owner:lua.lua_tonumber(L,-3),
-      removedEdge:lua.lua_tonumber(L,-2),payer:lua.lua_tonumber(L,-1)};
+    assert.equal(lua.lua_pcall(L,0,9,0),lua.LUA_OK,lua.lua_tojsstring(L,-1));
+    return {code:lua.lua_tojsstring(L,-9),calls:lua.lua_tonumber(L,-8),sends:lua.lua_tonumber(L,-7),
+      newEdge:lua.lua_tonumber(L,-6),objectEdge:lua.lua_tonumber(L,-5),owner:lua.lua_tonumber(L,-4),
+      removedEdge:lua.lua_tonumber(L,-3),payer:lua.lua_tonumber(L,-2),stage:lua.lua_tojsstring(L,-1)};
   }finally{lua.lua_close(L);}
 }
 
 test('the factory segment and stop bind to one replacement edge and company without submission',()=>{
-  assert.deepEqual(run(),{code:'prepared',calls:1,sends:0,newEdge:-1,objectEdge:-1,owner:10,removedEdge:24,payer:10});
+  assert.deepEqual(run(),{code:'prepared',calls:1,sends:0,newEdge:-1,objectEdge:-1,owner:10,removedEdge:24,payer:10,stage:'none'});
 });
 
 test('unsafe or stale roads and owners cannot produce a command',()=>{
@@ -75,4 +75,10 @@ test('rejection stays classified when the game sandbox does not expose rawequal'
   assert.equal(result.code,'rejected');
   assert.equal(result.calls,0);
   assert.equal(result.sends,0);
+});
+
+test('read-only factory rejection identifies the failed field',()=>{
+  assert.equal(run('street.addedNodes={1}').stage,'factoryAddedNodes');
+  assert.equal(run('street.nodeConfigsToAdd=nil').stage,'factoryNodeConfigsAdd');
+  assert.equal(run('added.entity=-2').stage,'factoryFirstSegment');
 });
