@@ -83,6 +83,13 @@ local function resource(v)
   return v
 end
 
+local function resourceStage(v)
+  if v == nil then return "constructionResourceNil" end
+  if type(v) ~= "string" then return "constructionResourceType" end
+  if #v == 0 then return "constructionResourceEmpty" end
+  return "constructionResourceSyntax"
+end
+
 local function jsonString(v)
   return '"' .. v:gsub('[%z\1-\31\\"]', function(c)
     local b = string.byte(c)
@@ -209,8 +216,9 @@ local function collect(api, request, stage)
   if edge == nil or not stop then fail() end
   stage("transform")
   local transf = transform(object.transf)
-  stage("constructionResource")
-  local construction = resource(object.edgeObjectConstruction)
+  local constructionValue = object.edgeObjectConstruction
+  stage(resourceStage(constructionValue))
+  local construction = resource(constructionValue)
   stage("params")
   local params = taggedParams(object.params)
   stage("encoding")

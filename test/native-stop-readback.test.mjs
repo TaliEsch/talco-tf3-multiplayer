@@ -130,6 +130,17 @@ test('fails closed when the zero-based instance matrix accessor cannot provide i
     assert.deepEqual([code,json,field],['unavailable','','transform'],mutation);
   }
 });
+test('classifies an unreadable construction resource without exporting its value',()=>{
+  for(const [mutation,field] of [
+    ['stop.edgeObjectConstruction=nil','constructionResourceNil'],
+    ['stop.edgeObjectConstruction=false','constructionResourceType'],
+    ["stop.edgeObjectConstruction=''",'constructionResourceEmpty'],
+    ["stop.edgeObjectConstruction='../unsafe.con'",'constructionResourceSyntax'],
+  ]){
+    const [code,json,,actualField]=run(mutation);
+    assert.deepEqual([code,json,actualField],['unavailable','',field],mutation);
+  }
+});
 test('returns fixed unavailable for request, pause, candidate, edge, and copy boundaries',()=>{
   for(const change of [
     'request.extra=true', 'request.oneWay=nil', 'request.name=string.rep("x",1025)', 'request.resultEntities={50,50}', 'data[0].GAME_SPEED.speedup=1',

@@ -77,7 +77,7 @@ export async function validateReviewPackage(root) {
     || /app\.saveGame\s*\(|api\.cmd|sendCommand|setGameSpeedup/.test(startupLoadSource))
     throw new Error('startup disposable loader differs from reviewed one-shot source');
   const stopReadbackSource=await readFile(path.join(absoluteRoot,'content','tf3mp_stop_readback.lua'),'utf8');
-  if(createHash('sha256').update(stopReadbackSource.replace(/\r\n/g,'\n')).digest('hex')!=='cd0a8eba428a6c1c12b4988b9733744d14e6385b96bf62b87ae613cf4abdae14')
+  if(createHash('sha256').update(stopReadbackSource.replace(/\r\n/g,'\n')).digest('hex')!=='a6332337b1bd053f759b211bce7fd2a98ad0e1916401bbda1934a9d7d7479ba8')
     throw new Error('stop readback differs from reviewed read-only source');
   for(const event of ['tf3mp_stop_readback','tf3mp_get_stop_readback'])
     if(!gameScript.includes(`state:subscribeToEvent("${event}")`))throw new Error('missing stop readback subscription');

@@ -6,6 +6,7 @@ import { connectClient } from "../src/client.mjs";
 import { HostAuthority } from "../src/lockstep.mjs";
 import { connectHostLocalParticipant } from "../src/host-local-participant.mjs";
 import {createTwoCompanyHostCapture} from '../src/two-company-host-capture.mjs';
+import {createHostRosterCapture} from '../src/host-roster-capture.mjs';
 
 const BUILD = "b".repeat(64);
 const MODS = "c".repeat(64);
@@ -214,6 +215,52 @@ test("host-local production attachment waits for authenticated capture roster", 
   } finally {
     await local?.close();
     remote?.socket.destroy();
+    await new Promise(resolve=>instance.server.close(resolve));
+  }
+});
+
+test("four-company socket roster attaches the Host's deferred adapter with the inspected identities", async () => {
+  const requiredSave={bytes:12,sha256:'e'.repeat(64)};
+  const instance=startHost({secret:SECRET,sessionId:'host-local-four-roster',port:0,
+    buildHash:BUILD,modManifestHash:MODS,getUpdateCount:()=>100,requiredSave});
+  await once(instance.server,'listening');
+  let local,attachedCompanies;
+  const received=[];
+  const remotes=[];
+  try {
+    local=connectHostLocalParticipant({host:instance,displayName:'Host',engineBinding:{native:true},
+      deferAdapterUntilCapture:true,verifiedSave:requiredSave,createAdapter:input=>{
+        attachedCompanies=[...input.companies.values()];
+        return {receive(kind){received.push(kind);},poll(){},close(){}};
+      }});
+    for(const companyEntity of [102,103,104]){
+      const remote=connectClient({secret:SECRET,sessionId:instance.sessionId,
+        port:instance.server.address().port,displayName:`Company ${companyEntity}`,
+        buildHash:BUILD,modManifestHash:MODS,onMessage:(message,context)=>{
+          if(message.kind==='admitted')context.send('save_ready',requiredSave);
+          if(message.kind==='session_ready')context.send('company_claim',{companyEntity});
+        }});
+      remotes.push(remote);
+    }
+    await until(()=>local.connection.playerId&&instance.authority.players().length===4
+      &&instance.companyClaims().length===3);
+    const bridge={connected:true,engineObservation:{available:true,
+      sample:{speedup:0,companyEntity:101,updateCount:100}},
+      async discoverHostCompanyRoster(companies){
+        assert.deepEqual(companies,[101,102,103,104]);
+        return {outcome:'verified',companies,hostCompanyEntity:101,updateCount:100};
+      }};
+    const capture=createHostRosterCapture({host:instance,bridge,nativeGate:{ready:true},hostLocal:local});
+    const result=await capture.start();
+    await local.attachment;
+    assert.deepEqual(result.players.map(player=>player.companyEntity),[101,102,103,104]);
+    assert.deepEqual(attachedCompanies,[101,102,103,104]);
+    assert.deepEqual(instance.authority.players().map(player=>player.companyEntity),[101,102,103,104]);
+    assert.equal(local.ready,true);
+    assert.equal(received[0],'coordination_capture');
+  } finally {
+    await local?.close();
+    for(const remote of remotes)remote.socket.destroy();
     await new Promise(resolve=>instance.server.close(resolve));
   }
 });

@@ -1,5 +1,20 @@
 # Completion audit against the build prompt
 
+## Four-company Host/Join socket integration — 24 September 2026
+
+A focused real-socket test now admits the authenticated Host-local participant
+and three Join peers, receives three separate company claims, checks the mocked
+TF3 roster inspection, binds companies 101–104, and attaches the Host's deferred
+engine adapter with that four-company mapping. The adapter receives the capture
+event. This verifies the production socket/roster/attachment wiring against a
+fake bridge and engine adapter. It does not verify TF3 identity inspection, Join
+engine adapters, gameplay, or two-instance synchronization.
+The focused socket/readback tests passed 40/40, and mod review passed with
+manifest `baa8263d7bd30d9f77d9705b23feab248fd89c9ccd7e6e295f2261afa99451f8`.
+The elevated full suite reported 963 tests: 957 passed, five existing native
+controller/observer fixture failures remained, and one was skipped. Its private
+log is `C:\Users\olihf\Downloads\Temp\tf3mp-check-20260924-roster-readback-elevated.log`.
+
 ## Single-game road-stop experiment — 24 September 2026
 
 One qualified build-40392 TF3 process loaded the unchanged disposable save
@@ -19,8 +34,14 @@ account changed from $40,229,553 to $40,162,053. A stop icon appeared on the
 selected road. Both capture diagnostics remained `CAPTURE_UNSUPPORTED`:
 `modelInstance`, `edgeEntity`, `param`, and `model` were absent; `oneWay` was
 boolean and `name` string. This matches the earlier documented schema gap;
-do not repeat the same placement or infer a replayable resource/position. No
-replay case or second-company service was created. TF3 was closed without
+do not repeat the same placement or infer a replayable resource/position. An
+independent readback found the placed, company-owned edge object and its road,
+but returned `READBACK_UNAVAILABLE` at `constructionResource`; it did not export
+a complete stop recipe. The read-only collector now distinguishes absent,
+non-string, empty and malformed resource values in its bounded failure field;
+focused Lua fixtures and mod review pass, but this diagnostic has not run in
+TF3. No replay case or second-company service was created.
+TF3 was closed without
 saving, the source save still hashes to
 `ccbf4beb740e53323e06d20890fd029c8e174d3e85efb06801a8b4275c762fb5`,
 and the exact hash-matched native loader was unstaged.
