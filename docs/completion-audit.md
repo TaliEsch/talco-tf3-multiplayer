@@ -1,5 +1,37 @@
 # Completion audit against the build prompt
 
+## Current milestone boundary — 24 September 2026
+
+The user moved two-instance tests out of stage 6. The corrected one-game
+host-ordered vehicle Stop on build 40392 meets the revised stage-6 checkpoint:
+native cancellation, Host sequence 1, one held execution/release at update 3428,
+and the observed Stopped postcondition are recorded below. This is **6/10 for
+that milestone**, not proof of playable multiplayer. Road/economy expansion,
+current-build qualification, synchronized two-game gameplay and four-player
+acceptance remain open. Historical entries using the old stage-6 definition
+are preserved as dated evidence, not current milestone claims.
+
+## TF3 updated during the one-game Host attempt — 24 September 2026
+
+The reviewed mod was staged with manifest
+`baa8263d7bd30d9f77d9705b23feab248fd89c9ccd7e6e295f2261afa99451f8`;
+the prior staged mod/cache was preserved at
+`E:\Steam\userdata\109855567\3493540\local\tf3mp_backup_5bb7588cb97f4cb781f5cec3841a38bb`.
+The exact-build loader staged after checking executable SHA-256
+`cbd8092757e539a42f56c51e00eeb7671d967a9072838d7a5f47d2de88348716`.
+Steam then replaced `TransportFever3.exe` at 16:23:12 UTC during the Host
+launch. The game displayed build 40396; its new on-disk SHA-256 is
+`086d69c141acaac1016e942beac28f469da0c5cb2de4b7f4c6f0d3fd7fd75dc1`.
+The WinHTTP proxy loaded the in-process runtime, whose probe returned status 2
+(`UNSUPPORTED_EXECUTABLE`) before native IPC opened. The launcher consequently
+reported `NATIVE_RUNTIME_CONNECT_FAILED` and ended the Host session. This is a
+successful fail-closed build gate, not a replay-record result. The intended
+disposable save reached TF3's Start Game screen, but no gameplay action was
+performed and no capture or stop readback was attempted. The game process was
+closed, the hash-checked native loader was unstaged, and the save retained SHA
+`ccbf4beb740e53323e06d20890fd029c8e174d3e85efb06801a8b4275c762fb5`.
+Native offsets and hooks for the previous executable must not be used on 40396.
+
 ## Four-company Host/Join socket integration — 24 September 2026
 
 A focused real-socket test now admits the authenticated Host-local participant
@@ -50,7 +82,8 @@ and the exact hash-matched native loader was unstaged.
 
 The user directed us to skip the two-instance TF3 attempt until they say to
 resume it. The existing same-profile second launch left only one game process.
-This does not count as a two-game test or remove the stage-6 requirement.
+This does not count as a two-game test; under the revised milestone boundary,
+that test is later acceptance for the full multiplayer goal.
 Host action admission now records each authenticated peer's last accepted
 update beside the Host update, once per request. A focused socket test proves
 an ahead peer produces the trace and still halts with `CLOCK_MISMATCH`; no

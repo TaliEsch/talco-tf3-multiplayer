@@ -5,8 +5,20 @@
 At the user's direction, defer the two-instance TF3 run until they say to
 resume it; a second launch from this Windows/Steam profile produced only one
 game process. Continue the one-game separate-company road/economy path and
-offline Host/Join engineering. The two-instance Stop and baseline remain
-required for stage 6 and the full multiplayer goal.
+offline Host/Join engineering. Under the user's revised stage boundary, the
+single-game host-ordered, cancelled, exactly-once vehicle Stop with observed
+postcondition completed the stage-6 checkpoint on build 40392. The two-instance
+Stop and baseline belong to later multiplayer acceptance and remain required
+for the full goal. Stage 7 road/economy and stage 8 playable multiplayer are
+still open.
+
+Steam updated the installed TF3 executable during the next one-game Host launch.
+Build 40396 has SHA-256 `086d69c141acaac1016e942beac28f469da0c5cb2de4b7f4c6f0d3fd7fd75dc1`,
+while the native loader and hooks were qualified for
+`cbd8092757e539a42f56c51e00eeb7671d967a9072838d7a5f47d2de88348716`.
+The in-process probe rejected the new executable before native IPC opened.
+Requalify the new build from its own binary evidence before another native
+gameplay run; retain all existing safety gates. See `docs/completion-audit.md`.
 
 The latest one-game road-stop experiment confirmed a native placement, exact
 $67,500 debit, and both proposal events, but the existing capture codec still
