@@ -56,6 +56,15 @@ and gate-site review, executable-specific guard updates, owned fixture checks,
 and a controlled single-game readback before any hook is enabled. The stage and
 loader remain pinned to the old SHA and reject 40396.
 
+A separate hash-pinned scan of non-executable PE sections found the candidate
+callback invoke pointer at `0x373fa80` pointing to `0xe3e810`, implying a
+candidate callback vtable at `0x373fa70`. The previous callback vtable was
+`0x373fa90` with invoke at `0xe3e820`. Adapter tables at `0x367cb20` and
+`0x367cc00` now point to candidate `0x1201a0`; `0x367cc38` points to
+`0x120410`. Two nearby matches each remain for the former `0x36cab88` and
+`0x3788880` adapters. Static pointer proximity does not establish which live
+callback shape is used, so those guards remain unresolved.
+
 ## Four-company Host/Join socket integration — 24 September 2026
 
 A focused real-socket test now admits the authenticated Host-local participant
