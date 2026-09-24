@@ -1895,6 +1895,25 @@ local ret : GameScriptWithGui<Tf3MpState, Tf3MpGuiState> = {
         local receipt : table = { nonce = request.nonce, observationId = request.observationId, code = "unavailable" }
         if ok and type(result) == "table" and result.code == "readback" and type(result.json) == "string" and #result.json > 0 and #result.json <= 65536 then
           receipt.code = "readback"; receipt.json = result.json
+          local probe = result.replacementProbe
+          if type(probe) == "table" and type(probe.code) == "string"
+            and (probe.code == "factoryMissing" or probe.code == "factoryNil" or probe.code == "factoryFailed"
+              or probe.code == "shapeUnavailable") then
+            receipt.replacementProbeCode = probe.code
+          elseif type(probe) == "table" and probe.code == "shape"
+            and validInteger(probe.added) and probe.added >= 0 and probe.added <= 64
+            and validInteger(probe.removed) and probe.removed >= 0 and probe.removed <= 64
+            and validInteger(probe.edgeObjects) and probe.edgeObjects >= 0 and probe.edgeObjects <= 64
+            and validInteger(probe.firstAddedEntity) and probe.firstAddedEntity >= -2147483647 and probe.firstAddedEntity <= 2147483647
+            and validInteger(probe.firstAddedObjectCount) and probe.firstAddedObjectCount >= 0 and probe.firstAddedObjectCount <= 64 then
+            receipt.replacementProbeCode = "shape"
+            receipt.replacementAdded = probe.added; receipt.replacementRemoved = probe.removed
+            receipt.replacementEdgeObjects = probe.edgeObjects
+            receipt.replacementFirstEntity = probe.firstAddedEntity
+            receipt.replacementFirstObjectCount = probe.firstAddedObjectCount
+          else
+            receipt.replacementProbeCode = "sourceMissing"
+          end
         elseif ok and type(result) == "table" and type(result.field) == "string" and #result.field <= 32 and result.field:match("^[A-Za-z]+$") then
           receipt.field = result.field
           if result.field == "constructionResourceSyntax" and type(result.constructionResourceValue) == "string"

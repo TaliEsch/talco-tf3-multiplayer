@@ -243,6 +243,34 @@ local function exchangeStopReadback() : nil
     schemaVersion = 1, kind = "road_stop_readback", nonce = stopReadbackSent.nonce,
     observationId = stopReadbackSent.observationId, snapshotHex = hex,
   })
+  local probeCode = receipt.replacementProbeCode
+  if type(probeCode) == "string"
+    and (probeCode == "factoryMissing" or probeCode == "factoryNil" or probeCode == "factoryFailed"
+      or probeCode == "shapeUnavailable" or probeCode == "sourceMissing") then
+    app.saveUserdata("tf3mp_status_1", "road_stop_replacement_probe", {
+      schemaVersion = 1, kind = "road_stop_replacement_probe", nonce = stopReadbackSent.nonce,
+      observationId = stopReadbackSent.observationId, code = probeCode,
+    })
+  elseif probeCode == "shape"
+    and type(receipt.replacementAdded) == "number" and receipt.replacementAdded % 1 == 0 and receipt.replacementAdded >= 0 and receipt.replacementAdded <= 64
+    and type(receipt.replacementRemoved) == "number" and receipt.replacementRemoved % 1 == 0 and receipt.replacementRemoved >= 0 and receipt.replacementRemoved <= 64
+    and type(receipt.replacementEdgeObjects) == "number" and receipt.replacementEdgeObjects % 1 == 0 and receipt.replacementEdgeObjects >= 0 and receipt.replacementEdgeObjects <= 64
+    and type(receipt.replacementFirstEntity) == "number" and receipt.replacementFirstEntity % 1 == 0
+    and receipt.replacementFirstEntity >= -2147483647 and receipt.replacementFirstEntity <= 2147483647
+    and type(receipt.replacementFirstObjectCount) == "number" and receipt.replacementFirstObjectCount % 1 == 0
+    and receipt.replacementFirstObjectCount >= 0 and receipt.replacementFirstObjectCount <= 64 then
+    app.saveUserdata("tf3mp_status_1", "road_stop_replacement_probe", {
+      schemaVersion = 1, kind = "road_stop_replacement_probe", nonce = stopReadbackSent.nonce,
+      observationId = stopReadbackSent.observationId, code = "shape", added = receipt.replacementAdded,
+      removed = receipt.replacementRemoved, edgeObjects = receipt.replacementEdgeObjects,
+      firstAddedEntity = receipt.replacementFirstEntity, firstAddedObjectCount = receipt.replacementFirstObjectCount,
+    })
+  else
+    app.saveUserdata("tf3mp_status_1", "road_stop_replacement_probe", {
+      schemaVersion = 1, kind = "road_stop_replacement_probe", nonce = stopReadbackSent.nonce,
+      observationId = stopReadbackSent.observationId, code = "bridgeMissing",
+    })
+  end
   log.message("{\"event\":\"native_stop_readback\",\"code\":\"COPIED_PLACED_OBJECT_ONLY\",\"gameplayVerified\":false}")
   return nil
 end

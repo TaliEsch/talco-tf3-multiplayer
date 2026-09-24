@@ -43,15 +43,15 @@ local api={type={ComponentType=CT,enum={EdgeObjectType=${edgeObjectType}},Mat4f=
 local request={schemaVersion=1,nonce=string.rep('a',32),observationId=3,companyEntity=10,resultEntities={50,51},oneWay=false,name='Observed stop'}
 ${mutation}
 local r=m.collect(api,request)
-return r.code,r.json or '',reads,r.field or '',table.concat(clockHandles, ','),r.modelId or -1,r.modelResourceName or '',r.constructionResourceValue or ''
+return r.code,r.json or '',reads,r.field or '',table.concat(clockHandles, ','),r.modelId or -1,r.modelResourceName or '',r.constructionResourceValue or '',r.replacementProbe and (r.replacementProbe.code .. ':' .. tostring(r.replacementProbe.added or -1) .. ':' .. tostring(r.replacementProbe.firstAddedEntity or 0)) or ''
 `;
   const L=lauxlib.luaL_newstate();lualib.luaL_openlibs(L);try{
     if(componentConstants) nativeNamespace(L,'NativeComponentType',componentConstants);
     if(edgeConstants) nativeNamespace(L,'NativeEdgeObjectType',edgeConstants);
     for(const name of ['NativeGetWorld','NativeGetComponent','NativeEntityExists','NativeGetEdge','NativeMat4Cols']) nativeCallable(L,name);
     assert.equal(lauxlib.luaL_loadstring(L,to_luastring(script)),lua.LUA_OK,lua.lua_tojsstring(L,-1));
-    assert.equal(lua.lua_pcall(L,0,8,0),lua.LUA_OK,lua.lua_tojsstring(L,-1));
-    return [lua.lua_tojsstring(L,-8),lua.lua_tojsstring(L,-7),lua.lua_tointeger(L,-6),lua.lua_tojsstring(L,-5),lua.lua_tojsstring(L,-4),lua.lua_tointeger(L,-3),lua.lua_tojsstring(L,-2),lua.lua_tojsstring(L,-1)];
+    assert.equal(lua.lua_pcall(L,0,9,0),lua.LUA_OK,lua.lua_tojsstring(L,-1));
+    return [lua.lua_tojsstring(L,-9),lua.lua_tojsstring(L,-8),lua.lua_tointeger(L,-7),lua.lua_tojsstring(L,-6),lua.lua_tojsstring(L,-5),lua.lua_tointeger(L,-4),lua.lua_tojsstring(L,-3),lua.lua_tojsstring(L,-2),lua.lua_tojsstring(L,-1)];
   }finally{lua.lua_close(L);}
 }
 const nativeComponents={GAME_SPEED:'GAME_SPEED',GAME_TIME:'GAME_TIME',EDGE_OBJECT:'EDGE_OBJECT',PLAYER_OWNED:'PLAYER_OWNED',BASE_EDGE:'BASE_EDGE',MODEL_INSTANCE_LIST:'MODEL_INSTANCE_LIST'};
@@ -60,6 +60,20 @@ test('copies one returned owned stop to bounded deterministic JSON',()=>{
   assert.doesNotMatch(source,/api\.cmd|sendCommand|makeWorldBuildProposalCmd|saveUserdata|io\.|os\./);
   const [code,json]=run(); assert.equal(code,'readback'); assert.ok(Buffer.byteLength(json)<=64*1024);
   assert.deepEqual(JSON.parse(json),{schemaVersion:1,kind:'road_stop_readback',nonce:'a'.repeat(32),observationId:3,companyEntity:10,updateCount:44,tickCount:77,stopEntity:50,edgeEntity:60,param:.25,oneWay:false,name:'Observed stop',left:true,transform:[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16],constructionResource:'construction/road_stop.con',params:{kind:'table',entries:[{keyType:'number',key:9,value:{kind:'string',value:'nine'}},{keyType:'string',key:'a',value:{kind:'boolean',value:true}},{keyType:'string',key:'nested',value:{kind:'table',entries:[{keyType:'string',key:'b',value:{kind:'number',value:2}}]}},{keyType:'string',key:'z',value:{kind:'string',value:'last'}}]}});
+});
+test('read-only replacement factory probe names the owned stop road and does not authorize a command',()=>{
+  const mutation=`api.engine.util.proposal={replaceSegment=function(id)
+    assert(id==60);return {proposal={addedSegments={{entity=-1,comp={objects={{50,'STOP_LEFT'}}}}},removedSegments={{entity=60}},edgeObjectsToAdd={}}}
+  end}`;
+  const result=run(mutation);
+  assert.equal(result[0],'readback');
+  assert.equal(result[8],'shape:1:-1');
+  assert.equal(run('api.engine.util.proposal={replaceSegment=function()error("private native failure")end}')[8],'factoryFailed:-1:0');
+  assert.match(gameScript,/receipt\.replacementProbeCode = "shape"/);
+  assert.match(gameScript,/receipt\.replacementProbeCode = "sourceMissing"/);
+  assert.match(panelScript,/receipt\.replacementProbeCode/);
+  assert.match(panelScript,/code = "bridgeMissing"/);
+  assert.match(panelScript,/"road_stop_replacement_probe"/);
 });
 test('the Lua snapshot is accepted by the JavaScript native-envelope codec',()=>{
   const [,json]=run(); const snapshotHex=Buffer.from(json,'utf8').toString('hex');

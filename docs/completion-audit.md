@@ -1,5 +1,19 @@
 # Completion audit against the build prompt
 
+## Replacement-proposal diagnostic checkpoint — 24 September 2026
+
+A further paused build-40396 disposable run returned a production road-stop
+readback for company 3141, stop 72962 on road 73667 at update 2970. The first
+click placed a stop for $67,500; a second click at the same position caused a
+$16,875 replacement. The read-only `replaceSegment` probe did not produce its
+separate diagnostic file, so no replacement recipe or replay is qualified.
+TF3 exited without saving; the disposable save SHA-256 remained
+`ccbf4beb740e53323e06d20890fd029c8e174d3e85efb06801a8b4275c762fb5`,
+and the temporary loader was removed. The bridge now forwards only bounded
+probe scalars and writes an explicit `sourceMissing` or `bridgeMissing` code if
+one side loses them. Focused readback tests and mod review pass. This bridge
+change has not yet been verified in TF3.
+
 ## Build-40396 road-stop readback checkpoint — 24 September 2026
 
 The updated executable SHA-256 is

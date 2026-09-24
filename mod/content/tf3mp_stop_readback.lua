@@ -207,6 +207,30 @@ local function isStopOnEdge(api, edge, candidate)
   return matches == 1 and stop, left
 end
 
+-- Probe the declared factory on the already verified road. It creates a
+-- proposal value only; this diagnostic never submits or modifies it.
+local function replacementProbe(api, edgeId)
+  local ok, result = pcall(function()
+    local proposalUtil = api.engine.util.proposal
+    if proposalUtil == nil or proposalUtil.replaceSegment == nil then return {code="factoryMissing"} end
+    local proposal = proposalUtil.replaceSegment(edgeId)
+    if not native(proposal) or not native(proposal.proposal) then return {code="factoryNil"} end
+    local street = proposal.proposal
+    local added, removed, objects = street.addedSegments, street.removedSegments, street.edgeObjectsToAdd
+    if type(added) ~= "table" or type(removed) ~= "table" or type(objects) ~= "table"
+      or #added > 64 or #removed > 64 or #objects > 64 then return {code="shapeUnavailable"} end
+    local first = added[1]
+    local firstId = first and first.entity
+    local firstObjects = first and first.comp and first.comp.objects
+    if firstId ~= nil and (not safeint(firstId) or firstId < -MAX_INT or firstId > MAX_INT) then return {code="shapeUnavailable"} end
+    if firstObjects ~= nil and (type(firstObjects) ~= "table" or #firstObjects > 64) then return {code="shapeUnavailable"} end
+    return {code="shape", added=#added, removed=#removed, edgeObjects=#objects,
+      firstAddedEntity=firstId or 0, firstAddedObjectCount=firstObjects and #firstObjects or 0}
+  end)
+  if not ok or type(result) ~= "table" then return {code="factoryFailed"} end
+  return result
+end
+
 local function collect(api, request, stage)
   stage("request")
   if not exactRequest(request) then fail() end
@@ -268,7 +292,7 @@ local function collect(api, request, stage)
     .. ',"transform":[' .. table.concat(values, ",") .. '],"constructionResource":' .. jsonString(construction)
     .. ',"params":' .. encodeTag(params) .. '}'
   if #json > MAX_JSON then fail() end
-  return {code="readback", json=json}
+  return {code="readback", json=json, replacementProbe=replacementProbe(api, edgeId)}
 end
 
 local function copyApply(proposal, results, observationId, stage)
