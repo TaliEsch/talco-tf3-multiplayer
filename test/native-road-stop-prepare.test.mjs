@@ -9,3 +9,11 @@ test('prepare checks model metadata and supports deduplicated precedence with an
  assert.deepEqual(run('local t=api.type;api.type=setmetatable({enum=t.enum,ComponentType=t.ComponentType,Proposal=t.Proposal,Context=t.Context,NodeAndEntity=t.NodeAndEntity,SegmentAndEntity=t.SegmentAndEntity,Vec3f=t.Vec3f,Vec4f=t.Vec4f,Mat4f=t.Mat4f},{__index=function()error("unpublished")end})'),['prepared','10','player']);
  assert.deepEqual(run('local x=deep(capture.proposal.street.removedSegments[1]);x.entity=23;table.insert(capture.proposal.street.removedSegments,x);actual[23]={BASE_EDGE=actual[22].BASE_EDGE,BASE_EDGE_STREET={precedenceNode0=2,precedenceNode1=0}}'),['prepared','10','player']);
 });
+test('prepare accepts callable native bindings without weakening live preflight',()=>{
+ const wrap='local function wrap(f)return setmetatable({}, {__call=function(_,...)return f(...)end})end;'
+  +'api.engine.util.getWorld=wrap(api.engine.util.getWorld);api.engine.getComponent=wrap(api.engine.getComponent);'
+  +'api.res.modelRep.getName=wrap(api.res.modelRep.getName);api.res.modelRep.find=wrap(api.res.modelRep.find);'
+  +'api.type.Context.new=wrap(api.type.Context.new);api.cmd.makeWorldBuildProposalCmd=wrap(api.cmd.makeWorldBuildProposalCmd)';
+ assert.deepEqual(run(wrap),['prepared','10','player']);
+ assert.deepEqual(run(wrap+';actual[99].GAME_SPEED.speedup=1'),['rejected','-1','none']);
+});

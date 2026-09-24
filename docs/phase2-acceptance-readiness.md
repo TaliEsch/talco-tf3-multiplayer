@@ -1,12 +1,23 @@
 # Phase 2 acceptance readiness — 20 September 2026
 
+## Replay API compatibility update — 24 September 2026
+
+The existing one-shot normal road-stop replay dispatcher, preflight, command
+preparation and result reader no longer assume TF3's native API bindings have
+Lua type `function` or that their namespaces are plain tables. They call the
+bindings inside their existing protected boundaries. Missing/throwing calls
+still reject or return an unknown outcome; ownership, paused-state, debit and
+one-attempt checks remain. Callable-proxy Lua fixtures pass, and the reviewed
+mod source hash is updated. No replay has been verified in TF3 by this change.
+
 **NOT READY. Do not run another preview-only test as Phase 2 acceptance.**
 
 Next meaningful local gate is record/reload/replay of one normal stop, followed
 by the second-company service/accounting sequence. Reload the identical starting
 checkpoint before replay, rather than duplicating an action in its modified
-world. The offline replay record and Lua reconstruction candidate are implemented
-and fixture-tested, not connected to a game execution button. Neither the current
+world. The offline replay record and one-use Lua replay request are connected
+through the Host helper's explicit confirm command and are fixture-tested. The
+live record/reload/replay sequence has not passed in TF3. Neither the current
 capture build nor a passing parser is a completed Phase 2 acceptance test.
 
 Replay preparation is being joined to the existing durable company transaction

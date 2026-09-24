@@ -11,6 +11,17 @@ an ahead peer produces the trace and still halts with `CLOCK_MISMATCH`; no
 clock gate was relaxed. Work continues on the one-game separate-company road
 and economy path without another same-profile launch attempt.
 
+The local normal road-stop replay's dispatcher, preflight, preparation and
+result modules now use protected native calls instead of requiring Lua
+`function` types for TF3 API bindings. Callable-proxy fixtures pass and missing
+bindings still fail closed. Mod review passed for manifest
+`9873c7204bb16ef51a4f1f3b55c937848d336e521df7248cb6dfc8194ad710b5`.
+This is source/fixture evidence; no new TF3 placement or replay occurred.
+The elevated full suite on the settled source reported 960 tests: 954 passed,
+the same five native controller/observer fixture failures remained, and one
+was skipped. Its private log is
+`C:\Users\olihf\Downloads\Temp\tf3mp-check-20260924-replay-proxy-elevated.log`.
+
 ## TF2 action-path comparison and production Stop lead — 24 September 2026
 
 The sibling TF2 multiplayer mod's actual capture/cancel, inject, semantic

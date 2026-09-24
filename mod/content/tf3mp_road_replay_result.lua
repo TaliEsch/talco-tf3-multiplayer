@@ -20,11 +20,11 @@ local function array(v, limit)
 end
 local function get(api, id, kind)
   local component = api and api.type and api.type.ComponentType and api.type.ComponentType[kind]
-  if (not entity(id) and not (kind == "GAME_SPEED" and id == 0)) or component == nil or not api.engine or type(api.engine.getComponent) ~= "function" then fail() end
+  if (not entity(id) and not (kind == "GAME_SPEED" and id == 0)) or component == nil or not api.engine then fail() end
   return api.engine.getComponent(id, component)
 end
 local function paused(api)
-  if not api or not api.engine or not api.engine.util or type(api.engine.util.getWorld) ~= "function" then fail() end
+  if not api or not api.engine or not api.engine.util then fail() end
   local world = api.engine.util.getWorld()
   if not entity(world) and world ~= 0 then fail() end
   local speed = get(api, world, "GAME_SPEED")
@@ -32,7 +32,7 @@ local function paused(api)
   return speed.speedup == 0
 end
 local function balance(api, company)
-  if not api or not api.engine or not api.engine.util or not api.engine.util.finance or type(api.engine.util.finance.getPlayersBalance) ~= "function" then fail() end
+  if not api or not api.engine or not api.engine.util or not api.engine.util.finance then fail() end
   local value = api.engine.util.finance.getPlayersBalance(company)
   if not safeInteger(value) then fail() end
   return value
@@ -60,11 +60,11 @@ local function copiedStop(capture, modelResource, target)
 end
 local function modelIdentity(api, id, resource)
   local rep = api and api.res and api.res.modelRep
-  if not rep or type(rep.find) ~= "function" or type(rep.getName) ~= "function" then fail() end
+  if not rep then fail() end
   return rep.find(resource) == id and rep.getName(id) == resource
 end
 local function members(api, kind, limit)
-  if not api or not api.engine or type(api.engine.getEntitiesWithComponent) ~= "function" or not api.type or not api.type.ComponentType then fail() end
+  if not api or not api.engine or not api.type or not api.type.ComponentType then fail() end
   local list = api.engine.getEntitiesWithComponent(api.type.ComponentType[kind])
   if not array(list, limit) then fail() end
   local out = {}
@@ -72,7 +72,7 @@ local function members(api, kind, limit)
   return out
 end
 local function sameTransform(api, actual, copied)
-  if not api or not api.type or not api.type.Mat4f or type(api.type.Mat4f.cols) ~= "function" then fail() end
+  if not api or not api.type or not api.type.Mat4f then fail() end
   for col = 1, 4 do
     local vector = api.type.Mat4f.cols(actual, col)
     if (type(vector) ~= "table" and type(vector) ~= "userdata") then return false end

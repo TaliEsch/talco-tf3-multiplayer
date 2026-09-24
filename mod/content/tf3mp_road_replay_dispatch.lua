@@ -85,9 +85,8 @@ end
 
 local function clock(api)
   local ok, tick, update = pcall(function()
-    if type(api) ~= "table" or type(api.engine) ~= "table" or type(api.engine.util) ~= "table"
-      or type(api.engine.util.getWorld) ~= "function" or type(api.engine.getComponent) ~= "function"
-      or type(api.type) ~= "table" or type(api.type.ComponentType) ~= "table" then error("unavailable") end
+    -- TF3 native bindings may be callable proxies rather than Lua functions.
+    -- The protected calls below still reject missing or throwing bindings.
     local world = api.engine.util.getWorld()
     if not finiteInteger(world, MAX_INT) then error("world") end -- world entity 0 is valid.
     local gameTime = api.engine.getComponent(world, api.type.ComponentType.GAME_TIME)
@@ -101,7 +100,6 @@ end
 
 local function enginePlayerIsTarget(api, target)
   local ok, player = pcall(function()
-    if not api.engine or not api.engine.util or type(api.engine.util.getPlayer) ~= "function" then error("player") end
     return api.engine.util.getPlayer()
   end)
   return ok and player == target

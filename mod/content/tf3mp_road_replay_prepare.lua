@@ -4,13 +4,13 @@ local REJECT = {}
 local function fail() error(REJECT, 0) end
 local function integer(v) return type(v) == "number" and v == math.floor(v) and v >= -2147483648 and v <= 2147483647 end
 local function prepare(capture, modelResource, targetCompany, api, rebuild, preflight, components)
-  if type(capture) ~= "table" or type(modelResource) ~= "table" or not integer(modelResource.modelId) or type(modelResource.resourceName) ~= "string" or modelResource.resourceName == "" or not integer(targetCompany) or targetCompany <= 0 or type(api) ~= "table" or type(rebuild) ~= "table" or type(rebuild.rebuild) ~= "function" or type(preflight) ~= "table" or type(preflight.verify) ~= "function" then fail() end
+  if type(capture) ~= "table" or type(modelResource) ~= "table" or not integer(modelResource.modelId) or type(modelResource.resourceName) ~= "string" or modelResource.resourceName == "" or not integer(targetCompany) or targetCompany <= 0 or not api or type(rebuild) ~= "table" or type(rebuild.rebuild) ~= "function" or type(preflight) ~= "table" or type(preflight.verify) ~= "function" then fail() end
   local street = capture.proposal and capture.proposal.street
   local object = street and street.edgeObjectsToAdd and street.edgeObjectsToAdd[1]
   if type(object) ~= "table" or object.playerEntity ~= targetCompany or type(object.modelInstance) ~= "table" or not integer(object.modelInstance.modelId) or object.modelInstance.modelId < 0 or modelResource.modelId ~= object.modelInstance.modelId then fail() end
   local proof = preflight.verify(capture, api, targetCompany)
   if type(proof) ~= "table" or proof.code ~= "unregistered_preflight_checked" or type(proof.proof) ~= "table" or type(proof.proof.removedSegments) ~= "table" then fail() end
-  if not api.res or not api.res.modelRep or type(api.res.modelRep.getName) ~= "function" or type(api.res.modelRep.find) ~= "function" then fail() end
+  if not api.res or not api.res.modelRep then fail() end
   local id = object.modelInstance.modelId
   if api.res.modelRep.getName(id) ~= modelResource.resourceName or api.res.modelRep.find(modelResource.resourceName) ~= id then fail() end
   if not api.type then fail() end
@@ -34,7 +34,7 @@ local function prepare(capture, modelResource, targetCompany, api, rebuild, pref
   if #types.qualifiedPrecedenceValues == 0 or #types.qualifiedPrecedenceValues > 3 then fail() end
   local rebuilt = rebuild.rebuild(capture, types, components)
   if type(rebuilt) ~= "table" or rebuilt.code ~= "unregistered" or rebuilt.proposal == nil then fail() end
-  if not types.Context or type(types.Context.new) ~= "function" or not api.cmd or type(api.cmd.makeWorldBuildProposalCmd) ~= "function" then fail() end
+  if not types.Context or not api.cmd then fail() end
   local context = types.Context.new(); if context == nil then fail() end
   context.player = targetCompany
   local command = api.cmd.makeWorldBuildProposalCmd(rebuilt.proposal, context, false, true, false)

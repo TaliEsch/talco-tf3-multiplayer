@@ -23,14 +23,14 @@ local function equalVec(actual, copied)
   return native(actual) and array(copied) and #copied == 3 and finite(copied[1]) and finite(copied[2]) and finite(copied[3]) and actual.x == copied[1] and actual.y == copied[2] and actual.z == copied[3]
 end
 local function enum(api, group, name)
-  local v = type(api) == "table" and api.type and api.type.enum and api.type.enum[group] and api.type.enum[group][name]
+  local v = api and api.type and api.type.enum and api.type.enum[group] and api.type.enum[group][name]
   if v == nil then fail() end
   return v
 end
 local function tryComponent(api, entity, kind)
   if not integer(entity) or entity < 0 or (entity == 0 and kind ~= "GAME_SPEED")
-    or not api.engine or type(api.engine.getComponent) ~= "function" or not api.type or not api.type.ComponentType then fail() end
-  local ok, value = pcall(api.engine.getComponent, entity, api.type.ComponentType[kind])
+    or not api or not api.engine or not api.type or not api.type.ComponentType then fail() end
+  local ok, value = pcall(function() return api.engine.getComponent(entity, api.type.ComponentType[kind]) end)
   if not ok then unknown() end
   return value
 end
@@ -76,8 +76,8 @@ local function sameOptional(api, entity, kind, copied, fields)
 end
 local function verify(capture, api, targetCompany)
   if type(capture) ~= "table" or capture.schemaVersion ~= 1 or capture.builderId ~= "streetTerminalBuilder" or not integer(targetCompany) or targetCompany <= 0 then fail() end
-  if not api.engine or not api.engine.util or type(api.engine.util.getWorld) ~= "function" then fail() end
-  local ok, world = pcall(api.engine.util.getWorld); if not ok then unknown() end
+  if not api or not api.engine or not api.engine.util then fail() end
+  local ok, world = pcall(function() return api.engine.util.getWorld() end); if not ok then unknown() end
   local gameSpeed = component(api, world, "GAME_SPEED")
   if not native(gameSpeed) or gameSpeed.speedup ~= 0 then fail() end
   component(api, targetCompany, "PLAYER")

@@ -63,6 +63,17 @@ return before.code,after.code,after.stopEntity or -1,after.chargedCost or -1
 test('read-only receipt verifies the normal curb-stop callback evidence',()=>{
   assert.deepEqual(execute(),['observed','verified',50,60]);
 });
+test('result reader accepts callable native finance, component and matrix bindings',()=>{
+  const wrap='local function wrap(f)return setmetatable({}, {__call=function(_,...)return f(...)end})end;'
+    +'api.engine.util.getWorld=wrap(api.engine.util.getWorld);'
+    +'api.engine.util.finance.getPlayersBalance=wrap(api.engine.util.finance.getPlayersBalance);'
+    +'api.engine.getComponent=wrap(api.engine.getComponent);'
+    +'api.engine.getEntitiesWithComponent=wrap(api.engine.getEntitiesWithComponent);'
+    +'api.res.modelRep.find=wrap(api.res.modelRep.find);api.res.modelRep.getName=wrap(api.res.modelRep.getName);'
+    +'api.type.Mat4f.cols=wrap(api.type.Mat4f.cols)';
+  assert.deepEqual(execute('',false,wrap),['observed','verified',50,60]);
+  assert.equal(execute('balances[1]=8999999941',false,wrap)[1],'unknown');
+});
 
 test('real result checker integrates with the one-shot executor and leaves acceptance unverified',()=>{
   assert.deepEqual(execute('',true),['observed','verified',50,60]);
