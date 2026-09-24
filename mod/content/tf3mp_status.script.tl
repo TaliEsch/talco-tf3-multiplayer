@@ -26,6 +26,7 @@ local record Tf3MpState
   nativeRoadReplayReceipt : table
   roadReplayWireReceipt : table
   roadStopReadbackReceipt : table
+  roadStopPreActionReceipt : table
   readbackEventVersion : integer
   nativeDepotAttempted : boolean
   nativeDepotReceipt : table
@@ -112,6 +113,8 @@ local roadReplay = ug_require "tf3mp_status_1::/tf3mp_road_replay_dispatch.lua" 
 local record Tf3MpStopReadback
   collect : function(any, table) : table
   copyApply : function(any, any, integer) : table
+  copyPreview : function(any, integer) : any
+  preActionProbe : function(any, table) : table
 end
 local stopReadback = ug_require "tf3mp_status_1::/tf3mp_stop_readback.lua" as Tf3MpStopReadback
 local function roadCaptureModelName(modelId : integer) : string
@@ -128,6 +131,7 @@ local record Tf3MpGuiState
   roadCaptureCreate : table
   roadCaptureApply : table
   roadStopReadbackCandidate : table
+  roadStopPreActionCandidate : table
 end
 
 local function readClock() : Engine.Component.GameTime
@@ -175,6 +179,13 @@ local function observeNativePlacement(guiState : GameScriptState<Tf3MpGuiState>,
     shapeInspected = shapeOk
     if not shapeOk then proposalType, dataType, resultType = "nil", "nil", "nil" end
     if shapeOk and id == "streetTerminalBuilder" then
+      if not isApply and current.roadStopPreActionCandidate == nil then
+        local ok, candidate = pcall(function() : table
+          local slots = param as table
+          return stopReadback.copyPreview(slots[1], current.placementSequence)
+        end)
+        if ok and type(candidate) == "table" then current.roadStopPreActionCandidate = candidate end
+      end
       -- Copy only committed result IDs and owner, never event userdata. The
       -- regular GUI callback forwards these to a read-only engine observation.
       if isApply and current.roadStopReadbackCandidate == nil then
@@ -1354,6 +1365,7 @@ local ret : GameScriptWithGui<Tf3MpState, Tf3MpGuiState> = {
     if current.nativeRoadReplayReceipt == nil then current.nativeRoadReplayReceipt = {} end
     if current.roadReplayWireReceipt == nil then current.roadReplayWireReceipt = {} end
     if current.roadStopReadbackReceipt == nil then current.roadStopReadbackReceipt = {} end
+    if current.roadStopPreActionReceipt == nil then current.roadStopPreActionReceipt = {} end
     local subscriptionsMissing = not state:hasEventSubscriptions()
     if current.nativeServiceObservation == nil then current.nativeServiceObservation = {} end
     if current.nativeServiceObservationReceipt == nil then current.nativeServiceObservationReceipt = {} end
@@ -1416,10 +1428,12 @@ local ret : GameScriptWithGui<Tf3MpState, Tf3MpGuiState> = {
       state:subscribeToEvent("tf3mp_get_station_template")
       current.eventSubscriptionsVersion = 20
     end
-    if subscriptionsMissing or current.readbackEventVersion ~= 1 then
+    if subscriptionsMissing or current.readbackEventVersion ~= 2 then
       state:subscribeToEvent("tf3mp_stop_readback")
       state:subscribeToEvent("tf3mp_get_stop_readback")
-      current.readbackEventVersion = 1
+      state:subscribeToEvent("tf3mp_road_preaction_probe")
+      state:subscribeToEvent("tf3mp_get_road_preaction_probe")
+      current.readbackEventVersion = 2
     end
     current.tickCount = clock.tickCount
     current.updateCount = clock.updateCount
@@ -1895,6 +1909,11 @@ local ret : GameScriptWithGui<Tf3MpState, Tf3MpGuiState> = {
         local receipt : table = { nonce = request.nonce, observationId = request.observationId, code = "unavailable" }
         if ok and type(result) == "table" and result.code == "readback" and type(result.json) == "string" and #result.json > 0 and #result.json <= 65536 then
           receipt.code = "readback"; receipt.json = result.json
+          if validInteger(result.modelId) and type(result.modelResourceName) == "string"
+            and #result.modelResourceName > 4 and #result.modelResourceName <= 1024 then
+            receipt.modelId = result.modelId
+            receipt.modelResourceName = result.modelResourceName
+          end
           local probe = result.replacementProbe
           if type(probe) == "table" and type(probe.code) == "string"
             and (probe.code == "factoryMissing" or probe.code == "factoryNil" or probe.code == "factoryFailed"
@@ -1929,6 +1948,30 @@ local ret : GameScriptWithGui<Tf3MpState, Tf3MpGuiState> = {
           end
         end
         current.roadStopReadbackReceipt = receipt
+        state:set(current)
+      end
+      return nil
+    end
+    if src == "tf3mp_status_1::/tf3mp_status.gs" and id == "tf3mp_engine_bridge" and name == "tf3mp_road_preaction_probe" and type(param) == "table" then
+      local current = state:get()
+      if current ~= nil then
+        local request = param as table
+        if type(request.nonce) ~= "string" or #request.nonce ~= 32 or not request.nonce:match("^[0-9a-f]+$")
+          or not validInteger(request.observationId) or request.observationId < 1 or request.observationId > 16 then return nil end
+        local previous = current.roadStopPreActionReceipt or {}
+        if previous.nonce == request.nonce and previous.observationId == request.observationId then return nil end
+        local ok, result = pcall(function() : table return stopReadback.preActionProbe(api, request) end)
+        local receipt : table = {nonce=request.nonce, observationId=request.observationId, code="unavailable"}
+        if ok and type(result) == "table" and result.code == "shape"
+          and result.nonce == request.nonce and result.observationId == request.observationId
+          and result.edgeEntity == request.edgeEntity and result.companyEntity == request.companyEntity
+          and validInteger(result.updateCount) and result.added == 1 and result.removed == 1
+          and result.temporaryEdgeEntity == -1 and result.firstAddedObjectCount == 0 then
+          receipt = {nonce=request.nonce, observationId=request.observationId, code="shape",
+            edgeEntity=result.edgeEntity, companyEntity=result.companyEntity, updateCount=result.updateCount,
+            added=1, removed=1, temporaryEdgeEntity=-1, firstAddedObjectCount=0}
+        end
+        current.roadStopPreActionReceipt = receipt
         state:set(current)
       end
       return nil
@@ -2268,6 +2311,11 @@ local ret : GameScriptWithGui<Tf3MpState, Tf3MpGuiState> = {
     if id == "tf3mp_engine_bridge" and name == "tf3mp_get_stop_readback" then
       local current = state:get()
       if current ~= nil then return current.roadStopReadbackReceipt end
+      return nil
+    end
+    if id == "tf3mp_engine_bridge" and name == "tf3mp_get_road_preaction_probe" then
+      local current = state:get()
+      if current ~= nil then return current.roadStopPreActionReceipt end
       return nil
     end
     if id == "tf3mp_engine_bridge" and name == "tf3mp_get_native_road_stop_replay" then

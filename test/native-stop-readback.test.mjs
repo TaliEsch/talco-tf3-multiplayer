@@ -56,6 +56,44 @@ return r.code,r.json or '',reads,r.field or '',table.concat(clockHandles, ','),r
 }
 const nativeComponents={GAME_SPEED:'GAME_SPEED',GAME_TIME:'GAME_TIME',EDGE_OBJECT:'EDGE_OBJECT',PLAYER_OWNED:'PLAYER_OWNED',BASE_EDGE:'BASE_EDGE',MODEL_INSTANCE_LIST:'MODEL_INSTANCE_LIST'};
 const nativeEdgeObjects={STOP_LEFT:'STOP_LEFT',STOP_RIGHT:'STOP_RIGHT',SIGNAL:'SIGNAL'};
+function runPreAction(mutation=''){
+  const script=`local m=(function()${source}end)()
+local preview={proposal={addedSegments={{entity=-1}},removedSegments={{entity=60}},edgeObjectsToAdd={{category=0,playerEntity=10}}}}
+local data={[0]={GAME_SPEED={speedup=0},GAME_TIME={tickCount=77,updateCount=44}},[10]={PLAYER={}},[60]={BASE_EDGE={objects={}}}}
+local api={type={ComponentType={GAME_SPEED='GAME_SPEED',GAME_TIME='GAME_TIME',PLAYER='PLAYER',BASE_EDGE='BASE_EDGE'}},
+  engine={util={getWorld=function()return 0 end,getPlayer=function()return 10 end,
+    proposal={replaceSegment=function(id)assert(id==60);return{proposal={addedSegments={{entity=-1,comp={objects={}}}},removedSegments={{entity=60}},addedNodes={},removedNodes={},edgeObjectsToAdd={}}}end}},
+    entityExists=function(id)return data[id]~=nil end,getComponent=function(id,kind)return data[id]and data[id][kind]end}}
+local request={nonce=string.rep('a',32),observationId=3,edgeEntity=60,companyEntity=10}
+${mutation}
+local candidate=m.copyPreview(preview,3)
+local receipt=m.preActionProbe(api,request)
+return candidate and candidate.edgeEntity or 0,candidate and candidate.companyEntity or 0,
+  receipt.code,receipt.edgeEntity or 0,receipt.temporaryEdgeEntity or 0`;
+  const L=lauxlib.luaL_newstate();lualib.luaL_openlibs(L);
+  try{
+    assert.equal(lauxlib.luaL_loadstring(L,to_luastring(script)),lua.LUA_OK,lua.lua_tojsstring(L,-1));
+    assert.equal(lua.lua_pcall(L,0,5,0),lua.LUA_OK,lua.lua_tojsstring(L,-1));
+    return [lua.lua_tointeger(L,-5),lua.lua_tointeger(L,-4),lua.lua_tojsstring(L,-3),lua.lua_tointeger(L,-2),lua.lua_tointeger(L,-1)];
+  }finally{lua.lua_close(L);}
+}
+test('pre-action preview and read-only factory agree on the untouched road and company',()=>{
+  assert.deepEqual(runPreAction(),[60,10,'shape',60,-1]);
+  for(const change of [
+    'preview.proposal.removedSegments[1].entity=-1',
+    'preview.proposal.edgeObjectsToAdd[1].playerEntity=0',
+    'request.companyEntity=11',
+    'data[60].BASE_EDGE.objects={{50,1}}',
+    'data[0].GAME_SPEED.speedup=1',
+    'api.engine.util.proposal.replaceSegment=function()error("private")end',
+  ]){
+    const value=runPreAction(change);
+    if(change.startsWith('preview.'))assert.equal(value[0],0,change);
+    else assert.equal(value[2],'unavailable',change);
+  }
+  assert.match(gameScript,/name == "tf3mp_road_preaction_probe"/);
+  assert.match(panelScript,/"road_stop_preaction_probe"/);
+});
 test('copies one returned owned stop to bounded deterministic JSON',()=>{
   assert.doesNotMatch(source,/api\.cmd|sendCommand|makeWorldBuildProposalCmd|saveUserdata|io\.|os\./);
   const [code,json]=run(); assert.equal(code,'readback'); assert.ok(Buffer.byteLength(json)<=64*1024);
@@ -170,7 +208,7 @@ test('accepts TF3 base-game resource namespace from a placed road stop',()=>{
   for(const bad of ['::/../unsafe.con',':://stations/unsafe.con','other::/stations/unsafe.con'])
     assert.equal(run(`stop.edgeObjectConstruction='${bad}'`)[0],'unavailable');
 });
-test('copies a unique rendered model identity only as an unavailable diagnostic',()=>{
+test('copies a unique rendered model identity when the construction resource is unavailable',()=>{
   const setup="stop.edgeObjectConstruction=nil;data[50].MODEL_INSTANCE_LIST={fatInstances={{modelId=21}},thinInstances={}};api.res={modelRep={getName=function(id) if id==21 then return 'model/road_stop.mdl' end end}}";
   assert.deepEqual(run(setup).slice(0,4),['unavailable','',8,'constructionResourceNil']);
   assert.deepEqual(run(setup).slice(5,7),[21,'model/road_stop.mdl']);
@@ -180,6 +218,13 @@ test('copies a unique rendered model identity only as an unavailable diagnostic'
     ";api.res.modelRep.getName=function()return '../bad.mdl' end",
     ';data[50].MODEL_INSTANCE_LIST.fatInstances[1].modelId=-1',
   ]) assert.deepEqual(run(setup+change).slice(5,7),[-1,'']);
+});
+test('copies a unique rendered model identity alongside a successful placed-stop readback',()=>{
+  const setup="data[50].MODEL_INSTANCE_LIST={fatInstances={{modelId=21}},thinInstances={}};api.res={modelRep={getName=function(id) if id==21 then return 'model/road_stop.mdl' end end}}";
+  assert.deepEqual(run(setup).slice(0,2).map((x,i)=>i===0?x:JSON.parse(x).kind),['readback','road_stop_readback']);
+  assert.deepEqual(run(setup).slice(5,7),[21,'model/road_stop.mdl']);
+  assert.match(gameScript,/receipt\.code = "readback"; receipt\.json = result\.json[\s\S]*?receipt\.modelResourceName = result\.modelResourceName/);
+  assert.match(panelScript,/app\.saveUserdata\("tf3mp_status_1", "road_stop_readback"[\s\S]*?app\.saveUserdata\("tf3mp_status_1", "road_stop_model_diagnostic"/);
 });
 test('engine readback receipt forwards only bounded diagnostics to the panel',()=>{
   assert.match(gameScript,/result\.field == "constructionResourceSyntax"[\s\S]*?#result\.constructionResourceValue <= 1024[\s\S]*?receipt\.constructionResourceValue = result\.constructionResourceValue/);

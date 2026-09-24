@@ -78,9 +78,10 @@ export async function validateReviewPackage(root) {
     || /app\.saveGame\s*\(|api\.cmd|sendCommand|setGameSpeedup/.test(startupLoadSource))
     throw new Error('startup disposable loader differs from reviewed one-shot source');
   const stopReadbackSource=await readFile(path.join(absoluteRoot,'content','tf3mp_stop_readback.lua'),'utf8');
-  if(createHash('sha256').update(stopReadbackSource.replace(/\r\n/g,'\n')).digest('hex')!=='e1c8cde3bd76eacb0e90bfb2729b63a5bb0d51962f0fce9c3e3a2797bcc396b7')
+  if(createHash('sha256').update(stopReadbackSource.replace(/\r\n/g,'\n')).digest('hex')!=='2d447a8b65540ddf8296d62863c95bd7fe23726106279e3f6b9ace2b105a36af')
     throw new Error('stop readback differs from reviewed read-only source');
-  for(const event of ['tf3mp_stop_readback','tf3mp_get_stop_readback'])
+  for(const event of ['tf3mp_stop_readback','tf3mp_get_stop_readback',
+    'tf3mp_road_preaction_probe','tf3mp_get_road_preaction_probe'])
     if(!gameScript.includes(`state:subscribeToEvent("${event}")`))throw new Error('missing stop readback subscription');
   const serviceObservationSource=await readFile(path.join(absoluteRoot,'content','tf3mp_service_observation.lua'),'utf8');
   if(createHash('sha256').update(serviceObservationSource.replace(/\r\n/g,'\n')).digest('hex')!=='5c16102a5fc3f943d1bcbbe0a914b2852560f669ca2a59c8c2545f0f7a5c270f')

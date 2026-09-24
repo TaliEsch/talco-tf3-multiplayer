@@ -1,5 +1,24 @@
 # Completion audit against the build prompt
 
+## Build-40396 pre-action road and model identity — 24 September 2026
+
+One controlled, paused disposable-save run connected the production bridge and
+captured both sides of a single normal Road Stop placement. Before the click,
+the new read-only probe recorded company 3141, untouched road 53417, update
+2889, one removed segment, one added temporary segment -1, and zero objects on
+that new segment. After exactly one click, the production readback at the same
+update recorded owned stop 72432 on road 72438 at road-relative parameter
+0.9667200446128845, with construction resource
+`::/stations/street/small_stops/small_mid.con`. The model diagnostic reported
+model ID 3940 and `::/stations/street/small_stops/small_mid.mdl`. Both receipts
+used the same private run nonce. The game preview cost $67,500, and the visible
+account changed from $40,393,094 to $40,325,594. The original save retained
+SHA-256 `ccbf4beb740e53323e06d20890fd029c8e174d3e85efb06801a8b4275c762fb5`;
+TF3 exited without saving and the hash-matched native loader was removed.
+This verifies the read-only pre-action factory shape and post-action model in
+one TF3 process. It does not qualify the simple command's acceptance, Host
+ordering, native replay charge or two-instance economy agreement.
+
 ## Offline simple road-stop preparation — 24 September 2026
 
 A guarded command preparer now uses the declared TF3 `SimpleProposal` records

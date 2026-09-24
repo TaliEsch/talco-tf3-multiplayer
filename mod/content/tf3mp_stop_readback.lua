@@ -222,10 +222,13 @@ local function replacementProbe(api, edgeId)
     local first = added[1]
     local firstId = first and first.entity
     local firstObjects = first and first.comp and first.comp.objects
+    local removedId = removed[1] and removed[1].entity
     if firstId ~= nil and (not safeint(firstId) or firstId < -MAX_INT or firstId > MAX_INT) then return {code="shapeUnavailable"} end
+    if removedId ~= nil and not entity(removedId) then return {code="shapeUnavailable"} end
     if firstObjects ~= nil and (type(firstObjects) ~= "table" or #firstObjects > 64) then return {code="shapeUnavailable"} end
     return {code="shape", added=#added, removed=#removed, edgeObjects=#objects,
-      firstAddedEntity=firstId or 0, firstAddedObjectCount=firstObjects and #firstObjects or 0}
+      firstAddedEntity=firstId or 0, firstAddedObjectCount=firstObjects and #firstObjects or 0,
+      firstRemovedEntity=removedId or 0}
   end)
   if not ok or type(result) ~= "table" then return {code="factoryFailed"} end
   return result
@@ -292,7 +295,10 @@ local function collect(api, request, stage)
     .. ',"transform":[' .. table.concat(values, ",") .. '],"constructionResource":' .. jsonString(construction)
     .. ',"params":' .. encodeTag(params) .. '}'
   if #json > MAX_JSON then fail() end
-  return {code="readback", json=json, replacementProbe=replacementProbe(api, edgeId)}
+  local modelOk, model = pcall(modelDiagnostic, api, candidate)
+  return {code="readback", json=json, replacementProbe=replacementProbe(api, edgeId),
+    modelId=modelOk and model and model.modelId or nil,
+    modelResourceName=modelOk and model and model.modelResourceName or nil}
 end
 
 local function copyApply(proposal, results, observationId, stage)
@@ -339,6 +345,54 @@ function M.copyApply(proposal, results, observationId)
   local ok, value = pcall(copyApply, proposal, results, observationId, function(name) field = name end)
   if ok then return value end
   return {code="unavailable", field=field}
+end
+
+-- Copy only the original road and owner from one normal builder preview.
+function M.copyPreview(proposal, observationId)
+  local ok, value = pcall(function()
+    if not entity(observationId) or observationId > 16 or not native(proposal) or not native(proposal.proposal) then fail() end
+    local street = proposal.proposal
+    if type(street.removedSegments) ~= "table" or #street.removedSegments ~= 1
+      or type(street.addedSegments) ~= "table" or #street.addedSegments ~= 1
+      or type(street.edgeObjectsToAdd) ~= "table" or #street.edgeObjectsToAdd ~= 1 then fail() end
+    local edge, object = street.removedSegments[1], street.edgeObjectsToAdd[1]
+    if not native(edge) or not native(object) or not entity(edge.entity)
+      or not entity(object.playerEntity) or object.category ~= 0 then fail() end
+    return {observationId=observationId, edgeEntity=edge.entity, companyEntity=object.playerEntity}
+  end)
+  if ok then return value end
+  return nil
+end
+
+-- Read-only pre-click qualification. The factory value never leaves this call.
+function M.preActionProbe(api, request)
+  local ok, value = pcall(function()
+    if type(request) ~= "table" or getmetatable(request) ~= nil then fail() end
+    local count = 0
+    for key in pairs(request) do
+      if key ~= "nonce" and key ~= "observationId" and key ~= "edgeEntity" and key ~= "companyEntity" then fail() end
+      count = count + 1
+    end
+    if count ~= 4 or type(request.nonce) ~= "string" or #request.nonce ~= 32
+      or not request.nonce:match("^[a-f0-9]+$") or not entity(request.observationId)
+      or request.observationId > 16 or not entity(request.edgeEntity) or not entity(request.companyEntity) then fail() end
+    local updateCount = clock(api, function() end)
+    if api.engine.util.getPlayer() ~= request.companyEntity
+      or api.engine.entityExists(request.companyEntity) ~= true
+      or api.engine.entityExists(request.edgeEntity) ~= true
+      or not native(component(api, request.companyEntity, "PLAYER")) then fail() end
+    local edge = component(api, request.edgeEntity, "BASE_EDGE")
+    if not native(edge) or not dense(edge.objects, 64) or #edge.objects ~= 0 then fail() end
+    local probe = replacementProbe(api, request.edgeEntity)
+    if probe.code ~= "shape" or probe.added ~= 1 or probe.removed ~= 1 or probe.edgeObjects ~= 0
+      or probe.firstAddedEntity ~= -1 or probe.firstAddedObjectCount ~= 0
+      or probe.firstRemovedEntity ~= request.edgeEntity then fail() end
+    return {code="shape", nonce=request.nonce, observationId=request.observationId,
+      edgeEntity=request.edgeEntity, companyEntity=request.companyEntity, updateCount=updateCount,
+      added=1, removed=1, temporaryEdgeEntity=-1, firstAddedObjectCount=0}
+  end)
+  if ok then return value end
+  return {code="unavailable"}
 end
 
 function M.collect(api, request)

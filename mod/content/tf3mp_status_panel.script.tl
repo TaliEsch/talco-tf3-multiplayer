@@ -156,6 +156,61 @@ local function exchangeRoadCapture() : nil
   end
   return nil
 end
+local preActionSent : table = {}
+local preActionFinished = false
+local preActionSteps : integer = 0
+local preActionPolls : integer = 0
+local function exchangeRoadPreAction() : nil
+  if preActionFinished or #bridgeNonce ~= 32 or missedAcks > 10 or lastAck < 0 then return nil end
+  preActionSteps = preActionSteps + 1
+  if preActionSteps % 60 ~= 0 then return nil end
+  if preActionSent.observationId == nil then
+    local response = api.gui.fireGuiScriptEvent("tf3mp_engine_bridge", "tf3mp_get_status", {}) as table
+    if type(response) ~= "table" or type(response.roadStopPreActionCandidate) ~= "table" then return nil end
+    local candidate = response.roadStopPreActionCandidate as table
+    if type(candidate.observationId) ~= "number" or candidate.observationId % 1 ~= 0
+      or candidate.observationId < 1 or candidate.observationId > 16
+      or type(candidate.edgeEntity) ~= "number" or candidate.edgeEntity % 1 ~= 0
+      or candidate.edgeEntity < 1 or candidate.edgeEntity > 2147483647
+      or type(candidate.companyEntity) ~= "number" or candidate.companyEntity % 1 ~= 0
+      or candidate.companyEntity < 1 or candidate.companyEntity > 2147483647 then
+      preActionFinished = true
+      return nil
+    end
+    preActionSent = {nonce=bridgeNonce, observationId=candidate.observationId,
+      edgeEntity=candidate.edgeEntity, companyEntity=candidate.companyEntity}
+    api.cmd.sendCommand(api.cmd.makeScriptingSendEventCmd("tf3mp_status_1::/tf3mp_status.gs",
+      "tf3mp_engine_bridge", "tf3mp_road_preaction_probe", preActionSent))
+    return nil
+  end
+  preActionPolls = preActionPolls + 1
+  if preActionPolls > 30 then preActionFinished = true; return nil end
+  local response = api.gui.fireGuiScriptEvent("tf3mp_engine_bridge", "tf3mp_get_road_preaction_probe", {})
+  if type(response) ~= "table" then return nil end
+  local receipt = response as table
+  if receipt.nonce ~= preActionSent.nonce or receipt.observationId ~= preActionSent.observationId then return nil end
+  preActionFinished = true
+  if receipt.code == "shape" and receipt.edgeEntity == preActionSent.edgeEntity
+    and receipt.companyEntity == preActionSent.companyEntity
+    and type(receipt.updateCount) == "number" and receipt.updateCount % 1 == 0
+    and receipt.updateCount >= 0 and receipt.updateCount <= 2147483647
+    and receipt.added == 1 and receipt.removed == 1
+    and receipt.temporaryEdgeEntity == -1 and receipt.firstAddedObjectCount == 0 then
+    app.saveUserdata("tf3mp_status_1", "road_stop_preaction_probe", {
+      schemaVersion=1, kind="road_stop_preaction_probe", nonce=preActionSent.nonce,
+      observationId=preActionSent.observationId, code="shape", edgeEntity=receipt.edgeEntity,
+      companyEntity=receipt.companyEntity, updateCount=receipt.updateCount,
+      added=1, removed=1, temporaryEdgeEntity=-1, firstAddedObjectCount=0,
+    })
+  else
+    app.saveUserdata("tf3mp_status_1", "road_stop_preaction_probe", {
+      schemaVersion=1, kind="road_stop_preaction_probe", nonce=preActionSent.nonce,
+      observationId=preActionSent.observationId, code="unavailable",
+    })
+  end
+  return nil
+end
+
 local stopReadbackSent : table = {}
 local stopReadbackFinished = false
 local stopReadbackSteps : integer = 0
@@ -243,6 +298,17 @@ local function exchangeStopReadback() : nil
     schemaVersion = 1, kind = "road_stop_readback", nonce = stopReadbackSent.nonce,
     observationId = stopReadbackSent.observationId, snapshotHex = hex,
   })
+  if type(receipt.modelId) == "number" and receipt.modelId % 1 == 0 and receipt.modelId >= 0 and receipt.modelId <= 2147483647
+    and type(receipt.modelResourceName) == "string" and #receipt.modelResourceName > 4 and #receipt.modelResourceName <= 1024 then
+    local modelNameHex = roadCapture.toHex(receipt.modelResourceName)
+    if type(modelNameHex) == "string" and #modelNameHex <= 2048 then
+      app.saveUserdata("tf3mp_status_1", "road_stop_model_diagnostic", {
+        schemaVersion = 1, kind = "road_stop_model_diagnostic", nonce = stopReadbackSent.nonce,
+        observationId = stopReadbackSent.observationId, modelId = receipt.modelId,
+        modelNameHex = modelNameHex,
+      })
+    end
+  end
   local probeCode = receipt.replacementProbeCode
   if type(probeCode) == "string"
     and (probeCode == "factoryMissing" or probeCode == "factoryNil" or probeCode == "factoryFailed"
@@ -275,6 +341,10 @@ local function exchangeStopReadback() : nil
   return nil
 end
 local function flushRoadCapture() : nil
+  if not preActionFinished then
+    local probeOk = pcall(exchangeRoadPreAction)
+    if not probeOk then preActionFinished = true end
+  end
   if not stopReadbackFinished then
     local readbackOk = pcall(exchangeStopReadback)
     if not readbackOk then
