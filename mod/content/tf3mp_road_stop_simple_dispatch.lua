@@ -23,7 +23,11 @@ local RESULTS = {EXPLICIT_REPLAY_CONSENT_REQUIRED=true,STATE_UNAVAILABLE=true,
   ENGINE_OUTCOME_UNKNOWN=true,CONSUME_PERSISTENCE_UNKNOWN=true,
   ENGINE_CALLBACK_MISSING=true,ENGINE_SEND_FAILED=true,
   ROAD_STOP_OWNER_AND_DEBIT_OBSERVED=true}
-local BEFORE_STAGES = {input=true,held=true,road=true,model=true,players=true,objects=true,balances=true}
+local BEFORE_STAGES = {input=true,held=true,road=true,model=true,players=true,objects=true,balances=true,
+  players_kind=true,players_fetch=true,players_type=true,players_metatable=true,
+  players_limit=true,players_keys=true,players_ids=true,
+  objects_kind=true,objects_fetch=true,objects_type=true,objects_metatable=true,
+  objects_limit=true,objects_keys=true,objects_ids=true}
 local function valid(request)
   if not exact(request, REQUEST) or request.schemaVersion ~= 1
     or request.kind ~= "native_road_stop_simple_probe" or not nonce(request.nonce)

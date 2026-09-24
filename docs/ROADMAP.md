@@ -2,14 +2,15 @@
 
 ## Current direction — 24 September 2026
 
-The guarded simple Road Stop request is now wired into the disposable-save
-game bridge and one-use executor. Two build-40396 attempts rejected before
-engine submission; bounded diagnostics place the current failure at player
-enumeration in the read-only before-snapshot. The save and balance were
-unchanged. Next, qualify that enumeration against TF3's actual player API,
-then repeat one guarded command and inspect stop ownership and native debit.
-Host ordering follows successful local acceptance. This is still stage 7
-work, around 6.2/10 overall readiness.
+The guarded simple Road Stop request is wired into the disposable-save game
+bridge and one-use executor. Two further build-40396 attempts isolated the
+read-only before-snapshot failure: `getEntitiesWithComponent(PLAYER)` threw,
+and the documented entity iterator also failed in this game-script callback. Both
+requests rejected before engine submission; the save and balance were
+unchanged. Next, identify the available entity-read surface in this callback,
+qualify a fail-closed company and economy snapshot, then attempt one guarded
+command with stop ownership and native debit readback. Host ordering follows
+successful local acceptance. This is stage 7 work, around 6.2/10 overall.
 
 Two further paused, read-only previews on the same disposable save exposed the
 remaining factory shape: `nodeConfigsToAdd` and `nodeConfigsToRemove` are both
@@ -20,10 +21,10 @@ command construction only. The next critical step is one guarded, host-ordered
 engine submission with correlated execution, stop and charge readback; road
 ordering and separate-company economy remain open.
 
-A read-only result adapter now checks the proposed command's callback against
-one new owned stop, replacement-road attachment, the native cost and all
-company balances. Its tests are mock-only; the adapter is not yet connected
-to a one-use ordered executor or verified in TF3.
+A read-only result adapter checks the proposed command's callback against one
+new owned stop, replacement-road attachment, native cost and company balances.
+It is connected to the one-use executor, but has rejected before submission
+in TF3 because the player snapshot could not be read in that callback.
 
 At the user's direction, defer the two-instance TF3 run until they say to
 resume it; a second launch from this Windows/Steam profile produced only one

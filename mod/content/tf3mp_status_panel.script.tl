@@ -565,7 +565,11 @@ local function exchangeRoadStopSimpleProbe() : nil
     or not string.match(receipt.outcome as string,"^[a-z_]+$") then return nil end
   result.code, result.outcome = receipt.code, receipt.outcome
   if receipt.code == "BEFORE_SNAPSHOT_UNQUALIFIED" then
-    local stages : table = {input=true,held=true,road=true,model=true,players=true,objects=true,balances=true}
+    local stages : table = {input=true,held=true,road=true,model=true,players=true,objects=true,balances=true,
+      players_kind=true,players_fetch=true,players_type=true,players_metatable=true,
+      players_limit=true,players_keys=true,players_ids=true,
+      objects_kind=true,objects_fetch=true,objects_type=true,objects_metatable=true,
+      objects_limit=true,objects_keys=true,objects_ids=true}
     if type(receipt.stage) == "string" and stages[receipt.stage] == true then result.stage = receipt.stage end
   end
   if receipt.stopEntity ~= nil or receipt.chargedCost ~= nil then

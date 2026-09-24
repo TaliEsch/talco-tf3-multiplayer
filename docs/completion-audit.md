@@ -1,5 +1,23 @@
 # Completion audit against the build prompt
 
+## Build-40396 road Stop snapshot qualification — 24 September 2026
+
+Two further paused disposable-save TF3 runs used the same untouched road
+53417, company 3141 and $67,500 GUI preview. The bounded first receipt
+(`07676268c30d74bf51654f7697216d4a`, update 2914) rejected before
+submission with `BEFORE_SNAPSHOT_UNQUALIFIED`, `stage=players_fetch`: the
+engine-side `getEntitiesWithComponent(PLAYER)` call threw. A guarded trial of
+TF3's documented `forEachEntityWithComponent` fallback also failed before
+submission (`9b73b5d5572db1fd43e0b6083bcb527f`, update 2939,
+`stage=players_iterate`). The ineffective fallback was removed from source;
+the bounded stage diagnostic remains. Both runs left the $40,393,094 balance
+and source save SHA-256
+`ccbf4beb740e53323e06d20890fd029c8e174d3e85efb06801a8b4275c762fb5`
+unchanged. TF3 exited without saving and the native loader was removed.
+The next step is to establish which entity-read APIs are available in this
+game-script callback, then form a fail-closed ownership/economy snapshot using
+actual TF3 evidence. No road Stop was submitted or placed by these runs.
+
 ## Build-40396 guarded road Stop admission — 24 September 2026
 
 A new disposable-save command bridge accepts one nonce-bound, confirmed

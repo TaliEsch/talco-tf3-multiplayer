@@ -20,12 +20,28 @@ local function component(api, id, name)
   if kind == nil then fail() end
   return api.engine.getComponent(id, kind)
 end
-local function members(api, name, limit)
+local function members(api, name, limit, progress)
+  local prefix = name == "PLAYER" and "players" or "objects"
+  progress.stage = prefix .. "_kind"
   local kind = api.type.ComponentType[name]
   if kind == nil then fail() end
+  progress.stage = prefix .. "_fetch"
   local list = api.engine.getEntitiesWithComponent(kind)
-  if not dense(list, limit) then fail() end
+  progress.stage = prefix .. "_type"
+  if type(list) ~= "table" then fail() end
+  progress.stage = prefix .. "_metatable"
+  if getmetatable(list) ~= nil then fail() end
+  progress.stage = prefix .. "_limit"
+  if #list > limit then fail() end
+  progress.stage = prefix .. "_keys"
+  local count = 0
+  for key in pairs(list) do
+    count = count + 1
+    if type(key) ~= "number" or key ~= math.floor(key) or key < 1 or key > #list then fail() end
+  end
+  if count ~= #list then fail() end
   local out = {}
+  progress.stage = prefix .. "_ids"
   for _, id in ipairs(list) do if not entity(id) or out[id] then fail() end; out[id] = true end
   return out
 end
@@ -59,9 +75,9 @@ local function snapshot(api, input, progress)
   local model = api.res.modelRep.find(input.model)
   if not integer(model) or model < 0 or model > 2147483647 then fail() end
   progress.stage = "players"
-  local players = members(api, "PLAYER", 64)
+  local players = members(api, "PLAYER", 64, progress)
   progress.stage = "objects"
-  local objects = members(api, "EDGE_OBJECT", 100000)
+  local objects = members(api, "EDGE_OBJECT", 100000, progress)
   if not players[input.companyEntity] then fail() end
   local balances = {}
   progress.stage = "balances"
@@ -87,7 +103,7 @@ local function verify(api, before, input, data, success, resultEntities)
   local proposal = native(data) and data.resultProposalData
   local cost = native(proposal) and proposal.costs
   if not integer(cost) or cost <= 0 then fail() end
-  local players = members(api, "PLAYER", 64)
+  local players = members(api, "PLAYER", 64, {stage="after_players"})
   for id in pairs(players) do if not before.players[id] then fail() end end
   for id in pairs(before.players) do if not players[id] then fail() end end
   for id, prior in pairs(before.balances) do
@@ -96,7 +112,7 @@ local function verify(api, before, input, data, success, resultEntities)
       if current ~= prior - cost or current < 0 then fail() end
     elseif current ~= prior then fail() end
   end
-  local objects = members(api, "EDGE_OBJECT", 100000)
+  local objects = members(api, "EDGE_OBJECT", 100000, {stage="after_objects"})
   local stop, count = nil, 0
   for id in pairs(objects) do
     if not before.objects[id] then stop, count = id, count + 1 end
