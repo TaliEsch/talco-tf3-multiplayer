@@ -8,6 +8,14 @@ game process. Continue the one-game separate-company road/economy path and
 offline Host/Join engineering. The two-instance Stop and baseline remain
 required for stage 6 and the full multiplayer goal.
 
+The latest one-game road-stop experiment confirmed a native placement, exact
+$67,500 debit, and both proposal events, but the existing capture codec still
+lacks model and road-relative placement data. The replay-record Host gate also
+rejected its own authenticated local player; source now checks for exactly that
+player and no remote peer. Do not rerun the same unsupported placement. Next
+resolve a supported complete stop recipe or use another already qualified road
+action while continuing offline multiplayer wiring.
+
 ## TF2-informed Stop timing — 24 September 2026
 
 The cloned MIT-licensed TF2 mod is now a concrete reference for cancellation,

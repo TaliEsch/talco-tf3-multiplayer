@@ -21,7 +21,7 @@ import {checkRoadStopReplayIdentity} from './road-stop-replay-case.mjs';
 import {openNativeHostJoinGate,resolveNativeHostJoinMode} from './native-host-join.mjs';
 import {prepareDisposableStartupLoad} from './startup-load.mjs';
 import {verifyPreparedJoinSave} from './prepared-join-save.mjs';
-import {connectHostLocalParticipant} from './host-local-participant.mjs';
+import {connectHostLocalParticipant,hasSoleHostLocalParticipant} from './host-local-participant.mjs';
 import {loadHostLocalEngineFactory} from './host-local-cli-seam.mjs';
 import {liveHostUpdateCount} from './live-host-clock.mjs';
 import {createTwoCompanyHostCapture} from './two-company-host-capture.mjs';
@@ -71,7 +71,8 @@ async function handleRoadReplayLine(line){
     replayLog(preview.status,preview.issues?{issues:preview.issues}:{});
     return;
   }
-  if(roadReplayBusy||stopping||command!=='host'||!bridge||!hostInstance||hostInstance.authority.players().length!==0)
+  if(roadReplayBusy||stopping||command!=='host'||!bridge
+    ||!hasSoleHostLocalParticipant({host:hostInstance,localParticipant:hostLocalParticipant,nativeGate}))
     throw new Error('FRESH_SOLO_HOST_REQUIRED');
   const start=operation==='road-replay-record'||operation==='road-replay-load';
   if(start&&(vehicleTestActive||integrationBatch||batchStarting||coordinatorRun||coordinatorStarting||phase2Setup||phase2Starting||roadReplayWorkflow))

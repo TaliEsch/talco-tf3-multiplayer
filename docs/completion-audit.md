@@ -1,5 +1,30 @@
 # Completion audit against the build prompt
 
+## Single-game road-stop experiment — 24 September 2026
+
+One qualified build-40392 TF3 process loaded the unchanged disposable save
+`tf3mp_disposable_43b49d368fbbd409ae2614ada7b0c757` with the reviewed mod.
+The bridge observed company 3141 at update 3015 and paused speed 0. The live
+`road-replay-record` command returned `FRESH_SOLO_HOST_REQUIRED` before any
+placement because the production Host's authenticated local participant was
+mistaken for an extra player. The helper now requires exactly that local player,
+no remote players, a ready native gate, and a lobby coordinator. Focused tests
+cover remote, wrong-player, missing-player, held, and native-gate cases; this
+repair has not yet been rerun in TF3.
+
+In the same loaded world, one normal roadside stop produced eight `create`
+samples and one `apply` sample from `streetTerminalBuilder`, with no observer
+errors. The owner was 3141, proposal cost was $67,500, and the displayed
+account changed from $40,229,553 to $40,162,053. A stop icon appeared on the
+selected road. Both capture diagnostics remained `CAPTURE_UNSUPPORTED`:
+`modelInstance`, `edgeEntity`, `param`, and `model` were absent; `oneWay` was
+boolean and `name` string. This matches the earlier documented schema gap;
+do not repeat the same placement or infer a replayable resource/position. No
+replay case or second-company service was created. TF3 was closed without
+saving, the source save still hashes to
+`ccbf4beb740e53323e06d20890fd029c8e174d3e85efb06801a8b4275c762fb5`,
+and the exact hash-matched native loader was unstaged.
+
 ## Two-instance trial deferred; one-game work continues — 24 September 2026
 
 The user directed us to skip the two-instance TF3 attempt until they say to

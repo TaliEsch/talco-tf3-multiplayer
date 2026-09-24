@@ -11,6 +11,14 @@ const FORWARDED = new Set([
   'error', 'peer_left',
 ]);
 
+export function hasSoleHostLocalParticipant({host, localParticipant, nativeGate} = {}) {
+  const players = host?.authority?.players();
+  return nativeGate?.ready === true && host?.coordinator?.phase === 'lobby'
+    && Array.isArray(players) && players.length === 1
+    && typeof localParticipant?.connection?.playerId === 'string'
+    && players[0].playerId === localParticipant.connection.playerId;
+}
+
 export function connectHostLocalParticipant({ host, displayName, engineBinding,
   createAdapter, onMessage = () => {}, verifiedSave = null, pollIntervalMs = 25,
   deferAdapterUntilCapture = false } = {}) {
