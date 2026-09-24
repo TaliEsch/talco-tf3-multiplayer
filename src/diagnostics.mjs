@@ -46,14 +46,15 @@ export function diagnosticLogger(stream = process.stdout) {
     // events. Never serialize a raw receipt, snapshot, path, or error object.
     const stopEvidenceEvents=new Set(['peer_checkpoint_ready','peer_command_applied','peer_barrier_released',
       'engine_operation_receipt','engine_checkpoint_evidence','engine_execution_evidence',
-      'engine_operation_fault','command_proposed']);
+      'engine_operation_fault','command_proposed','host_action_clock']);
     if(stopEvidenceEvents.has(record.event)){
       for(const field of ['roundId','operationId','role','operation','phase','fault'])
         if(typeof record[field]==='string'&&/^[A-Za-z0-9_.:-]{1,128}$/.test(record[field]))safe[field]=record[field];
       for(const field of ['checkpointHash','stateHash'])
         if(typeof record[field]==='string'&&/^[a-f0-9]{64}$/.test(record[field]))safe[field]=record[field];
       for(const field of ['entity','ownerCompanyEntity','releaseUpdate','admissionUpdate',
-        'scheduleLeadUpdates','unavailableCount','expectedUpdate','observedUpdate'])
+        'scheduleLeadUpdates','unavailableCount','expectedUpdate','observedUpdate',
+        'hostUpdateCount','peerUpdateCount'])
         if(Number.isSafeInteger(record[field])&&record[field]>=0&&record[field]<=2147483647)safe[field]=record[field];
       for(const field of ['held','stopped','comparisonReady'])
         if(typeof record[field]==='boolean')safe[field]=record[field];

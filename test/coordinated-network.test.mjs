@@ -47,6 +47,23 @@ test('production-sized Stop lead keeps the two-engine prepare window open',async
     assert.equal(f.host.coordinator.phase,'awaiting_prepare');
   }finally{await f.close();}
 });
+test('ahead peer clock is traced at Stop admission and still fails closed',async()=>{
+  const f=await fixture(2,{leadUpdates:60});
+  try{
+    await f.prepare();
+    f.clients[0].connection.send('participant_heartbeat',
+      {roundId:f.host.coordinator.roundId,updateCount:101});
+    // Same-socket frames are ordered, including when the writes are coalesced.
+    f.request();
+    await until(()=>f.clients[0].messages.some(m=>m.kind==='session_halted'));
+    const clocks=f.events.filter(event=>event.event==='host_action_clock');
+    assert.equal(clocks.length,2);
+    assert.deepEqual(clocks.map(event=>event.peerUpdateCount).sort((a,b)=>a-b),[100,101]);
+    assert.equal(clocks.every(event=>event.hostUpdateCount===100),true);
+    assert.equal(f.clients[0].messages.find(m=>m.kind==='session_halted').payload.code,'CLOCK_MISMATCH');
+    assert.equal(f.events.some(event=>event.event==='command_proposed'),false);
+  }finally{await f.close();}
+});
 for (const count of [2, 4]) test(`${count} socket participants coordinate prepare/commit/apply without legacy relay`, async () => {
   const f = await fixture(count);
   try {

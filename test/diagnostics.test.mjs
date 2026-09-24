@@ -95,14 +95,18 @@ test('Stop evidence logger retains bounded correlation fields and redacts raw re
   log({event:'command_proposed',admissionUpdate:100,scheduledUpdate:160,scheduleLeadUpdates:60});
   assert.equal(records[2].admissionUpdate,100);
   assert.equal(records[2].scheduleLeadUpdates,60);
+  log({event:'host_action_clock',roundId:'round-1',playerId:'join-1',
+    hostUpdateCount:100,peerUpdateCount:101});
+  assert.equal(records.at(-1).hostUpdateCount,100);
+  assert.equal(records.at(-1).peerUpdateCount,101);
   log({event:'engine_checkpoint_evidence',roundId:'round-1',checkpointHash:hash,
     comparisonReady:true,unavailableCount:1});
-  assert.equal(records[3].comparisonReady,true);
-  assert.equal(records[3].unavailableCount,1);
+  assert.equal(records[4].comparisonReady,true);
+  assert.equal(records[4].unavailableCount,1);
   log({event:'engine_execution_evidence',roundId:'C:\\private',stateHash:'secret',entity:-1,
     operationId:'x'.repeat(129),stopped:'true'});
   for(const field of ['roundId','stateHash','entity','operationId','stopped'])
-    assert.equal(records[4][field],undefined);
+    assert.equal(records[5][field],undefined);
   log({event:'unrelated',roundId:'round-1',stateHash:hash,entity:42});
-  for(const field of ['roundId','stateHash','entity'])assert.equal(records[5][field],undefined);
+  for(const field of ['roundId','stateHash','entity'])assert.equal(records[6][field],undefined);
 });

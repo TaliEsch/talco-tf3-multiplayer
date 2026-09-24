@@ -1,5 +1,13 @@
 # TalCo TF3 multiplayer — current delivery plan
 
+## Current direction — 24 September 2026
+
+At the user's direction, defer the two-instance TF3 run until they say to
+resume it; a second launch from this Windows/Steam profile produced only one
+game process. Continue the one-game separate-company road/economy path and
+offline Host/Join engineering. The two-instance Stop and baseline remain
+required for stage 6 and the full multiplayer goal.
+
 ## TF2-informed Stop timing — 24 September 2026
 
 The cloned MIT-licensed TF2 mod is now a concrete reference for cancellation,
@@ -22,7 +30,8 @@ entity, update and hash fields for these events; its earlier allowlist silently
 dropped several of them. This gives one bounded Host/Join run enough correlated fields
 to identify the first mismatching link. Focused two/four-player socket and
 adapter tests pass. These are logging and model results; two real TF3 instances
-still have not been compared.
+still have not been compared. The Host also records one bounded per-peer clock
+snapshot when an action arrives; an ahead peer still fails closed.
 
 ## Current checkpoint — 24 September 2026
 

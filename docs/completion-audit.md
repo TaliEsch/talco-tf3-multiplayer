@@ -1,5 +1,16 @@
 # Completion audit against the build prompt
 
+## Two-instance trial deferred; one-game work continues — 24 September 2026
+
+The user directed us to skip the two-instance TF3 attempt until they say to
+resume it. The existing same-profile second launch left only one game process.
+This does not count as a two-game test or remove the stage-6 requirement.
+Host action admission now records each authenticated peer's last accepted
+update beside the Host update, once per request. A focused socket test proves
+an ahead peer produces the trace and still halts with `CLOCK_MISMATCH`; no
+clock gate was relaxed. Work continues on the one-game separate-company road
+and economy path without another same-profile launch attempt.
+
 ## TF2 action-path comparison and production Stop lead — 24 September 2026
 
 The sibling TF2 multiplayer mod's actual capture/cancel, inject, semantic

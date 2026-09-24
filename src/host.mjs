@@ -44,7 +44,7 @@ export function startHost({ secret, sessionId = randomUUID(), bind = DEFAULT_BIN
     pendingConnections++;
     socket.setNoDelay(true);
     socket.setTimeout(HELLO_TIMEOUT_MS, () => { if (!peer.player) socket.destroy(); });
-    const peer = { socket, player: null, pending: true, ready: requiredSave === null, companyClaim: null, decoder: new FrameDecoder(), count: 0, window: Date.now(), lastSequence: -1, seen: new Set() };
+    const peer = { socket, player: null, pending: true, ready: requiredSave === null, companyClaim: null, clockUpdateCount: null, decoder: new FrameDecoder(), count: 0, window: Date.now(), lastSequence: -1, seen: new Set() };
     peers.add(peer);
     socket.on("data", (chunk) => {
       try {
@@ -93,15 +93,23 @@ export function startHost({ secret, sessionId = randomUUID(), bind = DEFAULT_BIN
             if (!peer.ready) throw new ProtocolError("SAVE_REQUIRED", "verify the save first");
             if (body.kind === "participant_ready") {
               coordinator.ready(peer.player.playerId, body.payload);
+              peer.clockUpdateCount=body.payload.updateCount;
               logger({level:'info',event:'peer_checkpoint_ready',playerId:peer.player.playerId,
                 roundId:body.payload.roundId,updateCount:body.payload.updateCount,
                 checkpointHash:body.payload.checkpointHash,companyEntity:body.payload.companyEntity,
                 gameplayVerified:false});
             }
-            if (body.kind === "participant_heartbeat") coordinator.heartbeat(peer.player.playerId, body.payload);
-            if (body.kind === "command_prepared") coordinator.prepared(peer.player.playerId, body.payload, getUpdateCount());
+            if (body.kind === "participant_heartbeat") {
+              coordinator.heartbeat(peer.player.playerId, body.payload);
+              peer.clockUpdateCount=body.payload.updateCount;
+            }
+            if (body.kind === "command_prepared") {
+              coordinator.prepared(peer.player.playerId, body.payload, getUpdateCount());
+              peer.clockUpdateCount=body.payload.updateCount;
+            }
             if (body.kind === "command_applied") {
               coordinator.applied(peer.player.playerId, body.payload);
+              peer.clockUpdateCount=body.payload.updateCount;
               logger({level:'info',event:'peer_command_applied',playerId:peer.player.playerId,
                 roundId:body.payload.roundId,hostSequence:body.payload.hostSequence,
                 updateCount:body.payload.updateCount,stateHash:body.payload.stateHash,
@@ -109,6 +117,7 @@ export function startHost({ secret, sessionId = randomUUID(), bind = DEFAULT_BIN
             }
             if (body.kind === "participant_released") {
               coordinator.released(peer.player.playerId, body.payload);
+              peer.clockUpdateCount=body.payload.updateCount;
               logger({level:'info',event:'peer_barrier_released',playerId:peer.player.playerId,
                 roundId:body.payload.roundId,hostSequence:body.payload.hostSequence,
                 releaseUpdate:body.payload.releaseUpdate,updateCount:body.payload.updateCount,
@@ -158,6 +167,13 @@ export function startHost({ secret, sessionId = randomUUID(), bind = DEFAULT_BIN
             void (async()=>{
               try {
                 if (!peer.ready) throw new ProtocolError("SAVE_REQUIRED", "authoritative save must be verified before gameplay requests");
+                const entryHostUpdate=!legacyModelRelay?getUpdateCount():null;
+                if(!legacyModelRelay){
+                  for(const member of peers)if(member.player&&member.clockUpdateCount!==null)
+                    logger({level:'info',event:'host_action_clock',roundId:coordinator.roundId,
+                      playerId:member.player.playerId,hostUpdateCount:entryHostUpdate,
+                      peerUpdateCount:member.clockUpdateCount});
+                }
                 let verifiedOwner;
                 if(body.kind==='action_request'&&body.payload?.commandType==='vehicle.setRunning'&&inspectVehicleOwner!==null){
                   const request=body.payload;
@@ -170,7 +186,7 @@ export function startHost({ secret, sessionId = randomUUID(), bind = DEFAULT_BIN
                     ||typeof request.payload.running!=='boolean'
                     ||Object.keys(request.payload).some(key=>key!=='running'))
                     throw new ProtocolError('BAD_RUNNING_STATE','vehicle request payload is invalid');
-                  if(!legacyModelRelay)coordinator.beforeCommand(getUpdateCount());
+                  if(!legacyModelRelay)coordinator.beforeCommand(entryHostUpdate);
                   let proof;
                   try{proof=await inspectVehicleOwner({targetEntity:request.targetEntity,
                     targetCompanyEntity:request.targetCompanyEntity});}
@@ -195,7 +211,7 @@ export function startHost({ secret, sessionId = randomUUID(), bind = DEFAULT_BIN
                 if (legacyModelRelay) broadcast("command_accepted", { command: accepted });
                 else coordinator.propose(accepted, hostUpdate);
                 logger({ level: "info", event: legacyModelRelay ? "command_accepted" : "command_proposed",
-                  playerId: peer.player.playerId, hostSequence: accepted.hostSequence,
+                  playerId: peer.player.playerId, roundId:coordinator.roundId,hostSequence: accepted.hostSequence,
                   admissionUpdate:hostUpdate,scheduledUpdate:accepted.scheduledUpdate,
                   scheduleLeadUpdates:accepted.scheduledUpdate-hostUpdate });
               } catch (error) {
