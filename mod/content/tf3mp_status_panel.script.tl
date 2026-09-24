@@ -224,6 +224,16 @@ local function exchangeStopReadback() : nil
         })
       end
     end
+    if field == "constructionResourceSyntax" and type(receipt.constructionResourceValue) == "string"
+      and #receipt.constructionResourceValue > 0 and #receipt.constructionResourceValue <= 1024 then
+      local valueHex = roadCapture.toHex(receipt.constructionResourceValue)
+      if type(valueHex) == "string" and #valueHex <= 2048 then
+        app.saveUserdata("tf3mp_status_1", "road_stop_construction_diagnostic", {
+          schemaVersion = 1, kind = "road_stop_construction_diagnostic", nonce = stopReadbackSent.nonce,
+          observationId = stopReadbackSent.observationId, valueHex = valueHex,
+        })
+      end
+    end
     log.message("{\"event\":\"native_stop_readback\",\"code\":\"READBACK_UNAVAILABLE\",\"field\":\"" .. field .. "\",\"gameplayVerified\":false}")
     return nil
   end

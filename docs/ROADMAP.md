@@ -12,21 +12,21 @@ Stop and baseline belong to later multiplayer acceptance and remain required
 for the full goal. Stage 7 road/economy and stage 8 playable multiplayer are
 still open.
 
-Steam updated the installed TF3 executable during the next one-game Host launch.
-Build 40396 has SHA-256 `086d69c141acaac1016e942beac28f469da0c5cb2de4b7f4c6f0d3fd7fd75dc1`,
-while the native loader and hooks were qualified for
-`cbd8092757e539a42f56c51e00eeb7671d967a9072838d7a5f47d2de88348716`.
-The in-process probe rejected the new executable before native IPC opened.
-Requalify the new build from its own binary evidence before another native
-gameplay run; retain all existing safety gates. See `docs/completion-audit.md`.
+Build 40396 has SHA-256
+`086d69c141acaac1016e942beac28f469da0c5cb2de4b7f4c6f0d3fd7fd75dc1`.
+The exact-build native startup, probe and vehicle gate passed in one TF3
+process. A paused disposable-save run placed one Road Stop and copied a
+complete owned post-placement readback through the production mod bridge;
+the host-side strict parser accepted it as evidence only. The original save
+was unchanged and the temporary loader removed. See `docs/completion-audit.md`.
 
-The latest one-game road-stop experiment confirmed a native placement, exact
-$67,500 debit, and both proposal events, but the existing capture codec still
-lacks model and road-relative placement data. The replay-record Host gate also
-rejected its own authenticated local player; source now checks for exactly that
-player and no remote peer. Do not rerun the same unsupported placement. Next
-resolve a supported complete stop recipe or use another already qualified road
-action while continuing offline multiplayer wiring.
+The next stage-7 action is to build a supported road-stop replay recipe from
+the observed post-placement edge and stop, or qualify the missing native
+proposal fields. Then submit one owned construction through Host ordering,
+execute once under the game hold, and verify the resulting stop and native
+charge. Separate-company ownership, balances, income and spending still need
+real-game evidence. The existing capture codec remains unsupported because its
+native proposal lacks model and road-relative placement data.
 
 The installed build-40396 API declares `SimpleStreetProposal.EdgeObject` with
 edge, relative position, side, model resource, owner and name, and accepts a

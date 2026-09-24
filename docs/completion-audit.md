@@ -1,5 +1,37 @@
 # Completion audit against the build prompt
 
+## Build-40396 road-stop readback checkpoint — 24 September 2026
+
+The updated executable SHA-256 is
+`086d69c141acaac1016e942beac28f469da0c5cb2de4b7f4c6f0d3fd7fd75dc1`.
+The exact-build native loader, probe and vehicle gate started in one TF3 process;
+the startup receipt files reported `runtime-loaded 0 0`, `probe-result 0 0`,
+and `vehicle-gate 0 1`. This qualifies that narrow native startup on 40396,
+not all gameplay adapters. The loader was removed after each disposable run.
+
+The unchanged save `tf3mp_disposable_43b49d368fbbd409ae2614ada7b0c757`
+loaded with bridge connected and company 3141. While paused, a normal Road
+Stop appeared on the selected road, with its $67,500 charge visible. A second
+click on the same location also caused a $16,875 replacement; neither action
+was saved. The save SHA-256 remained
+`ccbf4beb740e53323e06d20890fd029c8e174d3e85efb06801a8b4275c762fb5`.
+The engine readback reached `constructionResourceSyntax`; a missing bounded
+diagnostic was traced to the engine-to-panel bridge dropping the value. After
+the bridge fix, a real TF3 readback receipt at observation 3 captured
+`::/stations/street/small_stops/small_mid.con`, TF3's base-game resource
+namespace. Lua and JS readback validators now accept that exact namespace
+shape with the existing path bounds and traversal rejection. Focused tests pass.
+One further paused build-40396 run placed one Road Stop, charged $67,500, and
+returned `COPIED_PLACED_OBJECT_ONLY`. The production envelope parser accepted
+the complete readback with company 3141, stop entity 68677, attached edge
+73200, update 2983, two tagged parameter entries, and digest
+`9bebfc252de29d442276dc29ec87eb9670468c61818349d48838a8fcc1c6b6a7`.
+Its `executionAuthorized` flag remained false. The game exited without saving,
+and the original disposable-save hash was unchanged. This proves a bounded
+single-game post-placement snapshot, not replay. Native road proposal capture still
+reports missing `modelInstance`, `edgeEntity`, `param`, and `model`. No ordered
+road-stop replay, economy synchronization, or two-instance gameplay is proven.
+
 ## Current milestone boundary — 24 September 2026
 
 The user moved two-instance tests out of stage 6. The corrected one-game

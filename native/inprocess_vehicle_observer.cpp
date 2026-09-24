@@ -12,22 +12,22 @@
 namespace tf3vehicleobserver {
 namespace {
 
-constexpr DWORD kFactoryRva = 0x9ef122;
-constexpr DWORD kFactoryPostRva = 0x9ef198;
-constexpr DWORD kAdmissionRva = 0xe2ad4c;
-constexpr DWORD kCallbackTailRva = 0xe3e824;
-constexpr DWORD kCallbackContinuationRva = 0xe2a3f0;
-constexpr DWORD kSendReturnRva = 0xe2ad52;
-constexpr DWORD kMarshalerReturnRva = 0xe11a27;
-constexpr DWORD kPostSendBodyRva = 0xe1bb58;
-constexpr DWORD kCallbackVtableRva = 0x373fa90;
-constexpr DWORD kCallbackInvokeRva = 0xe3e820;
+constexpr DWORD kFactoryRva = 0x9ef132;
+constexpr DWORD kFactoryPostRva = 0x9ef1a8;
+constexpr DWORD kAdmissionRva = 0xe2ad3c;
+constexpr DWORD kCallbackTailRva = 0xe3e814;
+constexpr DWORD kCallbackContinuationRva = 0xe2a3e0;
+constexpr DWORD kSendReturnRva = 0xe2ad42;
+constexpr DWORD kMarshalerReturnRva = 0xe11a17;
+constexpr DWORD kPostSendBodyRva = 0xe1bb48;
+constexpr DWORD kCallbackVtableRva = 0x373fa70;
+constexpr DWORD kCallbackInvokeRva = 0xe3e810;
 constexpr std::array<unsigned char, 3> kFactoryBytes{0x41, 0x8b, 0xd8}; // mov ebx,r8d
 constexpr std::array<unsigned char, 1> kFactoryPostBytes{0x90}; // nop after constructed output
 constexpr std::array<unsigned char, 3> kAdmissionBytes{0x48, 0x8b, 0xd3}; // mov rdx,rbx
 constexpr std::array<unsigned char, 5> kCallbackTailBytes{0xe9, 0xc7, 0xbb, 0xfe, 0xff};
 constexpr std::array<unsigned char, 1> kNormalReturnBytes{0x90};
-constexpr std::array<unsigned char, 9> kSendReturnWindow{0x90, 0x48, 0x8b, 0xcb, 0xe8, 0x95, 0x4c, 0xba, 0xff};
+constexpr std::array<unsigned char, 9> kSendReturnWindow{0x90, 0x48, 0x8b, 0xcb, 0xe8, 0xd5, 0x4c, 0xba, 0xff};
 constexpr std::array<unsigned char, 9> kMarshalerReturnWindow{0x90, 0x48, 0x8b, 0x94, 0x24, 0xb0, 0x00, 0x00, 0x00};
 constexpr std::array<unsigned char, 6> kPostSendBodyWindow{0xe8, 0x38, 0xf0, 0x00, 0x00, 0x90};
 constexpr std::uintptr_t kMaximumUserPointer = 0x00007fffffffffffULL;
@@ -508,12 +508,12 @@ bool SafeReadCheckedCallback(const CONTEXT* context, std::uintptr_t* implementat
         }
 #endif
         const auto target = *reinterpret_cast<const std::uintptr_t*>(original_table + 0x10);
+        // Exact build-40396 PE pointers. The former third/fourth adapters have
+        // multiple static candidates and remain rejected until identified.
         const bool allowed_adapter =
-            (original_table == base + 0x367cc00 && target == base + 0x1201b0) ||
-            (original_table == base + 0x367cb20 && target == base + 0x1201b0) ||
-            (original_table == base + 0x36cab88 && target == base + 0x6ab630) ||
-            (original_table == base + 0x3788880 && target == base + 0x27c8810) ||
-            (original_table == base + 0x367cc38 && target == base + 0x120420);
+            (original_table == base + 0x367cc00 && target == base + 0x1201a0) ||
+            (original_table == base + 0x367cb20 && target == base + 0x1201a0) ||
+            (original_table == base + 0x367cc38 && target == base + 0x120410);
         if (!allowed_adapter || table != base + kCallbackVtableRva ||
             *reinterpret_cast<const std::uintptr_t*>(table + 0x10) != base + kCallbackInvokeRva) return false;
         *implementation = original;

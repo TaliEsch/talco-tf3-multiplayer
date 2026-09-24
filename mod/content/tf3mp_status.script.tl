@@ -1897,6 +1897,16 @@ local ret : GameScriptWithGui<Tf3MpState, Tf3MpGuiState> = {
           receipt.code = "readback"; receipt.json = result.json
         elseif ok and type(result) == "table" and type(result.field) == "string" and #result.field <= 32 and result.field:match("^[A-Za-z]+$") then
           receipt.field = result.field
+          if result.field == "constructionResourceSyntax" and type(result.constructionResourceValue) == "string"
+            and #result.constructionResourceValue > 0 and #result.constructionResourceValue <= 1024 then
+            receipt.constructionResourceValue = result.constructionResourceValue
+          elseif result.field == "constructionResourceNil" and validInteger(result.modelId)
+            and result.modelId >= 0 and result.modelId <= 2147483647
+            and type(result.modelResourceName) == "string" and #result.modelResourceName > 4
+            and #result.modelResourceName <= 1024 then
+            receipt.modelId = result.modelId
+            receipt.modelResourceName = result.modelResourceName
+          end
         end
         current.roadStopReadbackReceipt = receipt
         state:set(current)

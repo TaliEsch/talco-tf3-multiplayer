@@ -6,6 +6,8 @@ import {parseRoadStopReadbackEnvelope} from '../src/road-stop-readback.mjs';
 
 const {lua,lauxlib,lualib,to_luastring}=fengari;
 const source=await readFile(new URL('../mod/content/tf3mp_stop_readback.lua',import.meta.url),'utf8');
+const gameScript=await readFile(new URL('../mod/content/tf3mp_status.script.tl',import.meta.url),'utf8');
+const panelScript=await readFile(new URL('../mod/content/tf3mp_status_panel.script.tl',import.meta.url),'utf8');
 function nativeNamespace(L, globalName, constants){
   lua.lua_newuserdata(L,0);
   lua.lua_newtable(L);
@@ -41,15 +43,15 @@ local api={type={ComponentType=CT,enum={EdgeObjectType=${edgeObjectType}},Mat4f=
 local request={schemaVersion=1,nonce=string.rep('a',32),observationId=3,companyEntity=10,resultEntities={50,51},oneWay=false,name='Observed stop'}
 ${mutation}
 local r=m.collect(api,request)
-return r.code,r.json or '',reads,r.field or '',table.concat(clockHandles, ','),r.modelId or -1,r.modelResourceName or ''
+return r.code,r.json or '',reads,r.field or '',table.concat(clockHandles, ','),r.modelId or -1,r.modelResourceName or '',r.constructionResourceValue or ''
 `;
   const L=lauxlib.luaL_newstate();lualib.luaL_openlibs(L);try{
     if(componentConstants) nativeNamespace(L,'NativeComponentType',componentConstants);
     if(edgeConstants) nativeNamespace(L,'NativeEdgeObjectType',edgeConstants);
     for(const name of ['NativeGetWorld','NativeGetComponent','NativeEntityExists','NativeGetEdge','NativeMat4Cols']) nativeCallable(L,name);
     assert.equal(lauxlib.luaL_loadstring(L,to_luastring(script)),lua.LUA_OK,lua.lua_tojsstring(L,-1));
-    assert.equal(lua.lua_pcall(L,0,7,0),lua.LUA_OK,lua.lua_tojsstring(L,-1));
-    return [lua.lua_tojsstring(L,-7),lua.lua_tojsstring(L,-6),lua.lua_tointeger(L,-5),lua.lua_tojsstring(L,-4),lua.lua_tojsstring(L,-3),lua.lua_tointeger(L,-2),lua.lua_tojsstring(L,-1)];
+    assert.equal(lua.lua_pcall(L,0,8,0),lua.LUA_OK,lua.lua_tojsstring(L,-1));
+    return [lua.lua_tojsstring(L,-8),lua.lua_tojsstring(L,-7),lua.lua_tointeger(L,-6),lua.lua_tojsstring(L,-5),lua.lua_tojsstring(L,-4),lua.lua_tointeger(L,-3),lua.lua_tojsstring(L,-2),lua.lua_tojsstring(L,-1)];
   }finally{lua.lua_close(L);}
 }
 const nativeComponents={GAME_SPEED:'GAME_SPEED',GAME_TIME:'GAME_TIME',EDGE_OBJECT:'EDGE_OBJECT',PLAYER_OWNED:'PLAYER_OWNED',BASE_EDGE:'BASE_EDGE',MODEL_INSTANCE_LIST:'MODEL_INSTANCE_LIST'};
@@ -130,7 +132,7 @@ test('fails closed when the zero-based instance matrix accessor cannot provide i
     assert.deepEqual([code,json,field],['unavailable','','transform'],mutation);
   }
 });
-test('classifies an unreadable construction resource without exporting its value',()=>{
+test('classifies an unreadable construction resource and bounds its private diagnostic',()=>{
   for(const [mutation,field] of [
     ['stop.edgeObjectConstruction=nil','constructionResourceNil'],
     ['stop.edgeObjectConstruction=false','constructionResourceType'],
@@ -140,17 +142,33 @@ test('classifies an unreadable construction resource without exporting its value
     const [code,json,,actualField]=run(mutation);
     assert.deepEqual([code,json,actualField],['unavailable','',field],mutation);
   }
+  assert.equal(run("stop.edgeObjectConstruction='../unsafe.con'")[7],'../unsafe.con');
+  assert.equal(run("stop.edgeObjectConstruction=string.rep('x',1025)")[7],'');
+  assert.equal(run("stop.edgeObjectConstruction=false")[7],'');
+});
+test('accepts TF3 base-game resource namespace from a placed road stop',()=>{
+  const value='::/stations/street/small_stops/small_mid.con';
+  const [code,json]=run(`stop.edgeObjectConstruction='${value}'`);
+  assert.equal(code,'readback');
+  assert.equal(JSON.parse(json).constructionResource,value);
+  for(const bad of ['::/../unsafe.con',':://stations/unsafe.con','other::/stations/unsafe.con'])
+    assert.equal(run(`stop.edgeObjectConstruction='${bad}'`)[0],'unavailable');
 });
 test('copies a unique rendered model identity only as an unavailable diagnostic',()=>{
   const setup="stop.edgeObjectConstruction=nil;data[50].MODEL_INSTANCE_LIST={fatInstances={{modelId=21}},thinInstances={}};api.res={modelRep={getName=function(id) if id==21 then return 'model/road_stop.mdl' end end}}";
   assert.deepEqual(run(setup).slice(0,4),['unavailable','',8,'constructionResourceNil']);
-  assert.deepEqual(run(setup).slice(5),[21,'model/road_stop.mdl']);
+  assert.deepEqual(run(setup).slice(5,7),[21,'model/road_stop.mdl']);
   for(const change of [
     ';data[50].MODEL_INSTANCE_LIST.fatInstances[2]={modelId=22}',
     ';data[50].MODEL_INSTANCE_LIST.thinInstances[1]={modelId=22}',
     ";api.res.modelRep.getName=function()return '../bad.mdl' end",
     ';data[50].MODEL_INSTANCE_LIST.fatInstances[1].modelId=-1',
-  ]) assert.deepEqual(run(setup+change).slice(5),[-1,'']);
+  ]) assert.deepEqual(run(setup+change).slice(5,7),[-1,'']);
+});
+test('engine readback receipt forwards only bounded diagnostics to the panel',()=>{
+  assert.match(gameScript,/result\.field == "constructionResourceSyntax"[\s\S]*?#result\.constructionResourceValue <= 1024[\s\S]*?receipt\.constructionResourceValue = result\.constructionResourceValue/);
+  assert.match(gameScript,/result\.field == "constructionResourceNil"[\s\S]*?receipt\.modelId = result\.modelId[\s\S]*?receipt\.modelResourceName = result\.modelResourceName/);
+  assert.match(panelScript,/receipt\.constructionResourceValue[\s\S]*?app\.saveUserdata\("tf3mp_status_1", "road_stop_construction_diagnostic"/);
 });
 test('returns fixed unavailable for request, pause, candidate, edge, and copy boundaries',()=>{
   for(const change of [

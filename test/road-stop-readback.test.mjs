@@ -17,6 +17,8 @@ test('strict road-stop readback envelope is inert and canonically normalizes par
   assert.deepEqual({oneWay:result.snapshot.oneWay,name:result.snapshot.name,left:result.snapshot.left},{oneWay:true,name:'Observed stop',left:false});
   assert.equal(result.digest,sha256Canonical(result.snapshot));
   assert.deepEqual(parse(source().replaceAll("'",'"')).snapshot,result.snapshot);
+  const tf3Resource='::/stations/street/small_stops/small_mid.con';
+  assert.equal(parse(source({...readback(),constructionResource:tf3Resource})).snapshot.constructionResource,tf3Resource);
 });
 
 test('readback rejects envelope execution, bounds, identity mismatch and duplicate fields',()=>{
@@ -33,6 +35,6 @@ test('readback rejects duplicate JSON keys, typed-key duplicates and unsafe valu
   const malformed=json.replace('"param":0.5','"param":x0.5');
   let deeplyNested={kind:'number',value:1};for(let index=0;index<70;index++)deeplyNested={kind:'table',entries:[{keyType:'string',key:'n',value:deeplyNested}]};
   for(const value of [`function data() return {schemaVersion=1,kind='road_stop_readback',nonce='${nonce}',observationId=3,snapshotHex='${Buffer.from(json).toString('hex')}',} end`,
-    `function data() return {schemaVersion=1,kind='road_stop_readback',nonce='${nonce}',observationId=3,snapshotHex='${Buffer.from(malformed).toString('hex')}',} end`,source(duplicateKeys),source(unsafe),source({...readback(),params:{kind:'number',value:1}}),source({...readback(),params:deeplyNested}),source({...readback(),constructionResource:'construction/../stop'}),source({...readback(),oneWay:1}),source({...readback(),left:'false'}),source({...readback(),name:'x'.repeat(1025)})])
+    `function data() return {schemaVersion=1,kind='road_stop_readback',nonce='${nonce}',observationId=3,snapshotHex='${Buffer.from(malformed).toString('hex')}',} end`,source(duplicateKeys),source(unsafe),source({...readback(),params:{kind:'number',value:1}}),source({...readback(),params:deeplyNested}),source({...readback(),constructionResource:'construction/../stop'}),source({...readback(),constructionResource:'::/../unsafe.con'}),source({...readback(),constructionResource:'other::/stations/unsafe.con'}),source({...readback(),oneWay:1}),source({...readback(),left:'false'}),source({...readback(),name:'x'.repeat(1025)})])
     assert.throws(()=>parse(value),/^TypeError: INVALID_ROAD_STOP_READBACK$/);
 });

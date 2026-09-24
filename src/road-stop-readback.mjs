@@ -58,8 +58,8 @@ function strictJson(source){
 
 function resource(value){
   if(typeof value!=='string'||Buffer.byteLength(value,'utf8')>1024
-    ||! /^(?:[A-Za-z0-9_][A-Za-z0-9_.-]*)(?:\/[A-Za-z0-9_][A-Za-z0-9_.-]*)*$/.test(value)
-    ||value.split('/').some(part=>part==='.'||part==='..'))reject();
+    ||! /^(?:::\/)?(?:[A-Za-z0-9_][A-Za-z0-9_.-]*)(?:\/[A-Za-z0-9_][A-Za-z0-9_.-]*)*$/.test(value)
+    ||value.replace(/^::\//,'').split('/').some(part=>part==='.'||part==='..'))reject();
   return value;
 }
 function tagged(value,depth,state){

@@ -75,8 +75,12 @@ end
 local function resource(v)
   local function start(byte) return byte and ((byte >= 48 and byte <= 57) or (byte >= 65 and byte <= 90) or (byte >= 97 and byte <= 122) or byte == 95) end
   local function rest(byte) return start(byte) or byte == 46 or byte == 45 end
-  if type(v) ~= "string" or #v == 0 or #v > 1024 or v:sub(1,1) == "/" or v:sub(-1) == "/" or v:find("//",1,true) then fail() end
-  for part in v:gmatch("[^/]+") do
+  if type(v) ~= "string" or #v == 0 or #v > 1024 then fail() end
+  -- TF3's placed road stop reports the base-game resource namespace as ::/.
+  -- Keep the namespace marker intact; validate only the path that follows it.
+  local path = v:sub(1,3) == "::/" and v:sub(4) or v
+  if #path == 0 or path:sub(1,1) == "/" or path:sub(-1) == "/" or path:find("//",1,true) then fail() end
+  for part in path:gmatch("[^/]+") do
     if not start(string.byte(part, 1)) then fail() end
     for index = 2, #part do if not rest(string.byte(part, index)) then fail() end end
   end
@@ -242,7 +246,15 @@ local function collect(api, request, stage)
         modelResourceName=diagnostic.modelResourceName}
     end
   end
-  local construction = resource(constructionValue)
+  local validResource, construction = pcall(resource, constructionValue)
+  if not validResource then
+    -- Copy only a bounded string from this already verified, owned stop. The
+    -- panel stores it as hex for diagnosis; it is never a replay recipe.
+    if type(constructionValue) == "string" and #constructionValue > 0 and #constructionValue <= 1024 then
+      return {code="unavailable", field="constructionResourceSyntax", constructionResourceValue=constructionValue}
+    end
+    fail()
+  end
   stage("params")
   local params = taggedParams(object.params)
   stage("encoding")
@@ -312,6 +324,9 @@ function M.collect(api, request)
   if ok and type(value) == "table" and value.code == "unavailable" and value.field == "constructionResourceNil"
     and safeint(value.modelId) and value.modelId >= 0 and value.modelId <= MAX_INT
     and type(value.modelResourceName) == "string" then return value end
+  if ok and type(value) == "table" and value.code == "unavailable" and value.field == "constructionResourceSyntax"
+    and type(value.constructionResourceValue) == "string" and #value.constructionResourceValue > 0
+    and #value.constructionResourceValue <= 1024 then return value end
   return {code="unavailable", field=field}
 end
 return M
