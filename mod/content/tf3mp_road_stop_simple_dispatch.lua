@@ -23,11 +23,11 @@ local RESULTS = {EXPLICIT_REPLAY_CONSENT_REQUIRED=true,STATE_UNAVAILABLE=true,
   ENGINE_OUTCOME_UNKNOWN=true,CONSUME_PERSISTENCE_UNKNOWN=true,
   ENGINE_CALLBACK_MISSING=true,ENGINE_SEND_FAILED=true,
   ROAD_STOP_OWNER_AND_DEBIT_OBSERVED=true}
-local BEFORE_STAGES = {input=true,held=true,road=true,model=true,players=true,objects=true,balances=true,
-  players_kind=true,players_fetch=true,players_type=true,players_metatable=true,
-  players_limit=true,players_keys=true,players_ids=true,
-  objects_kind=true,objects_fetch=true,objects_type=true,objects_metatable=true,
-  objects_limit=true,objects_keys=true,objects_ids=true}
+local BEFORE_STAGES = {input=true,held=true,road=true,model=true,
+  roster_binding=true,roster_shape=true,roster_players=true,balances=true}
+local AFTER_STAGES = {result_shape=true,result_hold=true,result_player=true,
+  result_road=true,result_model=true,result_cost=true,
+  result_balances=true,result_entities=true,result_stop=true,result_attachment=true}
 local function valid(request)
   if not exact(request, REQUEST) or request.schemaVersion ~= 1
     or request.kind ~= "native_road_stop_simple_probe" or not nonce(request.nonce)
@@ -66,6 +66,8 @@ local function receipt(request,tick,update,code,outcome,observed)
   end
   if code == "BEFORE_SNAPSHOT_UNQUALIFIED" and type(observed) == "table"
     and BEFORE_STAGES[observed.stage] then result.stage = observed.stage end
+  if code == "ENGINE_OUTCOME_UNKNOWN" and type(observed) == "table"
+    and AFTER_STAGES[observed.stage] then result.stage = observed.stage end
   return result
 end
 function M.dispatch(state,request,api,deps)
@@ -80,6 +82,14 @@ function M.dispatch(state,request,api,deps)
   if api.engine.util.getPlayer() ~= request.targetCompany then
     return receipt(request,tick,update,"TARGET_COMPANY_CHANGED","rejected") end
   local current=state:get()
+  local companies={request.targetCompany}
+  local binding=current and current.coordinationBinding
+  if type(binding)=="table" and binding.nonce ~= nil then
+    if binding.nonce ~= request.nonce then
+      return receipt(request,tick,update,"BEFORE_SNAPSHOT_UNQUALIFIED","rejected",{stage="roster_binding"})
+    end
+    companies=binding.companies
+  end
   local pre=current and current.roadStopPreActionReceipt
   if type(pre) ~= "table" or pre.nonce ~= request.nonce or pre.code ~= "shape"
     or pre.commandCode ~= "prepared" or pre.companyEntity ~= request.targetCompany
@@ -92,7 +102,7 @@ function M.dispatch(state,request,api,deps)
     return receipt(request,tick,update,"DEPENDENCY_UNAVAILABLE","rejected") end
   -- Expose only a bounded pre-send stage. A rejected read-only snapshot must
   -- never consume the one-use command latch or submit a native command.
-  local beforeOk,before=pcall(deps.results.before,api,request.capture)
+  local beforeOk,before=pcall(deps.results.before,api,request.capture,companies)
   if not beforeOk or type(before) ~= "table" or before.code ~= "observed" then
     return receipt(request,tick,update,"BEFORE_SNAPSHOT_UNQUALIFIED","rejected",before)
   end
@@ -106,7 +116,7 @@ function M.dispatch(state,request,api,deps)
   end
   local results={before=function(input,resource,company)
     if resource.resourceName ~= input.model or company ~= input.companyEntity then return nil end
-    return deps.results.before(api,input)
+    return deps.results.before(api,input,companies)
   end,after=function(before,input,resource,company,_,data,success,entities)
     if resource.resourceName ~= input.model or company ~= input.companyEntity then return nil end
     return deps.results.after(api,before,input,data,success,entities)

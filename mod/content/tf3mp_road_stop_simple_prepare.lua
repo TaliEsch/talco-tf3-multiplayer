@@ -51,6 +51,10 @@ local function prepare(api, input, progress)
   if not native(rep) then fail() end
   local modelId = rep.find(input.model)
   if not integer(modelId) or modelId < 0 then fail() end
+  -- The repository lookup accepts the UI's ::/ alias. The proposal
+  -- converter expects the relative resource name without that prefix.
+  local modelName = input.model:sub(1, 3) == "::/" and input.model:sub(4) or input.model
+  resource(modelName)
 
   progress.stage = "factory"
   local factory = api.engine.util.proposal
@@ -96,7 +100,7 @@ local function prepare(api, input, progress)
   local object = api.type.SimpleStreetProposal.EdgeObject.new()
   if not native(simple) or not native(simpleStreet) or not native(object) then fail() end
   object.edgeEntity, object.param, object.oneWay = added.entity, input.param, input.oneWay
-  object.left, object.model, object.playerEntity, object.name = input.left, input.model, input.companyEntity, input.name
+  object.left, object.model, object.playerEntity, object.name = input.left, modelName, input.companyEntity, input.name
   simpleStreet.edgesToAdd, simpleStreet.edgesToRemove = {added}, {input.edgeEntity}
   simpleStreet.edgeObjectsToAdd = {object}
   simpleStreet.nodeConfigsToAdd = street.nodeConfigsToAdd

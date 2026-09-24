@@ -2,6 +2,15 @@
 
 ## Current direction — 24 September 2026
 
+Latest guarded single-game road Stop attempt reached the callback but returned
+`ENGINE_OUTCOME_UNKNOWN` at `result_road`: the original road still existed,
+balance was unchanged, and no stop appeared. Its one-use latch remains
+consumed. Before another disposable-save run, add bounded evidence for the
+callback's command result and replacement-road entities, then verify the
+proposal matches TF3's accepted shape. Do not retry that uncertain request.
+The two-instance test remains deferred by the user. Overall readiness remains
+about 6.2/10; separate-company road/economy acceptance is not yet proven.
+
 The guarded simple Road Stop request is wired into the disposable-save game
 bridge and one-use executor. Two further build-40396 attempts isolated the
 read-only before-snapshot failure: `getEntitiesWithComponent(PLAYER)` threw,

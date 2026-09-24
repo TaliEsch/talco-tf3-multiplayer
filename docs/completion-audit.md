@@ -1,5 +1,26 @@
 # Completion audit against the build prompt
 
+## Build-40396 guarded road Stop result — 24 September 2026
+
+One paused disposable-save command attempt reached TF3 with a qualified
+pre-action receipt for company 3141 and untouched road 53417. The GUI preview
+cost was $67,500. Receipt nonce `4ab543991b2615e4c1bc0222faa32525`
+returned `ENGINE_OUTCOME_UNKNOWN`, `stage=result_road` at update 3230:
+the callback reached postcondition checking, but the original road entity
+still existed. The company balance remained $40,229,553 and no Stop was
+visibly placed. The one-use latch was retained and the request was not
+retried. The source save SHA-256 remained
+`ccbf4beb740e53323e06d20890fd029c8e174d3e85efb06801a8b4275c762fb5`;
+TF3 exited without saving and the temporary native loader was removed.
+
+A separate fresh paused read-only run rejected before submission at
+`commandStage=model` when an unverified `modelRep.getName` lookup was tried.
+That lookup was removed. The current preparer validates the UI model alias
+with `modelRep.find` and sends its relative resource path, but the guarded
+run above did not establish an applied stop or charge. Inspect the actual
+callback command result and replacement-road entities before another game
+attempt; no host-ordered road/economy result is verified.
+
 ## Build-40396 road Stop snapshot qualification — 24 September 2026
 
 Two further paused disposable-save TF3 runs used the same untouched road

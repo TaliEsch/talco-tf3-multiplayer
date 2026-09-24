@@ -20,30 +20,18 @@ local function component(api, id, name)
   if kind == nil then fail() end
   return api.engine.getComponent(id, kind)
 end
-local function members(api, name, limit, progress)
-  local prefix = name == "PLAYER" and "players" or "objects"
-  progress.stage = prefix .. "_kind"
-  local kind = api.type.ComponentType[name]
-  if kind == nil then fail() end
-  progress.stage = prefix .. "_fetch"
-  local list = api.engine.getEntitiesWithComponent(kind)
-  progress.stage = prefix .. "_type"
-  if type(list) ~= "table" then fail() end
-  progress.stage = prefix .. "_metatable"
-  if getmetatable(list) ~= nil then fail() end
-  progress.stage = prefix .. "_limit"
-  if #list > limit then fail() end
-  progress.stage = prefix .. "_keys"
-  local count = 0
-  for key in pairs(list) do
-    count = count + 1
-    if type(key) ~= "number" or key ~= math.floor(key) or key < 1 or key > #list then fail() end
+local function roster(api, list, company, progress)
+  progress.stage = "roster_shape"
+  if not dense(list, 4) or #list < 1 then fail() end
+  local players = {}
+  progress.stage = "roster_players"
+  for _, id in ipairs(list) do
+    if not entity(id) or players[id] or api.engine.entityExists(id) ~= true
+      or not native(component(api, id, "PLAYER")) then fail() end
+    players[id] = true
   end
-  if count ~= #list then fail() end
-  local out = {}
-  progress.stage = prefix .. "_ids"
-  for _, id in ipairs(list) do if not entity(id) or out[id] then fail() end; out[id] = true end
-  return out
+  if not players[company] then fail() end
+  return players
 end
 local function balance(api, company)
   local amount = api.engine.util.finance.getPlayersBalance(company)
@@ -59,7 +47,7 @@ local function held(api)
     or not integer(time.updateCount) or time.updateCount < 0 then fail() end
   return time.updateCount
 end
-local function snapshot(api, input, progress)
+local function snapshot(api, input, companies, progress)
   progress.stage = "input"
   if type(input) ~= "table" or getmetatable(input) ~= nil or not entity(input.edgeEntity)
     or not entity(input.companyEntity) or type(input.model) ~= "string"
@@ -74,51 +62,59 @@ local function snapshot(api, input, progress)
   progress.stage = "model"
   local model = api.res.modelRep.find(input.model)
   if not integer(model) or model < 0 or model > 2147483647 then fail() end
-  progress.stage = "players"
-  local players = members(api, "PLAYER", 64, progress)
-  progress.stage = "objects"
-  local objects = members(api, "EDGE_OBJECT", 100000, progress)
-  if not players[input.companyEntity] then fail() end
+  local players = roster(api, companies, input.companyEntity, progress)
   local balances = {}
   progress.stage = "balances"
   for company in pairs(players) do balances[company] = balance(api, company) end
   return {code="observed", updateCount=update, companyEntity=input.companyEntity,
     edgeEntity=input.edgeEntity, model=input.model, modelId=model, left=input.left,
-    param=input.param, players=players, objects=objects, balances=balances}
+    param=input.param, players=players, balances=balances}
 end
-function M.before(api, input)
+function M.before(api, input, companies)
   local progress = {stage="input"}
-  local ok, value = pcall(snapshot, api, input, progress)
+  local ok, value = pcall(snapshot, api, input, companies, progress)
   if ok then return value end
   return {code="unknown", stage=progress.stage}
 end
-local function verify(api, before, input, data, success, resultEntities)
+local function verify(api, before, input, data, success, resultEntities, progress)
+  progress.stage = "result_shape"
   if type(before) ~= "table" or before.code ~= "observed" or success ~= true
     or before.companyEntity ~= input.companyEntity or before.edgeEntity ~= input.edgeEntity
     or before.model ~= input.model or before.left ~= input.left or before.param ~= input.param
     or not dense(resultEntities, 64) then fail() end
-  if held(api) ~= before.updateCount or api.engine.util.getPlayer() ~= input.companyEntity
-    or api.engine.entityExists(input.edgeEntity) ~= false
-    or api.res.modelRep.find(input.model) ~= before.modelId then fail() end
+  progress.stage = "result_hold"
+  if held(api) ~= before.updateCount then fail() end
+  progress.stage = "result_player"
+  if api.engine.util.getPlayer() ~= input.companyEntity then fail() end
+  progress.stage = "result_road"
+  if api.engine.entityExists(input.edgeEntity) ~= false then fail() end
+  progress.stage = "result_model"
+  if api.res.modelRep.find(input.model) ~= before.modelId then fail() end
+  progress.stage = "result_cost"
   local proposal = native(data) and data.resultProposalData
   local cost = native(proposal) and proposal.costs
   if not integer(cost) or cost <= 0 then fail() end
-  local players = members(api, "PLAYER", 64, {stage="after_players"})
-  for id in pairs(players) do if not before.players[id] then fail() end end
-  for id in pairs(before.players) do if not players[id] then fail() end end
+  progress.stage = "result_balances"
+  for id in pairs(before.players) do
+    if api.engine.entityExists(id) ~= true or not native(component(api, id, "PLAYER")) then fail() end
+  end
   for id, prior in pairs(before.balances) do
     local current = balance(api, id)
     if id == input.companyEntity then
       if current ~= prior - cost or current < 0 then fail() end
     elseif current ~= prior then fail() end
   end
-  local objects = members(api, "EDGE_OBJECT", 100000, {stage="after_objects"})
-  local stop, count = nil, 0
-  for id in pairs(objects) do
-    if not before.objects[id] then stop, count = id, count + 1 end
+  progress.stage = "result_entities"
+  local stop, count, affected = nil, 0, {}
+  for _, pair in ipairs(resultEntities) do
+    if not dense(pair, 2) or #pair ~= 2 or not entity(pair[1])
+      or not integer(pair[2]) or pair[2] < 0 or affected[pair[1]] then fail() end
+    local id = pair[1]
+    affected[id] = true
+    if native(component(api, id, "EDGE_OBJECT")) then stop, count = id, count + 1 end
   end
   if count ~= 1 then fail() end
-  for id in pairs(before.objects) do if not objects[id] then fail() end end
+  progress.stage = "result_stop"
   local owner = component(api, stop, "PLAYER_OWNED")
   local edgeObject = component(api, stop, "EDGE_OBJECT")
   local models = component(api, stop, "MODEL_INSTANCE_LIST")
@@ -131,6 +127,7 @@ local function verify(api, before, input, data, success, resultEntities)
     if instance.modelId == before.modelId then modelCount = modelCount + 1 end
   end
   if modelCount ~= 1 then fail() end
+  progress.stage = "result_attachment"
   local street = api.engine.system and api.engine.system.streetSystem
   local road = street and street.getEdgeForEdgeObject(stop)
   if not entity(road) or road == input.edgeEntity or api.engine.entityExists(road) ~= true then fail() end
@@ -148,8 +145,9 @@ local function verify(api, before, input, data, success, resultEntities)
     companyEntity=input.companyEntity, updateCount=before.updateCount}
 end
 function M.after(api, before, input, data, success, resultEntities)
-  local ok, value = pcall(verify, api, before, input, data, success, resultEntities)
+  local progress = {stage="result_shape"}
+  local ok, value = pcall(verify, api, before, input, data, success, resultEntities, progress)
   if ok then return value end
-  return {code="unknown"}
+  return {code="unknown",stage=progress.stage}
 end
 return M

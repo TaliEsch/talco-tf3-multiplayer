@@ -9,7 +9,7 @@ function run(change='',preChange=''){
   const script=`local result=(function() ${source} end)()
 local input={edgeEntity=24,companyEntity=10,model='models/stop.mdl',left=true,param=.5}
 local players={10,11};local stops={80};local balances={[10]=100000,[11]=70000}
-local exists={[24]=true,[80]=true};local update=50;local calls=0
+local exists={[10]=true,[11]=true,[24]=true,[80]=true};local update=50;local calls=0
 local components={PLAYER={ [10]={},[11]={} },BASE_EDGE={ [24]={objects={}},[25]={objects={{81,1}}} },
   PLAYER_OWNED={ [81]={player=10} },EDGE_OBJECT={ [81]={param=.5} },
   MODEL_INSTANCE_LIST={ [81]={fatInstances={{modelId=7}}} }}
@@ -27,9 +27,9 @@ local api={type={ComponentType={PLAYER='PLAYER',BASE_EDGE='BASE_EDGE',EDGE_OBJEC
     util={getWorld=function()return 0 end,getPlayer=function()return 10 end,
       finance={getPlayersBalance=function(id)return balances[id] end}}}}
 ${preChange}
-local before=result.before(api,input)
+local before=result.before(api,input,players)
 exists[24]=nil;exists[25]=true;exists[81]=true;stops={80,81};balances[10]=32500
-local data={resultProposalData={costs=67500}};local success=true;local entities={}
+local data={resultProposalData={costs=67500}};local success=true;local entities={{25,1},{81,1}}
 ${change}
 local after=result.after(api,before,input,data,success,entities)
 return before.code,after.code,after.stopEntity or 0,after.chargedCost or 0,calls`;
@@ -50,7 +50,7 @@ test('callback and state discrepancies remain unknown, without a mutation',()=>{
     'success=false','balances[10]=100000','balances[11]=69999','balances[10]=-1',
     'components.PLAYER_OWNED[81].player=11','components.BASE_EDGE[25].objects={{81,2}}',
     'components.MODEL_INSTANCE_LIST[81].fatInstances={{modelId=8}}',
-    'components.EDGE_OBJECT[81].param=.3','stops={80,81,82}','stops={81}',
+    'components.EDGE_OBJECT[81].param=.3','entities={{25,1}}','entities={{25,1},{81,1},{82,1}};components.EDGE_OBJECT[82]={param=.5}',
     'exists[24]=true','update=51','data.resultProposalData.costs=0',
   ]){
     const observed=run(change);
@@ -66,7 +66,8 @@ test('changing the bound road or company between snapshots leaves the outcome un
   }
 });
 test('invalid or moving preconditions cannot form a readback baseline',()=>{
-  for(const change of ['input.param=0/0','update=0/0','components.BASE_EDGE[24].objects={{80,1}}']){
+  for(const change of ['input.param=0/0','update=0/0','components.BASE_EDGE[24].objects={{80,1}}',
+    'players={10,10}','exists[11]=nil','components.PLAYER[11]=nil']){
     assert.equal(run('',change).before,'unknown',change);
   }
 });

@@ -22,7 +22,7 @@ local api={type={ComponentType={PLAYER='PLAYER',BASE_EDGE='BASE_EDGE',GAME_SPEED
       if id==24 and kind=='BASE_EDGE'then return{objects={},node0=31,node1=32}end
       if id==99 and kind=='GAME_SPEED'then return{speedup=0}end end,
     util={getWorld=function()return 99 end,proposal={replaceSegment=function(id)assert(id==24);return{proposal=street}end}}},
-  res={modelRep={find=function(name)assert(name=='models/stop.mdl');return 7 end}},
+  res={modelRep={find=function(name)assert(name=='models/stop.mdl' or name=='::/models/stop.mdl');return 7 end}},
   cmd={makeWorldBuildProposalCmd=function(proposal,context)calls=calls+1;return{proposal=proposal,context=context}end,
     sendCommand=function()sends=sends+1;error('MUST_NOT_SEND')end}}
 ${mutation}
@@ -33,6 +33,7 @@ if command then
   assert(command.proposal.streetProposal.nodeConfigsToRemove==street.nodeConfigsToRemove)
 end
 local object=command and command.proposal.streetProposal.edgeObjectsToAdd[1]
+if object then assert(object.model=='models/stop.mdl') end
 return result.code,calls,sends,result.temporaryEdgeEntity or 0,
   object and object.edgeEntity or 0,object and object.playerEntity or 0,
   command and command.proposal.streetProposal.edgesToRemove[1] or 0,
@@ -50,6 +51,7 @@ return result.code,calls,sends,result.temporaryEdgeEntity or 0,
 
 test('the factory segment and stop bind to one replacement edge and company without submission',()=>{
   assert.deepEqual(run(),{code:'prepared',calls:1,sends:0,newEdge:-1,objectEdge:-1,owner:10,removedEdge:24,payer:10,stage:'none'});
+  assert.equal(run("input.model='::/models/stop.mdl'").code,'prepared');
 });
 
 test('unsafe or stale roads and owners cannot produce a command',()=>{

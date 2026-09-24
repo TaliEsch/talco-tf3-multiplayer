@@ -62,6 +62,15 @@ test('an unqualified read-only player snapshot rejects before command submission
   assert.deepEqual(run("deps.results.before=function()return{code='unknown',stage='players'}end"),
     {code:'BEFORE_SNAPSHOT_UNQUALIFIED',outcome:'rejected',sends:0,fault:false});
 });
+test('a stale bound roster cannot become single-company evidence',()=>{
+  assert.deepEqual(run("saved.coordinationBinding={nonce=string.rep('c',32),companies={10,11}}"),
+    {code:'BEFORE_SNAPSHOT_UNQUALIFIED',outcome:'rejected',sends:0,fault:false});
+});
+test('an unknown callback retains bounded failure stage and consumes the attempt',()=>{
+  assert.deepEqual(run("deps.results.after=function()return{code='unknown',stage='result_entities'}end",
+    "assert(receipt.stage=='result_entities');assert(saved.nativeRoadReplayReceipt.stage=='result_entities')"),
+    {code:'ENGINE_OUTCOME_UNKNOWN',outcome:'unknown',sends:1,fault:true});
+});
 test('unknown callback cannot be retried and consumes the save',()=>{
   assert.deepEqual(run('callback=false','receipt=dispatcher.dispatch(state,request,api,deps)'),
     {code:'REPLAY_CONSUMED_OR_COMPANY_UNKNOWN',outcome:'rejected',sends:1,fault:true});

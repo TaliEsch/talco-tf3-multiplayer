@@ -36,6 +36,9 @@ local function receipt(request,code,outcome)
     sessionId=request.sessionId,actionId=request.actionId,consentId=request.consentId,
     targetCompany=request.targetCompany}
 end
+local RESULT_STAGES = {result_shape=true,result_hold=true,result_player=true,
+  result_road=true,result_model=true,result_cost=true,
+  result_balances=true,result_entities=true,result_stop=true,result_attachment=true}
 
 function M.execute(state,request,consent,api,prepare,results)
   local valid,approved = pcall(function()
@@ -73,7 +76,18 @@ function M.execute(state,request,consent,api,prepare,results)
       if type(observed) ~= "table" or observed.code ~= "verified"
         or not positive(observed.stopEntity) or type(observed.chargedCost) ~= "number"
         or observed.chargedCost ~= math.floor(observed.chargedCost)
-        or observed.chargedCost <= 0 or observed.chargedCost > 9007199254740991 then return end
+        or observed.chargedCost <= 0 or observed.chargedCost > 9007199254740991 then
+        if type(observed) == "table" and RESULT_STAGES[observed.stage] then
+          result.stage = observed.stage
+          pcall(function()
+            local saved = state:get()
+            if saved and saved.nativeRoadReplayAttempted and saved.phase2CompanyFault then
+              saved.nativeRoadReplayReceipt = result; state:set(saved)
+            end
+          end)
+        end
+        return
+      end
       local saved = state:get()
       assert(saved and saved.nativeRoadReplayAttempted and saved.phase2CompanyFault)
       -- Copy only bounded evidence, never callback data or native objects.
