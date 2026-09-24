@@ -212,6 +212,18 @@ local function exchangeStopReadback() : nil
   if receipt.code ~= "readback" or type(receipt.json) ~= "string" or #receipt.json < 1 or #receipt.json > 65536 then
     local field = "receipt"
     if type(receipt.field) == "string" and #receipt.field <= 32 and receipt.field:match("^[A-Za-z]+$") then field = receipt.field end
+    if field == "constructionResourceNil" and type(receipt.modelId) == "number" and receipt.modelId % 1 == 0
+      and receipt.modelId >= 0 and receipt.modelId <= 2147483647
+      and type(receipt.modelResourceName) == "string" and #receipt.modelResourceName > 4 and #receipt.modelResourceName <= 1024 then
+      local modelNameHex = roadCapture.toHex(receipt.modelResourceName)
+      if type(modelNameHex) == "string" and #modelNameHex <= 2048 then
+        app.saveUserdata("tf3mp_status_1", "road_stop_model_diagnostic", {
+          schemaVersion = 1, kind = "road_stop_model_diagnostic", nonce = stopReadbackSent.nonce,
+          observationId = stopReadbackSent.observationId, modelId = receipt.modelId,
+          modelNameHex = modelNameHex,
+        })
+      end
+    end
     log.message("{\"event\":\"native_stop_readback\",\"code\":\"READBACK_UNAVAILABLE\",\"field\":\"" .. field .. "\",\"gameplayVerified\":false}")
     return nil
   end

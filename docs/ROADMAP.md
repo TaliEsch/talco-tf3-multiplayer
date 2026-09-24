@@ -28,6 +28,14 @@ player and no remote peer. Do not rerun the same unsupported placement. Next
 resolve a supported complete stop recipe or use another already qualified road
 action while continuing offline multiplayer wiring.
 
+The installed build-40396 API declares `SimpleStreetProposal.EdgeObject` with
+edge, relative position, side, model resource, owner and name, and accepts a
+`SimpleProposal` through `makeWorldBuildProposalCmd`. The edge must first be
+represented as a new edge in `edgesToAdd`; the current road ID alone is not a
+valid recipe. A bounded placed-stop model probe is now available for the next
+single-game readback when `edgeObjectConstruction` is absent. This is diagnostic
+only; source and mock checks do not qualify replay or engine charging.
+
 ## TF2-informed Stop timing — 24 September 2026
 
 The cloned MIT-licensed TF2 mod is now a concrete reference for cancellation,

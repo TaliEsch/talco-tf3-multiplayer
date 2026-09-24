@@ -111,6 +111,17 @@ saving, the source save still hashes to
 `ccbf4beb740e53323e06d20890fd029c8e174d3e85efb06801a8b4275c762fb5`,
 and the exact hash-matched native loader was unstaged.
 
+The installed API describes a simpler `SimpleStreetProposal.EdgeObject` with
+road-relative position, side, model resource, owner and name. Its edge must be
+a replacement in `edgesToAdd`, so a current road entity ID is insufficient.
+The readback now probes `MODEL_INSTANCE_LIST` only when the construction name
+is nil and copies one model ID/resource name into a private diagnostic only if
+the model list is unambiguous. It still returns `unavailable`, never an
+execution-authorized recipe. The panel persists that bounded observation for
+one TF3 run. Focused native-readback/review tests passed 35/35 and mod review
+passed with manifest `fc0596a58425f7b7d0b62c04e7b91b2f0e13d5cccfcc67e723404a6529ddad6f`.
+No TF3 run has tested the new probe or the SimpleProposal route.
+
 ## Two-instance trial deferred; one-game work continues — 24 September 2026
 
 The user directed us to skip the two-instance TF3 attempt until they say to

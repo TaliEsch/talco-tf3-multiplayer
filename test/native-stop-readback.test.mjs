@@ -28,7 +28,7 @@ function nativeCallable(L, globalName){
 function run(mutation='', namespaces={}){
   const componentConstants=namespaces.component;
   const edgeConstants=namespaces.edge;
-  const componentType=componentConstants ? 'NativeComponentType' : "{GAME_SPEED='GAME_SPEED',GAME_TIME='GAME_TIME',EDGE_OBJECT='EDGE_OBJECT',PLAYER_OWNED='PLAYER_OWNED',BASE_EDGE='BASE_EDGE'}";
+  const componentType=componentConstants ? 'NativeComponentType' : "{GAME_SPEED='GAME_SPEED',GAME_TIME='GAME_TIME',EDGE_OBJECT='EDGE_OBJECT',PLAYER_OWNED='PLAYER_OWNED',BASE_EDGE='BASE_EDGE',MODEL_INSTANCE_LIST='MODEL_INSTANCE_LIST'}";
   const edgeObjectType=edgeConstants ? 'NativeEdgeObjectType' : "{STOP_LEFT='STOP_LEFT',STOP_RIGHT='STOP_RIGHT',SIGNAL='SIGNAL'}";
   const script=`
 local m=(function()${source}end)()
@@ -41,18 +41,18 @@ local api={type={ComponentType=CT,enum={EdgeObjectType=${edgeObjectType}},Mat4f=
 local request={schemaVersion=1,nonce=string.rep('a',32),observationId=3,companyEntity=10,resultEntities={50,51},oneWay=false,name='Observed stop'}
 ${mutation}
 local r=m.collect(api,request)
-return r.code,r.json or '',reads,r.field or '',table.concat(clockHandles, ',')
+return r.code,r.json or '',reads,r.field or '',table.concat(clockHandles, ','),r.modelId or -1,r.modelResourceName or ''
 `;
   const L=lauxlib.luaL_newstate();lualib.luaL_openlibs(L);try{
     if(componentConstants) nativeNamespace(L,'NativeComponentType',componentConstants);
     if(edgeConstants) nativeNamespace(L,'NativeEdgeObjectType',edgeConstants);
     for(const name of ['NativeGetWorld','NativeGetComponent','NativeEntityExists','NativeGetEdge','NativeMat4Cols']) nativeCallable(L,name);
     assert.equal(lauxlib.luaL_loadstring(L,to_luastring(script)),lua.LUA_OK,lua.lua_tojsstring(L,-1));
-    assert.equal(lua.lua_pcall(L,0,5,0),lua.LUA_OK,lua.lua_tojsstring(L,-1));
-    return [lua.lua_tojsstring(L,-5),lua.lua_tojsstring(L,-4),lua.lua_tointeger(L,-3),lua.lua_tojsstring(L,-2),lua.lua_tojsstring(L,-1)];
+    assert.equal(lua.lua_pcall(L,0,7,0),lua.LUA_OK,lua.lua_tojsstring(L,-1));
+    return [lua.lua_tojsstring(L,-7),lua.lua_tojsstring(L,-6),lua.lua_tointeger(L,-5),lua.lua_tojsstring(L,-4),lua.lua_tojsstring(L,-3),lua.lua_tointeger(L,-2),lua.lua_tojsstring(L,-1)];
   }finally{lua.lua_close(L);}
 }
-const nativeComponents={GAME_SPEED:'GAME_SPEED',GAME_TIME:'GAME_TIME',EDGE_OBJECT:'EDGE_OBJECT',PLAYER_OWNED:'PLAYER_OWNED',BASE_EDGE:'BASE_EDGE'};
+const nativeComponents={GAME_SPEED:'GAME_SPEED',GAME_TIME:'GAME_TIME',EDGE_OBJECT:'EDGE_OBJECT',PLAYER_OWNED:'PLAYER_OWNED',BASE_EDGE:'BASE_EDGE',MODEL_INSTANCE_LIST:'MODEL_INSTANCE_LIST'};
 const nativeEdgeObjects={STOP_LEFT:'STOP_LEFT',STOP_RIGHT:'STOP_RIGHT',SIGNAL:'SIGNAL'};
 test('copies one returned owned stop to bounded deterministic JSON',()=>{
   assert.doesNotMatch(source,/api\.cmd|sendCommand|makeWorldBuildProposalCmd|saveUserdata|io\.|os\./);
@@ -140,6 +140,17 @@ test('classifies an unreadable construction resource without exporting its value
     const [code,json,,actualField]=run(mutation);
     assert.deepEqual([code,json,actualField],['unavailable','',field],mutation);
   }
+});
+test('copies a unique rendered model identity only as an unavailable diagnostic',()=>{
+  const setup="stop.edgeObjectConstruction=nil;data[50].MODEL_INSTANCE_LIST={fatInstances={{modelId=21}},thinInstances={}};api.res={modelRep={getName=function(id) if id==21 then return 'model/road_stop.mdl' end end}}";
+  assert.deepEqual(run(setup).slice(0,4),['unavailable','',8,'constructionResourceNil']);
+  assert.deepEqual(run(setup).slice(5),[21,'model/road_stop.mdl']);
+  for(const change of [
+    ';data[50].MODEL_INSTANCE_LIST.fatInstances[2]={modelId=22}',
+    ';data[50].MODEL_INSTANCE_LIST.thinInstances[1]={modelId=22}',
+    ";api.res.modelRep.getName=function()return '../bad.mdl' end",
+    ';data[50].MODEL_INSTANCE_LIST.fatInstances[1].modelId=-1',
+  ]) assert.deepEqual(run(setup+change).slice(5),[-1,'']);
 });
 test('returns fixed unavailable for request, pause, candidate, edge, and copy boundaries',()=>{
   for(const change of [

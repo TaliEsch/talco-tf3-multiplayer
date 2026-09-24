@@ -90,6 +90,23 @@ local function resourceStage(v)
   return "constructionResourceSyntax"
 end
 
+-- The installed API exposes rendered model instances separately from the edge
+-- object's optional construction name. Copy only one unambiguous model identity;
+-- this is diagnostic evidence and cannot authorize a SimpleProposal replay.
+local function modelDiagnostic(api, candidate)
+  local models = component(api, candidate, "MODEL_INSTANCE_LIST")
+  if not native(models) or not dense(models.fatInstances, 8) or #models.fatInstances ~= 1
+    or not dense(models.thinInstances, 8) or #models.thinInstances ~= 0 then return nil end
+  local model = models.fatInstances[1]
+  if not native(model) or not safeint(model.modelId) or model.modelId < 0 or model.modelId > MAX_INT then return nil end
+  local rep = api.res and api.res.modelRep
+  if rep == nil then return nil end
+  local name = rep.getName(model.modelId)
+  if type(name) ~= "string" or name:sub(-4) ~= ".mdl" then return nil end
+  resource(name)
+  return {modelId=model.modelId, modelResourceName=name}
+end
+
 local function jsonString(v)
   return '"' .. v:gsub('[%z\1-\31\\"]', function(c)
     local b = string.byte(c)
@@ -218,6 +235,13 @@ local function collect(api, request, stage)
   local transf = transform(object.transf)
   local constructionValue = object.edgeObjectConstruction
   stage(resourceStage(constructionValue))
+  if constructionValue == nil then
+    local ok, diagnostic = pcall(modelDiagnostic, api, candidate)
+    if ok and diagnostic ~= nil then
+      return {code="unavailable", field="constructionResourceNil", modelId=diagnostic.modelId,
+        modelResourceName=diagnostic.modelResourceName}
+    end
+  end
   local construction = resource(constructionValue)
   stage("params")
   local params = taggedParams(object.params)
@@ -285,6 +309,9 @@ function M.collect(api, request)
   local field = "request"
   local ok, value = pcall(collect, api, request, function(name) field = name end)
   if ok and type(value) == "table" and value.code == "readback" and type(value.json) == "string" and #value.json <= MAX_JSON then return value end
+  if ok and type(value) == "table" and value.code == "unavailable" and value.field == "constructionResourceNil"
+    and safeint(value.modelId) and value.modelId >= 0 and value.modelId <= MAX_INT
+    and type(value.modelResourceName) == "string" then return value end
   return {code="unavailable", field=field}
 end
 return M
