@@ -1971,6 +1971,16 @@ local ret : GameScriptWithGui<Tf3MpState, Tf3MpGuiState> = {
           receipt = {nonce=request.nonce, observationId=request.observationId, code="shape",
             edgeEntity=result.edgeEntity, companyEntity=result.companyEntity, updateCount=result.updateCount,
             added=1, removed=1, temporaryEdgeEntity=-1, firstAddedObjectCount=0}
+          for _, prefix in ipairs({"nodeConfigsAdd", "nodeConfigsRemove"}) do
+            local shape = result[prefix .. "Shape"]
+            local count = result[prefix .. "Count"]
+            if (shape == "missing" or shape == "userdata" or shape == "other"
+              or shape == "metatable" or shape == "oversize" or shape == "irregular" or shape == "dense")
+              and validInteger(count) and count >= 0 and count <= 64 then
+              receipt[prefix .. "Shape"] = shape
+              receipt[prefix .. "Count"] = count
+            end
+          end
           if result.commandCode == "prepared" or result.commandCode == "rejected"
             or result.commandCode == "unknown" or result.commandCode == "notRequested" then
             receipt.commandCode = result.commandCode

@@ -59,11 +59,13 @@ const nativeEdgeObjects={STOP_LEFT:'STOP_LEFT',STOP_RIGHT:'STOP_RIGHT',SIGNAL:'S
 function runPreAction(mutation=''){
   const script=`local m=(function()${source}end)()
 local preview={proposal={addedSegments={{entity=-1}},removedSegments={{entity=60}},edgeObjectsToAdd={{category=0,playerEntity=10}}}}
+local replacementStreet={addedSegments={{entity=-1,comp={objects={}}}},removedSegments={{entity=60}},
+  addedNodes={},removedNodes={},edgeObjectsToAdd={},nodeConfigsToAdd={},nodeConfigsToRemove={}}
 local data={[0]={GAME_SPEED={speedup=0},GAME_TIME={tickCount=77,updateCount=44}},[10]={PLAYER={}},[60]={BASE_EDGE={objects={}}}}
 local api={type={ComponentType={GAME_SPEED='GAME_SPEED',GAME_TIME='GAME_TIME',PLAYER='PLAYER',BASE_EDGE='BASE_EDGE'}},
   res={modelRep={getName=function(id)assert(id==3940);return '::/stations/street/small_stops/small_mid.mdl'end}},
   engine={util={getWorld=function()return 0 end,getPlayer=function()return 10 end,
-    proposal={replaceSegment=function(id)assert(id==60);return{proposal={addedSegments={{entity=-1,comp={objects={}}}},removedSegments={{entity=60}},addedNodes={},removedNodes={},edgeObjectsToAdd={}}}end}},
+    proposal={replaceSegment=function(id)assert(id==60);return{proposal=replacementStreet}end}},
     entityExists=function(id)return data[id]~=nil end,getComponent=function(id,kind)return data[id]and data[id][kind]end}}
 local request={nonce=string.rep('a',32),observationId=3,edgeEntity=60,companyEntity=10}
 local preparer={prepare=function(_,input)assert(input.edgeEntity==60 and input.companyEntity==10)
@@ -73,16 +75,19 @@ ${mutation}
 local candidate=m.copyPreview(preview,3)
 local receipt=m.preActionProbe(api,request,preparer)
 return candidate and candidate.edgeEntity or 0,candidate and candidate.companyEntity or 0,
-  receipt.code,receipt.edgeEntity or 0,receipt.temporaryEdgeEntity or 0,receipt.commandCode or '',receipt.field or ''`;
+  receipt.code,receipt.edgeEntity or 0,receipt.temporaryEdgeEntity or 0,receipt.commandCode or '',receipt.field or '',
+  receipt.nodeConfigsAddShape or '',receipt.nodeConfigsAddCount or 0,
+  receipt.nodeConfigsRemoveShape or '',receipt.nodeConfigsRemoveCount or 0`;
   const L=lauxlib.luaL_newstate();lualib.luaL_openlibs(L);
   try{
     assert.equal(lauxlib.luaL_loadstring(L,to_luastring(script)),lua.LUA_OK,lua.lua_tojsstring(L,-1));
-    assert.equal(lua.lua_pcall(L,0,7,0),lua.LUA_OK,lua.lua_tojsstring(L,-1));
-    return [lua.lua_tointeger(L,-7),lua.lua_tointeger(L,-6),lua.lua_tojsstring(L,-5),lua.lua_tointeger(L,-4),lua.lua_tointeger(L,-3),lua.lua_tojsstring(L,-2),lua.lua_tojsstring(L,-1)];
+    assert.equal(lua.lua_pcall(L,0,11,0),lua.LUA_OK,lua.lua_tojsstring(L,-1));
+    return [lua.lua_tointeger(L,-11),lua.lua_tointeger(L,-10),lua.lua_tojsstring(L,-9),lua.lua_tointeger(L,-8),lua.lua_tointeger(L,-7),lua.lua_tojsstring(L,-6),lua.lua_tojsstring(L,-5),
+      lua.lua_tojsstring(L,-4),lua.lua_tointeger(L,-3),lua.lua_tojsstring(L,-2),lua.lua_tointeger(L,-1)];
   }finally{lua.lua_close(L);}
 }
 test('pre-action preview and read-only factory agree on the untouched road and company',()=>{
-  assert.deepEqual(runPreAction(),[60,10,'shape',60,-1,'notRequested','']);
+  assert.deepEqual(runPreAction(),[60,10,'shape',60,-1,'notRequested','','dense',0,'dense',0]);
   for(const change of [
     'preview.proposal.removedSegments[1].entity=-1',
     'preview.proposal.edgeObjectsToAdd[1].playerEntity=0',
@@ -104,8 +109,16 @@ test('pre-action command probe builds a centre-position command value without su
   const value=runPreAction(`preview.proposal.edgeObjectsToAdd[1].left=true
 preview.proposal.edgeObjectsToAdd[1].modelInstance={modelId=3940}
 request.model='::/stations/street/small_stops/small_mid.mdl';request.left=true`);
-  assert.deepEqual(value,[60,10,'shape',60,-1,'prepared','']);
+  assert.deepEqual(value,[60,10,'shape',60,-1,'prepared','','dense',0,'dense',0]);
   assert.match(panelScript,/saved\.commandCode = receipt\.commandCode/);
+});
+test('one read-only factory probe classifies both node configuration lists',()=>{
+  assert.deepEqual(runPreAction('replacementStreet.nodeConfigsToAdd={{entity=31,comp={}}};replacementStreet.nodeConfigsToRemove={31}').slice(7),
+    ['dense',1,'dense',1]);
+  assert.deepEqual(runPreAction('replacementStreet.nodeConfigsToAdd=nil;replacementStreet.nodeConfigsToRemove={unexpected=31}').slice(7),
+    ['missing',0,'irregular',0]);
+  assert.match(gameScript,/receipt\[prefix \.. "Shape"\] = shape/);
+  assert.match(panelScript,/saved\[prefix \.. "Shape"\] = shape/);
 });
 test('copies one returned owned stop to bounded deterministic JSON',()=>{
   assert.doesNotMatch(source,/api\.cmd|sendCommand|makeWorldBuildProposalCmd|saveUserdata|io\.|os\./);

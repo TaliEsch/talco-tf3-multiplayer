@@ -2,6 +2,15 @@
 
 ## Current direction — 24 September 2026
 
+Two further paused, read-only previews on the same disposable save exposed the
+remaining factory shape: `nodeConfigsToAdd` and `nodeConfigsToRemove` are both
+dense arrays of two, matching the road endpoints. The preparer now carries
+those factory values into the guarded `SimpleStreetProposal`; TF3 returned
+`commandCode=prepared` for the untouched road on build 40396. This qualifies
+command construction only. The next critical step is one guarded, host-ordered
+engine submission with correlated execution, stop and charge readback; road
+ordering and separate-company economy remain open.
+
 At the user's direction, defer the two-instance TF3 run until they say to
 resume it; a second launch from this Windows/Steam profile produced only one
 game process. Continue the one-game separate-company road/economy path and

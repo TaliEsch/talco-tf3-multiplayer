@@ -10,7 +10,8 @@ function run(mutation=''){
   const script=`local adapter=(function() ${source} end)()
 local input={edgeEntity=24,companyEntity=10,param=.4,left=true,oneWay=false,model='models/stop.mdl',name='Stop'}
 local removed={entity=24};local added={entity=-1,comp={objects={}}}
-local street={addedSegments={added},removedSegments={removed},addedNodes={},removedNodes={},edgeObjectsToAdd={},nodeConfigsToAdd={},nodeConfigsToRemove={}}
+local street={addedSegments={added},removedSegments={removed},addedNodes={},removedNodes={},edgeObjectsToAdd={},
+  nodeConfigsToAdd={{entity=31,comp={}},{entity=32,comp={}}},nodeConfigsToRemove={31,32}}
 local calls,sends=0,0
 local api={type={ComponentType={PLAYER='PLAYER',BASE_EDGE='BASE_EDGE',GAME_SPEED='GAME_SPEED'},
   SimpleProposal={new=function()return{}end},
@@ -18,7 +19,7 @@ local api={type={ComponentType={PLAYER='PLAYER',BASE_EDGE='BASE_EDGE',GAME_SPEED
   Context={new=function()return{}end}},
   engine={entityExists=function(id)return id==24 or id==10 end,
     getComponent=function(id,kind)if id==10 and kind=='PLAYER'then return{}end
-      if id==24 and kind=='BASE_EDGE'then return{objects={}}end
+      if id==24 and kind=='BASE_EDGE'then return{objects={},node0=31,node1=32}end
       if id==99 and kind=='GAME_SPEED'then return{speedup=0}end end,
     util={getWorld=function()return 99 end,proposal={replaceSegment=function(id)assert(id==24);return{proposal=street}end}}},
   res={modelRep={find=function(name)assert(name=='models/stop.mdl');return 7 end}},
@@ -27,6 +28,10 @@ local api={type={ComponentType={PLAYER='PLAYER',BASE_EDGE='BASE_EDGE',GAME_SPEED
 ${mutation}
 local result=adapter.prepare(api,input)
 local command=result.command
+if command then
+  assert(command.proposal.streetProposal.nodeConfigsToAdd==street.nodeConfigsToAdd)
+  assert(command.proposal.streetProposal.nodeConfigsToRemove==street.nodeConfigsToRemove)
+end
 local object=command and command.proposal.streetProposal.edgeObjectsToAdd[1]
 return result.code,calls,sends,result.temporaryEdgeEntity or 0,
   object and object.edgeEntity or 0,object and object.playerEntity or 0,
@@ -54,6 +59,11 @@ test('unsafe or stale roads and owners cannot produce a command',()=>{
     "api.engine.getComponent=function(id,kind)if kind=='BASE_EDGE'then return{objects={{30,1}}}end;return{}end",
     "api.engine.getComponent=function(id,kind)if kind=='GAME_SPEED'then return{speedup=1}end;return{}end",
     'added.entity=-2','removed.entity=25','street.edgeObjectsToAdd={{}}',
+    'street.nodeConfigsToAdd={}',
+    'street.nodeConfigsToRemove={31,31}',
+    'street.nodeConfigsToRemove={31,33}',
+    'street.nodeConfigsToAdd[1].entity=33',
+    'street.nodeConfigsToAdd[2].comp=nil',
     'street.addedSegments[2]={entity=-2,comp={objects={}}}',
   ]){
     const result=run(change);

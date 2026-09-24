@@ -1,5 +1,25 @@
 # Completion audit against the build prompt
 
+## Build-40396 road command value qualified — 24 September 2026
+
+Two controlled paused, read-only Road Stop previews used the disposable save,
+company 3141 and untouched road 53417. The first receipt (nonce
+`9e2e170acffb289d8a1c40a5c9270a69`, update 2987) showed the factory's
+`nodeConfigsToAdd` and `nodeConfigsToRemove` are both dense arrays of two;
+the previous empty-array guard rejected at `factoryNodeConfigsAdd`. The
+preparer now validates the two removed endpoint IDs and their two replacement
+configs, then passes the factory values to `SimpleStreetProposal`. The second
+receipt (nonce `5619dbafacdf61ec0b00f018f0f305d1`, update 3154) returned
+`code=shape, commandCode=prepared, commandStage=none`, with one added and one
+removed segment, temporary edge -1, and both node-config arrays of length two.
+The game's Road Stop preview showed $67,500. Neither run submitted a command,
+placed a stop or incurred a charge. TF3 exited without saving, the original
+save SHA-256 remained
+`ccbf4beb740e53323e06d20890fd029c8e174d3e85efb06801a8b4275c762fb5`,
+and the temporary native loader was removed. The next proof is guarded engine
+acceptance, host ordering, exactly-once execution and observed construction
+and native charge. Separate-company economy remains unverified.
+
 ## Build-40396 factory-field diagnostic — 24 September 2026
 
 A paused, read-only Road Stop preview on the disposable save returned

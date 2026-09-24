@@ -42,6 +42,7 @@ local function prepare(api, input, progress)
   if not native(api.engine.getComponent(input.companyEntity, types.PLAYER)) then fail() end
   local edge = api.engine.getComponent(input.edgeEntity, types.BASE_EDGE)
   if not native(edge) or not array(edge.objects, 0) then fail() end
+  if not entity(edge.node0) or not entity(edge.node1) or edge.node0 == edge.node1 then fail() end
   local world = api.engine.util.getWorld()
   local speed = api.engine.getComponent(world, types.GAME_SPEED)
   if not native(speed) or speed.speedup ~= 0 then fail() end
@@ -69,9 +70,21 @@ local function prepare(api, input, progress)
   progress.stage = "factoryEdgeObjects"
   if not array(street.edgeObjectsToAdd, 0) then fail() end
   progress.stage = "factoryNodeConfigsAdd"
-  if not array(street.nodeConfigsToAdd, 0) then fail() end
+  if not array(street.nodeConfigsToAdd, 2) then fail() end
   progress.stage = "factoryNodeConfigsRemove"
-  if not array(street.nodeConfigsToRemove, 0) then fail() end
+  if not array(street.nodeConfigsToRemove, 2) then fail() end
+  local removedConfigs = {}
+  for _, id in ipairs(street.nodeConfigsToRemove) do
+    if (id ~= edge.node0 and id ~= edge.node1) or removedConfigs[id] then fail() end
+    removedConfigs[id] = true
+  end
+  local addedConfigs = {}
+  for _, config in ipairs(street.nodeConfigsToAdd) do
+    if not native(config) or not removedConfigs[config.entity] or addedConfigs[config.entity]
+      or not native(config.comp) then fail() end
+    addedConfigs[config.entity] = true
+  end
+  if not addedConfigs[edge.node0] or not addedConfigs[edge.node1] then fail() end
   progress.stage = "factoryFirstSegment"
   local added, removed = street.addedSegments[1], street.removedSegments[1]
   if not native(added) or not native(removed) or added.entity ~= -1 or removed.entity ~= input.edgeEntity
@@ -86,6 +99,8 @@ local function prepare(api, input, progress)
   object.left, object.model, object.playerEntity, object.name = input.left, input.model, input.companyEntity, input.name
   simpleStreet.edgesToAdd, simpleStreet.edgesToRemove = {added}, {input.edgeEntity}
   simpleStreet.edgeObjectsToAdd = {object}
+  simpleStreet.nodeConfigsToAdd = street.nodeConfigsToAdd
+  simpleStreet.nodeConfigsToRemove = street.nodeConfigsToRemove
   simple.streetProposal = simpleStreet
   local context = api.type.Context.new()
   if not native(context) then fail() end

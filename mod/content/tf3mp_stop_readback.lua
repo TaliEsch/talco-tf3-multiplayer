@@ -209,6 +209,22 @@ end
 
 -- Probe the declared factory on the already verified road. It creates a
 -- proposal value only; this diagnostic never submits or modifies it.
+local function boundedListShape(value)
+  if value == nil then return "missing", 0 end
+  if type(value) ~= "table" then return type(value) == "userdata" and "userdata" or "other", 0 end
+  if getmetatable(value) ~= nil then return "metatable", 0 end
+  local length = #value
+  if length > 64 then return "oversize", 0 end
+  local keys = 0
+  for key in pairs(value) do
+    keys = keys + 1
+    if keys > 64 then return "oversize", 0 end
+    if not safeint(key) or key < 1 or key > length then return "irregular", length end
+  end
+  if keys ~= length then return "irregular", length end
+  return "dense", length
+end
+
 local function replacementProbe(api, edgeId)
   local ok, result = pcall(function()
     local proposalUtil = api.engine.util.proposal
@@ -226,9 +242,13 @@ local function replacementProbe(api, edgeId)
     if firstId ~= nil and (not safeint(firstId) or firstId < -MAX_INT or firstId > MAX_INT) then return {code="shapeUnavailable"} end
     if removedId ~= nil and not entity(removedId) then return {code="shapeUnavailable"} end
     if firstObjects ~= nil and (type(firstObjects) ~= "table" or #firstObjects > 64) then return {code="shapeUnavailable"} end
+    local addShape, addCount = boundedListShape(street.nodeConfigsToAdd)
+    local removeShape, removeCount = boundedListShape(street.nodeConfigsToRemove)
     return {code="shape", added=#added, removed=#removed, edgeObjects=#objects,
       firstAddedEntity=firstId or 0, firstAddedObjectCount=firstObjects and #firstObjects or 0,
-      firstRemovedEntity=removedId or 0}
+      firstRemovedEntity=removedId or 0, nodeConfigsAddShape=addShape,
+      nodeConfigsAddCount=addCount, nodeConfigsRemoveShape=removeShape,
+      nodeConfigsRemoveCount=removeCount}
   end)
   if not ok or type(result) ~= "table" then return {code="factoryFailed"} end
   return result
@@ -424,6 +444,8 @@ function M.preActionProbe(api, request, preparer)
     return {code="shape", nonce=request.nonce, observationId=request.observationId,
       edgeEntity=request.edgeEntity, companyEntity=request.companyEntity, updateCount=updateCount,
       added=1, removed=1, temporaryEdgeEntity=-1, firstAddedObjectCount=0,
+      nodeConfigsAddShape=probe.nodeConfigsAddShape, nodeConfigsAddCount=probe.nodeConfigsAddCount,
+      nodeConfigsRemoveShape=probe.nodeConfigsRemoveShape, nodeConfigsRemoveCount=probe.nodeConfigsRemoveCount,
       commandCode=commandCode, commandStage=commandStage}
   end)
   if ok then return value end

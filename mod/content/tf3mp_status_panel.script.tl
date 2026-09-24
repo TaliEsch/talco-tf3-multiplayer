@@ -207,6 +207,16 @@ local function exchangeRoadPreAction() : nil
       companyEntity=receipt.companyEntity, updateCount=receipt.updateCount,
       added=1, removed=1, temporaryEdgeEntity=-1, firstAddedObjectCount=0,
     }
+    for _, prefix in ipairs({"nodeConfigsAdd", "nodeConfigsRemove"}) do
+      local shape = receipt[prefix .. "Shape"]
+      local count = receipt[prefix .. "Count"]
+      if (shape == "missing" or shape == "userdata" or shape == "other"
+        or shape == "metatable" or shape == "oversize" or shape == "irregular" or shape == "dense")
+        and type(count) == "number" and count % 1 == 0 and count >= 0 and count <= 64 then
+        saved[prefix .. "Shape"] = shape
+        saved[prefix .. "Count"] = count
+      end
+    end
     if receipt.commandCode == "prepared" or receipt.commandCode == "rejected"
       or receipt.commandCode == "unknown" or receipt.commandCode == "notRequested" then
       saved.commandCode = receipt.commandCode
