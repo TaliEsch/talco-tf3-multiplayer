@@ -1,5 +1,27 @@
 # TalCo TF3 multiplayer — current delivery plan
 
+## TF2-informed Stop timing — 24 September 2026
+
+The cloned MIT-licensed TF2 mod is now a concrete reference for cancellation,
+semantic command scheduling, originator replay, saved-vehicle identity,
+history and pacing; see `docs/tf2-baseline.md`. Its action path confirms that
+the player who clicked must replay an actually cancelled action at the same
+future step as peers. The TF3 implementation already does that for one-use
+Stop. The production Host now schedules 60 updates ahead, as measured in the
+successful single-game Stop, and allows 30 seconds for the coordinated round.
+The earlier eight-update default was only exercised in socket fixtures. This
+timing change is offline-tested, not yet verified across two real TF3 games.
+
+## Two-instance evidence trace — 24 September 2026
+
+The production Host now logs each accepted peer checkpoint, applied state hash
+and barrier release. Each real engine adapter logs its accepted checkpoint and
+operation receipts, including the decoded vehicle Stop postcondition after a
+held execution. This gives one bounded Host/Join run enough correlated fields
+to identify the first mismatching link. Focused two/four-player socket and
+adapter tests pass. These are logging and model results; two real TF3 instances
+still have not been compared.
+
 ## Current checkpoint — 24 September 2026
 
 The Host capture path now accepts two to four distinct company claims. Before

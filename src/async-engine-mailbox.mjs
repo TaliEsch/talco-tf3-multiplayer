@@ -92,10 +92,10 @@ export async function isUnpublishedEngineSource(temporary,source) {
 }
 
 export async function createAsyncEngineMailbox({directory,nonce=randomBytes(16).toString("hex"),requireCheckpointSnapshot=true,
-  requireCompleteCheckpointCoverage=false,onCheckpointEvidence=()=>{}}) {
+  requireCompleteCheckpointCoverage=false,onCheckpointEvidence=()=>{},onExecutionEvidence=()=>{}}) {
   if (!/^[0-9a-f]{32}$/.test(nonce)) throw new TypeError("invalid mailbox nonce");
   if(typeof requireCheckpointSnapshot!=='boolean'||typeof requireCompleteCheckpointCoverage!=='boolean'
-    ||typeof onCheckpointEvidence!=='function') throw new TypeError('invalid checkpoint evidence option');
+    ||typeof onCheckpointEvidence!=='function'||typeof onExecutionEvidence!=='function') throw new TypeError('invalid checkpoint evidence option');
   directory=await requirePlainDirectory(directory);
   const lockPath=path.join(directory,"coordination.lock"), requestPath=path.join(directory,"coordination_request.lua");
   const lock=await open(lockPath,"wx",0o600);
@@ -191,6 +191,7 @@ export async function createAsyncEngineMailbox({directory,nonce=randomBytes(16).
             ||decoded.state.vehicle.ownerCompanyEntity!==expected.company
             ||decoded.state.vehicle.stopped!==expected.stopped)
             throw new Error('EXECUTION_POSTCONDITION_MISMATCH');
+          onExecutionEvidence(structuredClone(decoded));
           p=decoded.receipt;
         } catch {p={...p,status:'unknown'};}
       }

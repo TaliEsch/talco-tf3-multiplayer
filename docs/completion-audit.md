@@ -1,5 +1,37 @@
 # Completion audit against the build prompt
 
+## TF2 action-path comparison and production Stop lead — 24 September 2026
+
+The sibling TF2 multiplayer mod's actual capture/cancel, inject, semantic
+schedule, saved-vehicle mapping, history, pacing and replay paths were traced;
+`docs/tf2-baseline.md` records exact source files and TF3 decisions. Its
+strict originator replay and future-step scheduling principles fit the
+existing TF3 Stop path. No TF2 source or build-specific native constants were
+copied. Production Host Stop now uses a 60-update lead and 30-second
+coordination timeout, consistent with the earlier TF3 single-game result
+(`proposedUpdate=3368`, `scheduledUpdate=3428`, measured 5.29 updates/s,
+applied after 12.38 seconds). Focused socket/adapter tests pass; the schedule
+has not yet been tested with two TF3 instances.
+
+The integration suite after the Stop timing change reported 955 tests: 949
+passed, five pre-existing native controller/observer fixture failures remained,
+and one was skipped. The private log is
+`C:\Users\olihf\Downloads\Temp\tf3mp-check-20260924-tf2-stop.log`.
+
+## Production two-instance trace — 24 September 2026
+
+The Host logs accepted `peer_checkpoint_ready`, `peer_command_applied` and
+`peer_barrier_released` records by authenticated player ID. The production
+adapter logs only accepted engine operation receipts; checkpoint evidence
+includes update, hash and coverage, while execution evidence includes the
+actual observed vehicle entity, owner, Stop state and state hash. An engine
+receipt that arrives before the held observation is confirmed is not logged as
+accepted. Focused socket and adapter tests passed. No new real-game or
+two-instance result is claimed; the trace is prepared for that run. The full
+suite again reported 954 tests: 948 passed, the same five native controller/
+observer fixture failures remained, and one was skipped. Its private log is
+`C:\Users\olihf\Downloads\Temp\tf3mp-check-20260924-trace.log`.
+
 ## Host roster inspection — 24 September 2026
 
 Production Host capture now checks two to four distinct claimed company IDs

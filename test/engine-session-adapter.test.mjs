@@ -38,6 +38,8 @@ for(const locked of [false,true])test(`session adapter requires observed binding
     const hold=await waitOperation('holdCheckpoint');assert.equal(hold.checkpointHash,undefined);
     await reply(hold,{updateCount:140,held:true,snapshotVersion:1,companyCount:2,company1:7,balance1:100,negative1:0,company2:9,balance2:0,negative2:0});
     assert.equal(adapter.phase,'holding_checkpoint','receipt ahead of telemetry cannot announce a hold');
+    assert.equal(nativeEvents.some(event=>event.event==='engine_checkpoint_evidence'),false,
+      'an undecided mailbox receipt cannot be reported as an accepted checkpoint');
     native.emit('unknownOutcome',{payload:{status:'accepted',control:'release',updateCount:140,held:false}});
     assert.equal(adapter.phase,'holding_checkpoint','native release traffic is not a game-world receipt');
     assert.equal(sent.some(m=>m.kind==='participant_ready'),false);
@@ -47,6 +49,14 @@ for(const locked of [false,true])test(`session adapter requires observed binding
     await adapter.poll();
     assert.equal(adapter.phase,'preparing');const ready=sent.find(m=>m.kind==='participant_ready').payload;
     assert.match(ready.checkpointHash,/^[a-f0-9]{64}$/);
+    assert.equal(nativeEvents.some(event=>event.event==='engine_checkpoint_evidence'
+      &&event.roundId==='r'&&event.updateCount===140
+      &&event.checkpointHash===ready.checkpointHash
+      &&event.comparisonReady===false),true,'trace identifies the actual engine checkpoint and its coverage');
+    assert.equal(nativeEvents.some(event=>event.event==='engine_operation_receipt'
+      &&event.operation==='holdCheckpoint'&&event.roundId==='r'
+      &&event.updateCount===140&&event.checkpointHash===ready.checkpointHash),true,
+    'trace correlates the accepted hold receipt with the checkpoint');
     adapter.receive('coordination_ready',{roundId:'r',updateCount:140,checkpointHash:ready.checkpointHash});
     if(locked){
       assert.equal(adapter.phase,'releasing');

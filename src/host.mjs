@@ -7,10 +7,11 @@ import {ownerProofClockCurrent} from './vehicle-owner-proof.mjs';
 import { SessionCoordinator } from "./session-coordinator.mjs";
 import { connectClient } from "./client.mjs";
 
-export function startHost({ secret, sessionId = randomUUID(), bind = DEFAULT_BIND, port = DEFAULT_PORT, buildHash, modManifestHash, requiredSave = null, expiresAt = null, getUpdateCount = () => 0, resolveEntityOwner = () => null, inspectVehicleOwner = null, admissionAllowed = () => true, logger = () => {}, legacyModelRelay = false, requireReleaseAck = true }) {
+export function startHost({ secret, sessionId = randomUUID(), bind = DEFAULT_BIND, port = DEFAULT_PORT, buildHash, modManifestHash, requiredSave = null, expiresAt = null, getUpdateCount = () => 0, resolveEntityOwner = () => null, inspectVehicleOwner = null, admissionAllowed = () => true, logger = () => {}, legacyModelRelay = false, requireReleaseAck = true, leadUpdates, coordinationTimeoutMs }) {
   if (expiresAt !== null && (!Number.isSafeInteger(expiresAt) || expiresAt <= Date.now())) throw new RangeError("session expiry must be a future Unix timestamp in milliseconds");
   if(inspectVehicleOwner!==null&&typeof inspectVehicleOwner!=='function')throw new TypeError('INVALID_VEHICLE_OWNER_INSPECTOR');
-  const authority = new HostAuthority({ sessionId, buildHash, modManifestHash, resolveEntityOwner });
+  const authority = new HostAuthority({ sessionId, buildHash, modManifestHash, resolveEntityOwner,
+    ...(leadUpdates===undefined?{}:{leadUpdates}) });
   const peers = new Set();
   // Entries are created only by connectLocalParticipant below.  A loopback
   // socket alone is not proof that the host game has a bound engine adapter.
@@ -32,7 +33,9 @@ export function startHost({ secret, sessionId = randomUUID(), bind = DEFAULT_BIN
     return socket.write(frame);
   };
   const broadcast = (kind, payload) => { for (const peer of peers) if (peer.player) send(peer.socket, kind, payload, peer.player.playerId); };
-  const coordinator = new SessionCoordinator({ requireReleaseAck, broadcast: (kind, payload) => {
+  const coordinator = new SessionCoordinator({ requireReleaseAck,
+    ...(coordinationTimeoutMs===undefined?{}:{timeoutMs:coordinationTimeoutMs}),
+    broadcast: (kind, payload) => {
     broadcast(kind, payload); logger({ level: kind === "session_halted" ? "warn" : "info", event: kind, code: payload.code, hostSequence: payload.hostSequence });
   } });
   const server = net.createServer((socket) => {
@@ -88,11 +91,29 @@ export function startHost({ secret, sessionId = randomUUID(), bind = DEFAULT_BIN
           if (body.playerId !== peer.player.playerId) throw new ProtocolError("IDENTITY_MISMATCH", "message player ID differs");
           if (["participant_ready", "participant_heartbeat", "command_prepared", "command_applied", "participant_released"].includes(body.kind)) {
             if (!peer.ready) throw new ProtocolError("SAVE_REQUIRED", "verify the save first");
-            if (body.kind === "participant_ready") coordinator.ready(peer.player.playerId, body.payload);
+            if (body.kind === "participant_ready") {
+              coordinator.ready(peer.player.playerId, body.payload);
+              logger({level:'info',event:'peer_checkpoint_ready',playerId:peer.player.playerId,
+                roundId:body.payload.roundId,updateCount:body.payload.updateCount,
+                checkpointHash:body.payload.checkpointHash,companyEntity:body.payload.companyEntity,
+                gameplayVerified:false});
+            }
             if (body.kind === "participant_heartbeat") coordinator.heartbeat(peer.player.playerId, body.payload);
             if (body.kind === "command_prepared") coordinator.prepared(peer.player.playerId, body.payload, getUpdateCount());
-            if (body.kind === "command_applied") coordinator.applied(peer.player.playerId, body.payload);
-            if (body.kind === "participant_released") coordinator.released(peer.player.playerId, body.payload);
+            if (body.kind === "command_applied") {
+              coordinator.applied(peer.player.playerId, body.payload);
+              logger({level:'info',event:'peer_command_applied',playerId:peer.player.playerId,
+                roundId:body.payload.roundId,hostSequence:body.payload.hostSequence,
+                updateCount:body.payload.updateCount,stateHash:body.payload.stateHash,
+                gameplayVerified:false});
+            }
+            if (body.kind === "participant_released") {
+              coordinator.released(peer.player.playerId, body.payload);
+              logger({level:'info',event:'peer_barrier_released',playerId:peer.player.playerId,
+                roundId:body.payload.roundId,hostSequence:body.payload.hostSequence,
+                releaseUpdate:body.payload.releaseUpdate,updateCount:body.payload.updateCount,
+                gameplayVerified:false});
+            }
             continue;
           }
           if (body.kind === "save_ready") {
@@ -173,7 +194,10 @@ export function startHost({ secret, sessionId = randomUUID(), bind = DEFAULT_BIN
                   peer.player.playerId,verifiedOwner);
                 if (legacyModelRelay) broadcast("command_accepted", { command: accepted });
                 else coordinator.propose(accepted, hostUpdate);
-                logger({ level: "info", event: legacyModelRelay ? "command_accepted" : "command_proposed", playerId: peer.player.playerId, hostSequence: accepted.hostSequence, scheduledUpdate: accepted.scheduledUpdate });
+                logger({ level: "info", event: legacyModelRelay ? "command_accepted" : "command_proposed",
+                  playerId: peer.player.playerId, hostSequence: accepted.hostSequence,
+                  admissionUpdate:hostUpdate,scheduledUpdate:accepted.scheduledUpdate,
+                  scheduleLeadUpdates:accepted.scheduledUpdate-hostUpdate });
               } catch (error) {
                 const code=error instanceof ProtocolError?error.code:'OWNERSHIP_UNAVAILABLE';
                 send(socket, "command_rejected", { requestMessageId: body.messageId, code }, peer.player.playerId);

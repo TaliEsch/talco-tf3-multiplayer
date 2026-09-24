@@ -16,11 +16,13 @@ export async function createEngineSessionAdapter({directory,bridge,playerId,comp
     ||typeof nativeRuntime.gateControl!=='function'||typeof nativeRuntime.awaitGateEvent!=='function'
     ||typeof nativeRuntime.logger!=='function')) throw new TypeError('INVALID_NATIVE_RUNTIME_ADAPTER_OPTIONS');
   if(!['production','local_diagnostic'].includes(checkpointEvidenceScope))throw new TypeError('INVALID_CHECKPOINT_EVIDENCE_SCOPE');
-  let checkpointEvidence=null;
+  let checkpointEvidence=null,executionEvidence=null,faultLogged=false;
+  // Trace output must never change an accepted engine outcome.
+  const logEngine=event=>{try{nativeRuntime?.logger?.(event);}catch{}};
   const mailbox=await createAsyncEngineMailbox({directory,nonce:bridge.nonce,
     requireCompleteCheckpointCoverage:checkpointEvidenceScope==='production',onCheckpointEvidence:evidence=>{
       checkpointEvidence=structuredClone(evidence);onCheckpointEvidence(structuredClone(evidence));
-    }});
+    },onExecutionEvidence:evidence=>{executionEvidence=evidence;}});
   let participant,lease,closed=false,lastCounter=-1,polling=null,closing=null,nativeHaltPromise=null,orderlyStop=null;
   let nativeHaltState='not_requested',nativeConnectionLost=false;
   // This adapter has not issued a native hold, so the only legal fail-stop
@@ -157,7 +159,40 @@ export async function createEngineSessionAdapter({directory,bridge,playerId,comp
           if(receipt.status==='ok'
             && (!observation?.available||!s||s.updateCount<receipt.updateCount
               ||receipt.held===true&&s.updateCount===receipt.updateCount&&s.speedup!==0))return false;
-          return participant.receiveEngine(receipt);
+          const accepted=participant.receiveEngine(receipt);
+          if(accepted)logEngine({level:'info',event:'engine_operation_receipt',
+            role:nativeRuntime?.role??'local',roundId:receipt.roundId,operationId:receipt.operationId,
+            operation:receipt.operation,updateCount:receipt.updateCount,held:receipt.held,
+            ...(receipt.checkpointHash?{checkpointHash:receipt.checkpointHash}:{}),
+            ...(receipt.ownerCompanyEntity?{ownerCompanyEntity:receipt.ownerCompanyEntity}:{}),
+            ...(receipt.stateHash?{stateHash:receipt.stateHash}:{}),
+            phase:participant.phase,gameplayVerified:false});
+          if(accepted&&receipt.operation==='holdCheckpoint'
+            &&checkpointEvidence?.receipt.operationId===receipt.operationId
+            &&checkpointEvidence.receipt.roundId===receipt.roundId){
+            logEngine({level:'info',event:'engine_checkpoint_evidence',role:nativeRuntime?.role??'local',
+              roundId:receipt.roundId,operationId:receipt.operationId,updateCount:receipt.updateCount,
+              checkpointHash:receipt.checkpointHash,comparisonReady:checkpointEvidence.coverage.comparisonReady,
+              unavailable:checkpointEvidence.coverage.unavailable,gameplayVerified:false});
+          }
+          if(accepted&&receipt.operation==='executeHeld'
+            &&executionEvidence?.receipt.operationId===receipt.operationId
+            &&executionEvidence.receipt.roundId===receipt.roundId){
+            const observed=executionEvidence.state;
+            logEngine({level:'info',event:'engine_execution_evidence',role:nativeRuntime?.role??'local',
+              roundId:receipt.roundId,operationId:receipt.operationId,
+              hostSequence:observed.hostSequence,updateCount:observed.updateCount,
+              entity:observed.vehicle.entity,ownerCompanyEntity:observed.vehicle.ownerCompanyEntity,
+              stopped:observed.vehicle.stopped,stateHash:receipt.stateHash,
+              gameplayVerified:false});
+            executionEvidence=null;
+          }
+          else if(participant.phase==='halted'&&!faultLogged){
+            faultLogged=true;
+            logEngine({level:'error',event:'engine_operation_fault',role:nativeRuntime?.role??'local',
+              fault:participant.fault,evidence:participant.faultEvidence,gameplayVerified:false});
+          }
+          return accepted;
         }});} catch {participant.halt('ENGINE_MAILBOX_UNAVAILABLE');return false;}
       })().finally(()=>{polling=null;});
       return polling;

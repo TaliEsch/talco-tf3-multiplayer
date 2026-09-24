@@ -32,7 +32,8 @@ test('mailbox translates raw execution evidence and fails closed on digest-only 
   const directory=path.join(root,'tf3mp_status_1');await mkdir(directory);
   let mailbox;
   try {
-    const p=fixture();mailbox=await createAsyncEngineMailbox({directory,nonce:p.nonce});
+    const p=fixture(),evidence=[];mailbox=await createAsyncEngineMailbox({directory,nonce:p.nonce,
+      onExecutionEvidence:result=>evidence.push(result)});
     let observed;
     const poll=async value=>{
       await writeFile(path.join(directory,'coordination_receipt.lua'),`function data() return {${Object.entries(value).map(([k,v])=>`${k}=${JSON.stringify(v)},`).join('')}} end`);
@@ -47,6 +48,9 @@ test('mailbox translates raw execution evidence and fails closed on digest-only 
         requestMessageId:'request:1'}});
     await poll(p);
     assert.equal(observed.stateHash,decodeExecutionReceipt(p).receipt.stateHash);
+    assert.equal(evidence.length,1);
+    assert.deepEqual(evidence[0].state.vehicle,{entity:42,ownerCompanyEntity:7,stopped:true});
+    assert.equal(evidence[0].receipt.stateHash,observed.stateHash);
     assert.equal(observed.nonce,undefined);
     assert.equal(observed.balance,undefined);
     await poll({...decodeExecutionReceipt(p).receipt});
@@ -58,5 +62,6 @@ test('mailbox translates raw execution evidence and fails closed on digest-only 
       await poll({...p,...change});
       assert.equal(observed.status,'unknown');
     }
+    assert.equal(evidence.length,1,'rejected postconditions cannot appear as execution evidence');
   } finally {await mailbox?.close();await rm(root,{recursive:true,force:true});}
 });

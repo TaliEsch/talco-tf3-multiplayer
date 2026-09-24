@@ -431,6 +431,9 @@ if (command === 'prepare-join') {
     sessionId:hostSessionId,buildHash,modManifestHash:opt['mod-hash'],requiredSave,verifiedSave:requiredSave,
     engineSessionDirectory:opt['bridge-dir'],logger:log});
   const instance = startHost({ secret: sessionSecret, sessionId: hostSessionId, bind: opt.bind, port: opt.port ? Number(opt.port) : undefined, buildHash, modManifestHash: opt["mod-hash"], requiredSave, expiresAt, logger: log,
+    // The verified TF3 Stop needed 60 updates (~11 s at its measured 1x rate).
+    // Eight updates is a transport fixture lead, not enough for two engines.
+    ...(!nativeMode.diagnosticOnly?{leadUpdates:60,coordinationTimeoutMs:30000}:{}),
     getUpdateCount:()=>liveHostUpdateCount(bridge),
     inspectVehicleOwner:nativeMode.diagnosticOnly?null:async ({targetEntity,targetCompanyEntity})=>{
       if(nativeGate?.ready!==true)throw new Error('NATIVE_GATE_UNAVAILABLE');

@@ -9,10 +9,10 @@ async function until(predicate) {
   for (let i = 0; i < 300; i++) { if (predicate()) return; await new Promise(r => setTimeout(r, 5)); }
   assert.fail("coordination socket test timed out");
 }
-async function fixture(count, { requireReleaseAck = false } = {}) {
+async function fixture(count, { requireReleaseAck = false, leadUpdates, coordinationTimeoutMs } = {}) {
   let update = 100;
-  const owners = new Map(), clients = [];
-  const host = startHost({ secret, buildHash, modManifestHash, port: 0, getUpdateCount: () => update, resolveEntityOwner: e => owners.get(e) ?? null, requireReleaseAck });
+  const owners = new Map(), clients = [], events=[];
+  const host = startHost({ secret, buildHash, modManifestHash, port: 0, getUpdateCount: () => update, resolveEntityOwner: e => owners.get(e) ?? null, requireReleaseAck, leadUpdates, coordinationTimeoutMs, logger:event=>events.push(event) });
   await once(host.server, "listening");
   try {
     for (let i = 0; i < count; i++) {
@@ -27,7 +27,7 @@ async function fixture(count, { requireReleaseAck = false } = {}) {
   } catch (e) { for (const c of clients) c.connection?.socket.destroy(); host.server.close(); throw e; }
   const request = (seq = 1) => clients[0].connection.send("action_request", { clientSequence: seq, commandType: "vehicle.setRunning",
     originPlayerId: clients[0].player.playerId, targetCompanyEntity: 1000, targetEntity: 2000, payload: { running: false } });
-  return { host, clients, request, setUpdate: u => { update = u; },
+  return { host, clients, events, request, setUpdate: u => { update = u; },
     async prepare() {
       host.beginCoordination({ checkpointHash, updateCount: 100 });
       await until(() => clients.every(c => c.messages.some(m => m.kind === "coordination_prepare")));
@@ -37,6 +37,16 @@ async function fixture(count, { requireReleaseAck = false } = {}) {
     async close() { for (const c of clients) c.connection.socket.destroy(); await new Promise(r => host.server.close(r)); },
   };
 }
+test('production-sized Stop lead keeps the two-engine prepare window open',async()=>{
+  const f=await fixture(2,{leadUpdates:60,coordinationTimeoutMs:30000});
+  try{
+    await f.prepare();f.request();
+    await until(()=>f.clients.every(c=>c.messages.some(m=>m.kind==='command_prepare')));
+    const command=f.clients[0].messages.find(m=>m.kind==='command_prepare').payload.command;
+    assert.equal(command.scheduledUpdate,160);
+    assert.equal(f.host.coordinator.phase,'awaiting_prepare');
+  }finally{await f.close();}
+});
 for (const count of [2, 4]) test(`${count} socket participants coordinate prepare/commit/apply without legacy relay`, async () => {
   const f = await fixture(count);
   try {
@@ -44,6 +54,7 @@ for (const count of [2, 4]) test(`${count} socket participants coordinate prepar
     await until(() => f.clients[0].messages.some(m => m.kind === "command_rejected"));
     assert.equal(f.clients[0].messages.find(m => m.kind === "command_rejected").payload.code, "COORDINATION_NOT_READY");
     await f.prepare(); f.request(2);
+    assert.equal(f.events.filter(event=>event.event==='peer_checkpoint_ready').length,count);
     await until(() => f.clients.every(c => c.messages.some(m => m.kind === "command_prepare")));
     const command = f.clients[0].messages.find(m => m.kind === "command_prepare").payload.command;
     assert.equal(f.clients.some(c => c.messages.some(m => m.kind === "command_accepted" || m.kind === "command_commit")), false);
@@ -52,6 +63,7 @@ for (const count of [2, 4]) test(`${count} socket participants coordinate prepar
     f.setUpdate(command.scheduledUpdate);
     for (const c of f.clients) c.connection.send("command_applied", { roundId: f.host.coordinator.roundId, hostSequence: command.hostSequence, updateCount: command.scheduledUpdate, stateHash });
     await until(() => f.clients.every(c => c.messages.some(m => m.kind === "command_completed")));
+    assert.equal(f.events.filter(event=>event.event==='peer_command_applied').length,count);
     assert.equal(f.host.coordinator.phase, "running");
     assert.throws(() => f.host.beginCoordination({ checkpointHash, updateCount: 100 }), /cannot restart/);
   } finally { await f.close(); }
