@@ -169,10 +169,11 @@ function M.probeOrdered(api, request)
     if type(request) ~= "table" or getmetatable(request) ~= nil then fail() end
     local allowed = {schemaVersion=true, kind=true, nonce=true, requestId=true,
       hostSequence=true, company=true, localCompany=true, sourceRoad=true, road=true, stop=true,
-      update=true, balance=true, balanceNegative=true, charge=true}
+      update=true, balance=true, balanceNegative=true,
+      localBalance=true, localBalanceNegative=true, charge=true}
     local fields = 0
     for key in pairs(request) do if not allowed[key] then fail() end; fields = fields + 1 end
-    if fields ~= 14 or request.schemaVersion ~= 1
+    if fields ~= 16 or request.schemaVersion ~= 1
       or request.kind ~= "ordered_road_readback_request"
       or type(request.nonce) ~= "string" or #request.nonce ~= 32
       or not request.nonce:match("^[0-9a-f]+$")
@@ -185,6 +186,9 @@ function M.probeOrdered(api, request)
       or not integer(request.balance) or request.balance < 0
       or (request.balanceNegative ~= 0 and request.balanceNegative ~= 1)
       or request.balance == 0 and request.balanceNegative ~= 0
+      or not integer(request.localBalance) or request.localBalance < 0
+      or (request.localBalanceNegative ~= 0 and request.localBalanceNegative ~= 1)
+      or request.localBalance == 0 and request.localBalanceNegative ~= 0
       or not integer(request.charge) or request.charge < 1 then fail() end
     progress.stage = "clock"
     local world = api.engine.util.getWorld()
@@ -196,6 +200,10 @@ function M.probeOrdered(api, request)
     progress.stage = "balance"
     local signedBalance = request.balanceNegative == 1 and -request.balance or request.balance
     if api.engine.util.finance.getPlayersBalance(request.company) ~= signedBalance then fail() end
+    progress.stage = "local_balance"
+    local signedLocalBalance = request.localBalanceNegative == 1
+      and -request.localBalance or request.localBalance
+    if api.engine.util.finance.getPlayersBalance(request.localCompany) ~= signedLocalBalance then fail() end
     progress.stage = "source_road"
     local sourcePresent = api.engine.entityExists(request.sourceRoad)
     if type(sourcePresent) ~= "boolean" then fail() end
@@ -222,6 +230,7 @@ function M.probeOrdered(api, request)
       sourceRoad=request.sourceRoad, road=request.road,
       stop=request.stop, update=request.update, balance=request.balance,
       balanceNegative=request.balanceNegative,
+      localBalance=request.localBalance, localBalanceNegative=request.localBalanceNegative,
       charge=request.charge}
   end
   local ok, result = pcall(inspect)

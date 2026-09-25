@@ -17,7 +17,8 @@ function runOrdered(change=''){
   const script=`local module=(function() ${source} end)()
 local request={schemaVersion=1,kind='ordered_road_readback_request',nonce=string.rep('a',32),
   requestId=3,hostSequence=1,company=10,localCompany=10,sourceRoad=24,road=25,stop=81,
-  update=50,balance=53652,balanceNegative=0,charge=46348}
+  update=50,balance=53652,balanceNegative=0,localBalance=53652,
+  localBalanceNegative=0,charge=46348}
 local map={[81]=25};local components={EDGE_OBJECT={[81]={param=.5}},
   PLAYER_OWNED={[81]={player=10}},BASE_EDGE={[25]={objects={{81,1}}}}}
 local api={type={ComponentType={EDGE_OBJECT='EDGE_OBJECT',PLAYER_OWNED='PLAYER_OWNED',
@@ -47,14 +48,17 @@ test('ordered road readback independently checks held world and rejects mismatch
     ['request.update=51','clock'],
     ["local prior=api.engine.getComponent;api.engine.getComponent=function(id,kind)if kind=='GAME_SPEED'then return{speedup=1}end return prior(id,kind)end",'clock'],
     ['api.engine.util.finance.getPlayersBalance=function()return 1 end','balance'],
+    ['request.localBalance=1','local_balance'],
     ['components.BASE_EDGE[24]={objects={}};local prior=api.engine.entityExists;api.engine.entityExists=function(id)if id==24 then return true end return prior(id)end','source_road'],
     ['components.PLAYER_OWNED[81].player=11','stop'],
     ['map[81]=26','attachment'],
   ])assert.deepEqual(runOrdered(change),{code:'unknown',stage});
-  assert.deepEqual(runOrdered('request.company=11;components.PLAYER_OWNED[81].player=11'),
+  assert.deepEqual(runOrdered('request.company=11;request.balance=123;components.PLAYER_OWNED[81].player=11;api.engine.util.finance.getPlayersBalance=function(id)if id==11 then return 123 end return 53652 end'),
     {code:'observed',stage:''});
+  assert.deepEqual(runOrdered('request.company=11;request.balance=123;components.PLAYER_OWNED[81].player=11;api.engine.util.finance.getPlayersBalance=function(id)if id==11 then return 123 end return 1 end'),
+    {code:'unknown',stage:'local_balance'});
   assert.deepEqual(runOrdered('request.localCompany=11'),{code:'unknown',stage:'clock'});
-  assert.deepEqual(runOrdered('request.balanceNegative=1;api.engine.util.finance.getPlayersBalance=function()return -53652 end'),
+  assert.deepEqual(runOrdered('request.company=11;components.PLAYER_OWNED[81].player=11;request.balanceNegative=1;api.engine.util.finance.getPlayersBalance=function(id)if id==11 then return -53652 end return 53652 end'),
     {code:'observed',stage:''});
 });
 function run(change='', includeMissing=false){

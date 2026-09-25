@@ -1,5 +1,15 @@
 # TalCo TF3 multiplayer — current delivery plan
 
+## Held economy readback extension — 25 September 2026
+
+The ordered Stop readback now carries the local company's balance from the
+same paused engine observation and independently checks it in the game-side
+finance API, alongside the acting company's native debit. Distinct target and
+local balances and a mismatched local balance pass/fail in focused fixtures.
+This extension is not yet TF3 verified. The next controlled game batch should
+exercise it while extending the separate-company road loop; two-instance
+testing remains deferred by the user.
+
 ## Separate-company ordered Stop checkpoint — 25 September 2026
 
 The one-engine ordered road Stop harness now proposes as its simulated remote

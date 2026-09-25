@@ -1,5 +1,15 @@
 # Completion audit against the build prompt
 
+## Independent local-company economy check — 25 September 2026
+
+The ordered Stop readback now binds a paused engine observation of the local
+company balance to the nonce-bound request and checks that balance with a
+fresh game-side finance read. It separately retains the acting company's
+signed native debit. Distinct-company balance and mismatch fixtures passed;
+18 focused tests passed and mod review accepted the revised source. No TF3
+process was launched for this change, so the previous one-engine Stop remains
+the latest live result. Stage 7 service and economy acceptance remains open.
+
 ## Successful one-engine separate-company ordered Stop — 25 September 2026
 
 The local one-engine coordinator harness now assigns a road Stop to the

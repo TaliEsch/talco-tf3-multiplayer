@@ -811,12 +811,19 @@ export async function startGameBridge({ directory, logger = () => {}, intervalMs
           const observation=observations.status;
           if(!observation.available||observation.sample.speedup!==0
             ||observation.sample.updateCount!==update
-            ||observation.sample.companyEntity!==localCompany)
+            ||observation.sample.companyEntity!==localCompany
+            ||observation.sample.balanceKnown!==1
+            ||!Number.isSafeInteger(observation.sample.balance)
+            ||observation.sample.balance<0
+            ||![0,1].includes(observation.sample.balanceNegative)
+            ||observation.sample.balance===0&&observation.sample.balanceNegative!==0)
             throw new Error('ORDERED_ROAD_READBACK_CONTEXT_LOST');
           const requestId=++requestSequence;
           const request={schemaVersion:1,kind:'ordered_road_readback_request',nonce,
             requestId,hostSequence,company,localCompany,sourceRoad,road,stop,update,
-            balance:Math.abs(balance),balanceNegative:balance<0?1:0,charge};
+            balance:Math.abs(balance),balanceNegative:balance<0?1:0,
+            localBalance:observation.sample.balance,
+            localBalanceNegative:observation.sample.balanceNegative,charge};
           await publish(directory,'ordered_road_readback_request.lua',request);
           return request;
         });
