@@ -5,9 +5,19 @@ function readProposalFacts(value) {
   if(!value||typeof value!=='object'||Array.isArray(value)||value.schemaVersion!==1)return null;
   if(['unavailable','bounds'].includes(value.code)){
     if(Object.keys(value).length===2)return {schemaVersion:1,code:value.code};
-    if(Object.keys(value).length===3&&['street',...factCounts,'cost','critical','ownerCompany'].includes(value.field))
+    if(Object.keys(value).length===3&&['street',...factCounts,'cost','critical','ownerCompany','resource'].includes(value.field))
       return {schemaVersion:1,code:value.code,field:value.field};
     return null;
+  }
+  if(value.code==='constructionReadable'){
+    const keys=['schemaVersion','code','constructions','removals','resultCount','ownerCompany','resource','cost','critical'];
+    if(Object.keys(value).length!==keys.length||Object.keys(value).some(k=>!keys.includes(k))
+      ||value.constructions!==1||!['removals','resultCount'].every(k=>Number.isInteger(value[k])&&value[k]>=0&&value[k]<=64)
+      ||!Number.isInteger(value.ownerCompany)||value.ownerCompany<1||value.ownerCompany>2147483647
+      ||typeof value.resource!=='string'||value.resource.length<1||value.resource.length>256
+      ||!/^[A-Za-z0-9_./:%-]+$/.test(value.resource)
+      ||!Number.isSafeInteger(value.cost)||value.cost<0||typeof value.critical!=='boolean')return null;
+    return Object.fromEntries(keys.map(k=>[k,value[k]]));
   }
   const keys=['schemaVersion','code',...factCounts,'cost','critical','ownerCompany'];
   if(value.code!=='readable'||Object.keys(value).length!==keys.length||Object.keys(value).some(k=>!keys.includes(k))
@@ -64,8 +74,9 @@ export function summarizeNativePlacementLog(text) {
     let facts={};
     if(current.revision>=6){
       const value=readProposalFacts(item.proposalFacts);
-      if(!value)current.rejectedRecords++;
-      facts={proposalFacts:value??{schemaVersion:1,code:'invalid'}};
+      if(!value||(value.code==='constructionReadable'&&builderId!=='constructionBuilder'))current.rejectedRecords++;
+      facts={proposalFacts:value&&!(value.code==='constructionReadable'&&builderId!=='constructionBuilder')
+        ?value:{schemaVersion:1,code:'invalid'}};
     }
     current.samples.push({stage,builderId,sequence,sample,tickCount,updateCount,proposalType,dataType,resultType,...shape,...facts});
   }

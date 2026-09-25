@@ -118,7 +118,7 @@ export async function validateReviewPackage(root) {
     if (createHash('sha256').update(source.replace(/\r\n/g, '\n')).digest('hex') !== digest)
       throw new Error(`road replay ${file} differs from reviewed source`);
   }
-  if (createHash('sha256').update(factsSource.replace(/\r\n/g, '\n')).digest('hex') !== '55d015ccc1c478f4ea8018b91fbb4aa040c0fd4e01bf735b6a1c1a4cdc9115ce') {
+  if (createHash('sha256').update(factsSource.replace(/\r\n/g, '\n')).digest('hex') !== '19db55804d2be6ec681fecf1c449915a08563da041841cb95a04f3c7ab9bffea') {
     throw new Error('proposal facts collector differs from reviewed passive source');
   }
   for (const [kind, digest] of [
@@ -227,6 +227,9 @@ export async function validateReviewPackage(root) {
     'proposalType = type(slots[1])', 'dataType = type(slots[2])', 'resultType = type(slots[3])',
     'shapeInspected = shapeOk', 'if not shapeOk then proposalType, dataType, resultType = "nil", "nil", "nil" end',
     'if shapeOk and id == "streetTerminalBuilder" then',
+    'if shapeOk and id == "constructionBuilder" then',
+    'return proposalFacts.collectConstruction(slots[1], slots[2], slots[3])',
+    'type(constructionCaptured) == "string" and #constructionCaptured <= 1024',
     'local factsOk, captured = pcall(function() : string',
     'return proposalFacts.collect(slots[1], slots[2], slots[3])',
     'type(captured) == "string" and #captured <= 1024',

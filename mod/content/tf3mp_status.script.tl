@@ -184,6 +184,15 @@ local function observeNativePlacement(guiState : GameScriptState<Tf3MpGuiState>,
     end)
     shapeInspected = shapeOk
     if not shapeOk then proposalType, dataType, resultType = "nil", "nil", "nil" end
+    if shapeOk and id == "constructionBuilder" then
+      local constructionFactsOk, constructionCaptured = pcall(function() : string
+        local slots = param as table
+        return proposalFacts.collectConstruction(slots[1], slots[2], slots[3])
+      end)
+      if constructionFactsOk and type(constructionCaptured) == "string" and #constructionCaptured <= 1024 then
+        facts = constructionCaptured as string
+      end
+    end
     if shapeOk and id == "streetTerminalBuilder" then
       if not isApply and current.roadStopPreActionCandidate == nil then
         local ok, candidate = pcall(function() : table

@@ -1,5 +1,22 @@
 # Completion audit against the build prompt
 
+## Road depot construction diagnostic — 25 September 2026
+
+The read-only `constructionBuilder` observer now emits a fixed, bounded native
+proposal subset, and the report parser validates that subset only for the
+construction builder. In one exact build-40396 TF3 GUI run, a local company-3141
+Bullfrog Road Depot create/apply pair reported resource
+`::/depots/road/road_depot/road_depot.con`, native cost 454,977, no critical
+error and one apply result. The GUI balance fell by 454,977 and the depot detail
+panel showed capacity 0/12 and $67,500 yearly maintenance. A prior diagnostic
+run also placed an unintended maintenance building before the depot; both runs
+were quit without saving. The disposable source save SHA-256 remained
+`CCBF4BEB740E53323E06D20890FD029C8E174D3E85EFB06801A8B4275C762FB5`.
+These are local UI observations, not Host ordered construction or separate-company
+proof. Sixteen focused tests, mod review and diff check passed. Stage 7 remains
+open for depot ordering/replay, lines, vehicles, service costs and income;
+two-instance proof remains deferred by the user.
+
 ## Sequential separate-company Stop driver — 25 September 2026
 
 The existing one-engine coordinator driver now accepts two distinct Stop

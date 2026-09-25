@@ -118,4 +118,46 @@ function M.collect(proposal, data, result)
   return facts
 end
 
+-- ConstructionBuilder uses the same native Proposal slots as the street
+-- builder. Copy only the one-construction diagnostic fields needed to qualify
+-- a road depot. This never retains the native proposal or authorizes replay.
+function M.collectConstruction(proposal, data, result)
+  local activeField = "constructions"
+  local ok, facts = pcall(function()
+    local additions, code = boundedArray(proposal.toAdd)
+    if additions == nil then return failure(code, activeField) end
+    if additions ~= 1 then return failure("unavailable", activeField) end
+    activeField = "removals"
+    local removals
+    removals, code = boundedArray(proposal.toRemove)
+    if removals == nil then return failure(code, activeField) end
+    activeField = "resultCount"
+    local resultCount = 0
+    if result ~= nil then
+      resultCount, code = boundedArray(result)
+      if resultCount == nil then return failure(code, activeField) end
+    end
+    activeField = "ownerCompany"
+    local construction = proposal.toAdd[1]
+    local ownerCompany = construction.playerEntity
+    if not integer(ownerCompany, 1, MAX_ENTITY) then return failure("unavailable", activeField) end
+    activeField = "resource"
+    local resource = construction.fileName
+    if type(resource) ~= "string" or #resource < 1 or #resource > 256
+      or not resource:match("^[A-Za-z0-9_./:%%%-]+$") then return failure("unavailable", activeField) end
+    activeField = "cost"
+    local cost = data.costs
+    if not integer(cost, 0, MAX_SAFE_INTEGER) then return failure("unavailable", activeField) end
+    activeField = "critical"
+    local errorState = data.errorState
+    if errorState == nil or type(errorState.critical) ~= "boolean" then return failure("unavailable", activeField) end
+    return '{"schemaVersion":1,"code":"constructionReadable","constructions":1,"removals":'
+      .. tostring(removals) .. ',"resultCount":' .. tostring(resultCount)
+      .. ',"ownerCompany":' .. tostring(ownerCompany) .. ',"resource":"' .. resource
+      .. '","cost":' .. tostring(cost) .. ',"critical":' .. tostring(errorState.critical) .. '}'
+  end)
+  if not ok or type(facts) ~= "string" then return fixed("unavailable", activeField) end
+  return facts
+end
+
 return M

@@ -1,5 +1,19 @@
 # TalCo TF3 multiplayer — current delivery plan
 
+## Road depot proposal observation — 25 September 2026
+
+The passive native construction observer now copies bounded owner, resource,
+cost, critical-error and result-count facts for a single `constructionBuilder`
+proposal. In one exact build-40396 TF3 session, a locally placed Bullfrog Road
+Depot produced create/apply facts for company 3141, resource
+`::/depots/road/road_depot/road_depot.con`, and native cost 454,977. The GUI
+showed the same debit and the completed depot with capacity 0/12. The source
+disposable save remained unchanged. This qualifies observation of the native
+proposal shape only. Next is host-authoritative depot admission, one-use
+cancellation, scheduled replay and a held-world postcondition for a separately
+mapped company; then line, vehicle and service economy work. Two-instance
+testing remains deferred by the user.
+
 ## Sequential separate-company Stop path — 25 September 2026
 
 The controlled one-engine coordinator can now accept two distinct road Stop
