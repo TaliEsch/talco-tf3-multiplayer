@@ -1,5 +1,19 @@
 # Completion audit against the build prompt
 
+## Bounded road Stop order contract — 25 September 2026
+
+The Host authority model and ordered queue now validate `road.stop.place`
+against the exact seven-field TF3 road Stop capture: road and company IDs,
+relative position, side, direction, fixed qualified model and bounded name.
+The live Host returns `ROAD_STOP_ENGINE_UNAVAILABLE` before action admission
+and sequence assignment. The engine mailbox has a bounded scalar encoding for
+the exact fractional position and UTF-8 name; it rejects publication of the
+road command until game-side prepare/execute receipts exist. Focused model,
+codec, Lua decoder and authenticated socket tests verify the schema and closed
+production gate. The Lua decoder is read-only and not connected to a game
+event. This is offline transport work only, not Host-ordered TF3 execution or
+a successful road Stop callback.
+
 ## Offline road Stop callback readback — 25 September 2026
 
 The verifier now accepts an empty or partial callback entity vector only when

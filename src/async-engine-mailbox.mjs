@@ -6,13 +6,16 @@ import { CommandQueue } from "./lockstep.mjs";
 import { decodeCheckpointReceipt } from "./coordinator-checkpoint.mjs";
 import { decodeExecutionReceipt } from "./coordinator-execution.mjs";
 import { replaceUnpublished } from './unpublished-replace.mjs';
+import { decodeRoadStopFlat, encodeRoadStopFlat } from './road-stop-order-payload.mjs';
 
 const exact = (p, names) => p && Object.keys(p).sort().join(",") === names.split(",").sort().join(",");
 const uint = n => Number.isSafeInteger(n) && n >= 0 && n <= 2147483647;
 const ident = s => typeof s === "string" && /^[A-Za-z0-9_.:-]{1,128}$/.test(s);
 const hash = s => typeof s === "string" && /^[0-9a-f]{64}$/.test(s);
-// Data-only fixed schema. No eval, network strings, paths, arbitrary script,
-// construction or finance payloads. Development mod consumes bindSession,
+// Data-only fixed schema. No eval, paths, arbitrary script or finance payloads.
+// Road Stop has a bounded scalar codec, but publication stays disabled until
+// the game-side prepare/execute path and receipts are qualified.
+// Development mod consumes bindSession,
 // prepare, held checkpoint capture/release, executeHeld and terminal halt under
 // a live lease. Engine command cycles remain unverified in TF3.
 export function encodeAsyncEngineRequest(r, nonce) {
@@ -40,11 +43,14 @@ export function encodeAsyncEngineRequest(r, nonce) {
   } else if (["prepare","executeHeld"].includes(r.operation)) {
     const c=r.command;
     if (!exact(r,common+",command") || !exact(c,"protocolVersion,hostSequence,scheduledUpdate,originPlayerId,targetCompanyEntity,targetEntity,commandType,payload,clientSequence,requestMessageId")
-      || c.commandType !== "vehicle.setRunning" || !ident(c.originPlayerId) || !ident(c.requestMessageId)
+      || !['vehicle.setRunning','road.stop.place'].includes(c.commandType)
+      || !ident(c.originPlayerId) || !ident(c.requestMessageId)
       || ![c.hostSequence,c.scheduledUpdate,c.targetCompanyEntity,c.targetEntity,c.clientSequence].every(uint)) throw new TypeError("invalid bounded command");
     if (!new CommandQueue().enqueue(c,new Map([[c.originPlayerId,c.targetCompanyEntity]]),() => c.targetCompanyEntity)) throw new TypeError("invalid command sequence");
     Object.assign(p,{hostSequence:c.hostSequence,scheduledUpdate:c.scheduledUpdate,companyEntity:c.targetCompanyEntity,
-      entity:c.targetEntity,running:c.payload.running,clientSequence:c.clientSequence,
+      entity:c.targetEntity,...(c.commandType==='road.stop.place'
+        ?encodeRoadStopFlat(c.payload,c.targetEntity,c.targetCompanyEntity)
+        :{running:c.payload.running}),clientSequence:c.clientSequence,
       originPlayerId:c.originPlayerId,requestMessageId:c.requestMessageId,protocolVersion:c.protocolVersion,commandType:c.commandType});
   } else if (r.operation !== "halt" || !exact(r,common)) throw new TypeError("unsupported engine operation");
   const source=`function data()\nreturn {\n${Object.entries(p).map(([k,v]) => ` ${k}=${JSON.stringify(v)},`).join("\n")}\n}\nend\n`;
@@ -66,7 +72,9 @@ export function decodeAsyncEngineRequest(source, nonce) {
   else if(["prepare","executeHeld"].includes(p.operation)) r.command={
     protocolVersion:p.protocolVersion,hostSequence:p.hostSequence,scheduledUpdate:p.scheduledUpdate,
     originPlayerId:p.originPlayerId,targetCompanyEntity:p.companyEntity,targetEntity:p.entity,
-    commandType:p.commandType,payload:{running:p.running},clientSequence:p.clientSequence,requestMessageId:p.requestMessageId,
+    commandType:p.commandType,payload:p.commandType==='road.stop.place'
+      ?decodeRoadStopFlat(p):{running:p.running},
+    clientSequence:p.clientSequence,requestMessageId:p.requestMessageId,
   };
   const validated=parseFlatDataFile(encodeAsyncEngineRequest(r,nonce));
   if(Object.keys(p).sort().join(",")!==Object.keys(validated).sort().join(",")
@@ -111,6 +119,9 @@ export async function createAsyncEngineMailbox({directory,nonce=randomBytes(16).
       // Validate and snapshot before entering the serialized I/O queue.
       let source;
       try { source=encodeAsyncEngineRequest(request,nonce); } catch(e) { return Promise.reject(e); }
+      if(['prepare','executeHeld'].includes(request.operation)
+        &&request.command.commandType==='road.stop.place')
+        return Promise.reject(new Error('ROAD_STOP_ENGINE_UNAVAILABLE'));
       if (halting) return Promise.reject(new Error("mailbox halted; create a new verified session"));
       if(request.operation==='executeHeld')expectedExecution=Object.freeze({
         roundId:request.roundId,operationId:request.operationId,

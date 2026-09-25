@@ -2,6 +2,16 @@
 
 ## Current direction — 25 September 2026
 
+A bounded `road.stop.place` command shape now exists in the Host authority
+model and ordered queue. It binds the seven observed TF3 fields to one road
+and company and rejects balance/cost input. The engine mailbox now has a
+bounded scalar encoding for the fractional position and UTF-8 name. The live
+Host still rejects road requests before assigning a sequence, and the mailbox
+refuses road publication because the game-side prepare/execute receipt path is
+not implemented. A read-only game-side decoder reconstructs the payload in
+Lua fixtures; it is not connected to a game event. No TF3 run tested this
+contract.
+
 The ordered vehicle path is explicitly vehicle-only at Host admission,
 participant validation, engine mailbox encoding and game-side preparation /
 execution. The road Stop currently uses a separate one-use disposable-save

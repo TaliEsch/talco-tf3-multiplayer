@@ -4,6 +4,7 @@ import { mkdtemp,mkdir,readFile,writeFile,rm,link,rename } from "node:fs/promise
 import path from "node:path";
 import os from "node:os";
 import { createAsyncEngineMailbox,encodeAsyncEngineRequest,decodeAsyncEngineRequest,isUnpublishedEngineSource } from "../src/async-engine-mailbox.mjs";
+import { ROAD_STOP_MODEL } from '../src/road-stop-order-payload.mjs';
 import {replaceUnpublished} from '../src/unpublished-replace.mjs';
 import { parseFlatDataFile } from "../src/userdata-ipc.mjs";
 import { AsyncSessionParticipant } from "../src/async-session-participant.mjs";
@@ -75,6 +76,40 @@ test('engine mailbox preserves complete player/company command identity in both 
     assert.throws(()=>decodeAsyncEngineRequest(source,'b'.repeat(32)),/nonce/);
     assert.throws(()=>decodeAsyncEngineRequest(source.replace('return {','return { extra=1,'),nonce),/fields/);
   }
+});
+
+test('road Stop scalar codec preserves position and UTF-8 name but publication stays closed',async()=>{
+  const name='TalCo ' + 'é'.repeat(90);
+  const command={protocolVersion:2,hostSequence:1,scheduledUpdate:108,originPlayerId:'player-a',
+    targetCompanyEntity:3141,targetEntity:53417,commandType:'road.stop.place',
+    payload:{edgeEntity:53417,companyEntity:3141,param:0.0000001,left:true,oneWay:false,
+      model:ROAD_STOP_MODEL,name},clientSequence:11,requestMessageId:'road-11'};
+  for(const operation of ['prepare','executeHeld']){
+    const request={schemaVersion:1,roundId:'round',operationId:operation,operation,command};
+    const source=encodeAsyncEngineRequest(request,nonce);
+    assert.deepEqual(decodeAsyncEngineRequest(source,nonce),request);
+    assert.throws(()=>decodeAsyncEngineRequest(source.replace(' paramText="1e-7",',' paramText="2",'),nonce));
+    assert.throws(()=>decodeAsyncEngineRequest(source.replace(' nameChunkCount=3,',' nameChunkCount=2,'),nonce));
+    const root=await mkdtemp(path.join(os.tmpdir(),'tf3mp-road-mailbox-'));
+    const directory=path.join(root,'tf3mp_status_1');
+    await mkdir(directory);
+    const mailbox=await createAsyncEngineMailbox({directory,nonce});
+    try{
+      await assert.rejects(mailbox.publish(request),/ROAD_STOP_ENGINE_UNAVAILABLE/);
+      await assert.rejects(readFile(path.join(directory,'coordination_request.lua')));
+    }finally{await mailbox.close();await rm(root,{recursive:true,force:true});}
+  }
+});
+
+test('largest accepted road Stop name remains inside the coordination IPC bound',()=>{
+  const command={protocolVersion:2,hostSequence:1,scheduledUpdate:108,originPlayerId:'player-a',
+    targetCompanyEntity:3141,targetEntity:53417,commandType:'road.stop.place',
+    payload:{edgeEntity:53417,companyEntity:3141,param:0.5,left:true,oneWay:false,
+      model:ROAD_STOP_MODEL,name:'n'.repeat(1024)},clientSequence:11,requestMessageId:'road-12'};
+  const request={schemaVersion:1,roundId:'round',operationId:'prepare',operation:'prepare',command};
+  const source=encodeAsyncEngineRequest(request,nonce);
+  assert.ok(Buffer.byteLength(source,'utf8')<=4096);
+  assert.deepEqual(decodeAsyncEngineRequest(source,nonce),request);
 });
 
 test('engine binding codec preserves distinct two-to-four-company rosters',()=>{

@@ -3,6 +3,7 @@ import {
   MAX_PLAYERS, MAX_SCHEDULE_LEAD, MAX_SESSION_MESSAGES, MIN_SCHEDULE_LEAD, PROTOCOL_VERSION, SUPPORTED_SPEEDS,
 } from "./constants.mjs";
 import { sha256Canonical } from "./canonical.mjs";
+import { parseRoadStopOrderPayload } from './road-stop-order-payload.mjs';
 
 export class ProtocolError extends Error {
   constructor(code, message) { super(message); this.code = code; }
@@ -76,7 +77,8 @@ export class HostAuthority {
     if (!request.payload || typeof request.payload !== "object" || Array.isArray(request.payload)) {
       throw new ProtocolError("BAD_PAYLOAD", "payload must be an object");
     }
-    if (request.commandType !== "vehicle.setRunning" && request.commandType !== "simulation.speed") {
+    if (request.commandType !== "vehicle.setRunning" && request.commandType !== "simulation.speed"
+      && request.commandType !== 'road.stop.place') {
       throw new ProtocolError("UNSUPPORTED_COMMAND", "command type is not enabled");
     }
     if (request.commandType === "simulation.speed" && !SUPPORTED_SPEEDS.includes(request.payload?.speedup)) {
@@ -95,6 +97,13 @@ export class HostAuthority {
         throw new ProtocolError("BAD_RUNNING_STATE", "vehicle payload must contain only a boolean running field");
       }
     }
+    let roadPayload;
+    if (request.commandType === 'road.stop.place') {
+      if (!Number.isSafeInteger(request.targetEntity) || request.targetEntity < 1
+        || request.targetEntity > 2147483647) throw new ProtocolError('BAD_ENTITY','invalid road entity');
+      try { roadPayload=parseRoadStopOrderPayload(request.payload,request.targetEntity,player.companyEntity); }
+      catch { throw new ProtocolError('BAD_ROAD_STOP_PAYLOAD','invalid bounded road Stop payload'); }
+    }
     if (request.requestedUpdate !== undefined && (!Number.isSafeInteger(request.requestedUpdate) || request.requestedUpdate < 0)) {
       throw new ProtocolError("BAD_SCHEDULE", "requested update must be a nonnegative safe integer");
     }
@@ -109,7 +118,7 @@ export class HostAuthority {
       targetCompanyEntity: request.targetCompanyEntity,
       targetEntity: request.targetEntity ?? null,
       commandType: request.commandType,
-      payload: Object.freeze({ ...request.payload }),
+      payload: roadPayload ?? Object.freeze({ ...request.payload }),
       clientSequence: request.clientSequence,
       requestMessageId: request.messageId,
     });
@@ -167,6 +176,9 @@ export class CommandQueue {
           || !SUPPORTED_SPEEDS.includes(command.payload.speedup) || Object.keys(command.payload).some((key) => key !== "speedup")) {
         throw new ProtocolError("AUTH_RECHECK_FAILED", "accepted speed command failed local payload validation");
       }
+    } else if (command.commandType === 'road.stop.place') {
+      try { parseRoadStopOrderPayload(command.payload,command.targetEntity,mappedOwner); }
+      catch { throw new ProtocolError('AUTH_RECHECK_FAILED','accepted road Stop payload changed'); }
     } else {
       throw new ProtocolError("AUTH_RECHECK_FAILED", "accepted command type is not enabled locally");
     }

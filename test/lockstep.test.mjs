@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { CommandQueue, HostAuthority, ProtocolError, canonicalStateHash } from "../src/lockstep.mjs";
 import { PROTOCOL_VERSION } from "../src/constants.mjs";
+import { ROAD_STOP_MODEL } from '../src/road-stop-order-payload.mjs';
 
 const BUILD = "b".repeat(64);
 const MODS = "c".repeat(64);
@@ -78,6 +79,29 @@ test("client queue fails closed without matching entity ownership", () => {
   const command = { protocolVersion: PROTOCOL_VERSION, hostSequence: 1, scheduledUpdate: 10, originPlayerId: "a", targetCompanyEntity: 1, targetEntity: 9, commandType: "vehicle.setRunning", payload: { running: false }, clientSequence: 0 };
   assert.throws(() => queue.enqueue(command, new Map([["a", 1]])), (e) => e.code === "AUTH_RECHECK_FAILED");
   assert.equal(queue.enqueue(command, new Map([["a", 1]]), () => 1), true);
+});
+
+test('bounded road Stop enters a company-bound sequence and rechecks its command shape',()=>{
+  const host=new HostAuthority(compatibility);
+  const a=host.admit({displayName:'A',buildHash:BUILD,modManifestHash:MODS});
+  const b=host.admit({displayName:'B',buildHash:BUILD,modManifestHash:MODS});
+  host.bindCompanyEntity(a.playerId,101);
+  host.bindCompanyEntity(b.playerId,102);
+  const payload={edgeEntity:53417,companyEntity:101,param:0.5,left:true,oneWay:false,
+    model:ROAD_STOP_MODEL,name:'TalCo Road Stop'};
+  const request={messageId:'road-1',originPlayerId:a.playerId,targetCompanyEntity:101,
+    targetEntity:53417,commandType:'road.stop.place',payload,clientSequence:0};
+  assert.throws(()=>host.accept({...request,messageId:'cross',targetCompanyEntity:102},100,a.playerId),e=>e.code==='NOT_OWNER');
+  assert.throws(()=>host.accept({...request,messageId:'spoof',originPlayerId:b.playerId},100,a.playerId),e=>e.code==='IDENTITY_MISMATCH');
+  assert.throws(()=>host.accept({...request,messageId:'cost',payload:{...payload,chargedCost:1}},100,a.playerId),e=>e.code==='BAD_ROAD_STOP_PAYLOAD');
+  const accepted=host.accept(request,100,a.playerId);
+  assert.equal(accepted.hostSequence,1);
+  assert.equal(accepted.commandType,'road.stop.place');
+  const queue=new CommandQueue({maxPending:1});
+  const map=new Map([[a.playerId,101],[b.playerId,102]]);
+  assert.equal(queue.enqueue(accepted,map),true);
+  assert.deepEqual(queue.due(accepted.scheduledUpdate).map(item=>item.hostSequence),[1]);
+  assert.throws(()=>new CommandQueue().enqueue({...accepted,payload:{...payload,companyEntity:102}},map),e=>e.code==='AUTH_RECHECK_FAILED');
 });
 
 test("vehicle action requires a bounded boolean payload and increasing client sequence", () => {

@@ -340,6 +340,29 @@ test("authenticated client is admitted and exchanges test message", async () => 
   await shutdown(instance.server, [handle.socket]);
 });
 
+test('road Stop remains rejected on the live Host until its engine adapter exists',async()=>{
+  const instance=startHost({legacyModelRelay:true,secret:SECRET,sessionId:'road-engine-gate',
+    port:0,buildHash:BUILD,modManifestHash:MODS});
+  await once(instance.server,'listening');
+  let handle;
+  const result=new Promise((resolve,reject)=>{
+    handle=connectClient({secret:SECRET,sessionId:instance.sessionId,
+      port:instance.server.address().port,displayName:'Alice',buildHash:BUILD,modManifestHash:MODS,
+      onMessage(message,context){
+        if(message.kind==='admitted')context.send('action_request',{clientSequence:0,
+          commandType:'road.stop.place',originPlayerId:message.payload.player.playerId,
+          targetCompanyEntity:3141,targetEntity:53417,
+          payload:{edgeEntity:53417,companyEntity:3141,param:0.5,left:true,
+            oneWay:false,model:'::/stations/street/small_stops/small_mid.mdl',name:'TalCo Road Stop'}});
+        if(message.kind==='command_rejected')resolve(message.payload.code);
+        if(message.kind==='command_accepted'||message.kind==='command_prepare')reject(new Error('road action escaped engine gate'));
+        if(message.kind==='error')reject(new Error(message.payload.code));
+      }});
+  });
+  try{assert.equal(await result,'ROAD_STOP_ENGINE_UNAVAILABLE');}
+  finally{await shutdown(instance.server,[handle.socket]);}
+});
+
 test("authenticated socket subscribers observe signed coordination frames with stable ordered fanout", async () => {
   const instance = startHost({ secret: SECRET, sessionId: "subscriber-session", port: 0, buildHash: BUILD, modManifestHash: MODS });
   await once(instance.server, "listening");
