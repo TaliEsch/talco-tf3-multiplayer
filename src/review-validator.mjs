@@ -14,6 +14,10 @@ const EXPECTED_CONTENT = Object.freeze([
   "tf3mp_depot_tools.res.lua",
   "tf3mp_depot_tools.script.lua",
   "tf3mp_funded_model_preflight.lua",
+  "tf3mp_line_create_order_action.lua",
+  "tf3mp_line_create_order_execute.lua",
+  "tf3mp_line_create_order_prepare.lua",
+  "tf3mp_line_create_order_wire.lua",
   "tf3mp_load_probe.script.lua",
   "tf3mp_native_controls.res.lua",
   "tf3mp_native_controls.script.tl",
@@ -131,6 +135,10 @@ export async function validateReviewPackage(root) {
     ['tf3mp_vehicle_buy_order_wire.lua', '9cb05b602af8c95bce5da0e6ead78c3c4c78d58357f8e6afe1ffda246a084401'],
     ['tf3mp_vehicle_buy_order_prepare.lua', '89b3008fec181c0cca43431333a43030d40ad24f5de2c426b5fbf4e8b30f77cb'],
     ['tf3mp_vehicle_buy_order_execute.lua', '5f181a11dec6c5ff123366e02bb41fa3ba3159e55a39848e8e5b207567625e86'],
+    ['tf3mp_line_create_order_action.lua', 'ebe52d4031be7505476c75b118e25eb953a1394352ae9488fd7420bcb2a20c52'],
+    ['tf3mp_line_create_order_execute.lua', 'cbf9305d92c54a344d419a9e78bb582a5b2ad70c20263c461bc1c1a2246458b7'],
+    ['tf3mp_line_create_order_prepare.lua', '8b14ef165314238b56a2f63019701faf76f88cc7665185265129029bbead1f2a'],
+    ['tf3mp_line_create_order_wire.lua', '14fc690e53a97eb50e545c3d874adb65d0ec00c8e3b16a7c2e85884b8cc66502'],
     ['tf3mp_depot_build_order_readback.lua', 'ee8fafa52736e95d639cebf657aecc11454ca179c710a88b55e3d73068904a9f'],
     ['tf3mp_road_stop_simple_prepare.lua', 'b9de96bbb92f212b3d8cc83d97564f2b7a814cfd6aa65ac4116ad9208add382c'],
     ['tf3mp_road_stop_simple_dispatch.lua', 'c3b689756b181097b62ecc2b0477d490075a9e4e1d477be7ddb587f1632d5a6b'],
@@ -388,6 +396,22 @@ export async function validateReviewPackage(root) {
     'eventName = "tf3mp_execute_vehicle_buy"',
     'observationEvent = "tf3mp_observe_vehicle_buy"'])
     if(!panelScript.includes(marker))throw new Error('ordered vehicle purchase GUI route is missing');
+  for(const marker of ['state:subscribeToEvent("tf3mp_prepare_line_create")',
+    'state:subscribeToEvent("tf3mp_arm_line_create_hold")',
+    'state:subscribeToEvent("tf3mp_execute_line_create")',
+    'state:subscribeToEvent("tf3mp_observe_line_create")',
+    'lineCreateOrderPrepare.handle(state, param as table, api)',
+    'lineCreateOrderExecute.arm(state, param as table, api)',
+    'lineCreateOrderExecute.execute(state, param as table, api)',
+    'lineCreateOrderExecute.observe(state, api)'])
+    if(!gameScript.includes(marker))throw new Error('ordered line create game route is missing');
+  for(const marker of ['lineCreateOrderWire.decode(request) == nil',
+    'eventName = "tf3mp_prepare_line_create"',
+    'eventName = "tf3mp_arm_line_create_hold"',
+    'eventName = "tf3mp_execute_line_create"',
+    'observationEvent = "tf3mp_observe_line_create"',
+    'receipt.snapshotVersion == 4'])
+    if(!panelScript.includes(marker))throw new Error('ordered line create GUI route is missing');
   for(const marker of ['eventName = "tf3mp_arm_road_stop_hold"',
     'eventName = "tf3mp_execute_road_stop"'])
     if(!panelScript.includes(marker))throw new Error('ordered road Stop GUI execution route is missing');

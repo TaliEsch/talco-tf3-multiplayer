@@ -21,7 +21,8 @@ export class AsyncSessionParticipant {
   #faultEvidence = null;
   constructor({ playerId, companies, publish, send, disconnect, now = Date.now,
     timeoutMs = 15000, heartbeatMs = 10000, engineStaleMs = 5000,
-    requireEngineBinding = false,enableDepotBuild=false,enableVehicleBuy=false }) {
+    requireEngineBinding = false,enableDepotBuild=false,enableVehicleBuy=false,
+    enableLineCreate=false }) {
     if (!(companies instanceof Map) || companies.size < 2 || companies.size > 4 || !companies.has(playerId)
       || [...companies].some(([id,c]) => typeof id !== "string" || !id.length || !uint(c))
       || new Set(companies.values()).size !== companies.size) throw new TypeError("distinct verified companies required");
@@ -33,10 +34,12 @@ export class AsyncSessionParticipant {
     if (typeof requireEngineBinding !== "boolean") throw new TypeError("invalid engine binding option");
     if(typeof enableDepotBuild!=='boolean')throw new TypeError('invalid depot capability');
     if(typeof enableVehicleBuy!=='boolean')throw new TypeError('invalid vehicle purchase capability');
+    if(typeof enableLineCreate!=='boolean')throw new TypeError('invalid line creation capability');
     this.requireEngineBinding = requireEngineBinding;
     this.enableDepotBuild=enableDepotBuild;
     this.enableVehicleBuy=enableVehicleBuy;
-    this.#queue=new CommandQueue({maxPending:1,enableDepotBuild,enableVehicleBuy});
+    this.enableLineCreate=enableLineCreate;
+    this.#queue=new CommandQueue({maxPending:1,enableDepotBuild,enableVehicleBuy,enableLineCreate});
   }
   get phase() { return this.#phase; }
   get fault() { return this.#fault; }
@@ -154,14 +157,14 @@ export class AsyncSessionParticipant {
         if (this.#phase !== "running" || !exact(p,"roundId,command")) this.#fail("INVALID_COMMAND_PREPARE");
         const c = structuredClone(p.command);
         if (!exact(c,"protocolVersion,hostSequence,scheduledUpdate,originPlayerId,targetCompanyEntity,targetEntity,commandType,payload,clientSequence,requestMessageId")
-          || !['vehicle.setRunning','road.stop.place',...(this.enableDepotBuild?['road.depot.build']:[]),...(this.enableVehicleBuy?['road.vehicle.buy']:[])].includes(c.commandType)
+          || !['vehicle.setRunning','road.stop.place',...(this.enableDepotBuild?['road.depot.build']:[]),...(this.enableVehicleBuy?['road.vehicle.buy']:[]),...(this.enableLineCreate?['road.line.create']:[])].includes(c.commandType)
           || c.hostSequence !== this.#sequence + 1
           || !uint(c.scheduledUpdate) || c.scheduledUpdate <= this.#update
           || typeof c.requestMessageId !== "string" || c.requestMessageId.length > 128) this.#fail("INVALID_COMMAND_PREPARE");
         // Structural check only here. Actual owner comes from engine inspection,
         // then must be checked atomically again by executeHeld before mutation.
         const check = new CommandQueue({maxPending:1,enableDepotBuild:this.enableDepotBuild,
-          enableVehicleBuy:this.enableVehicleBuy});
+          enableVehicleBuy:this.enableVehicleBuy,enableLineCreate:this.enableLineCreate});
         if (!check.enqueue(c,this.#companies,() => c.targetCompanyEntity)) this.#fail("INVALID_COMMAND_PREPARE");
         this.#command = c; this.#transition("inspecting"); this.#issue("prepare", {command:c});
       } else if (kind === "command_commit") {
@@ -216,7 +219,7 @@ export class AsyncSessionParticipant {
         this.send("participant_ready", {roundId:this.#round,...this.#checkpoint,companyEntity:this.#companies.get(this.playerId)});
       } else if (r.operation === "prepare") {
         if (this.#update >= this.#command.scheduledUpdate
-          || ['road.stop.place','road.depot.build','road.vehicle.buy'].includes(this.#command.commandType)
+          || ['road.stop.place','road.depot.build','road.vehicle.buy','road.line.create'].includes(this.#command.commandType)
             && p.ownerCompanyEntity!==this.#command.targetCompanyEntity
           || !this.#queue.enqueue(this.#command,this.#companies,() => p.ownerCompanyEntity)) this.#fail("INVALID_PREPARE_RECEIPT");
         this.#transition("prepared");

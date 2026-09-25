@@ -28,6 +28,17 @@ run in TF3. Next qualify one current-build, single-game funded depot→purchase
 sequence, then continue the road service loop and economy. Two-instance tests
 remain deferred at the user's direction.
 
+## Ordered two-stop ROAD line source — 25 September 2026
+
+A second-company `road.line.create` action now has opt-in Host/queue admission,
+both-station ownership rechecks, one-use held execution, and a correlated
+line/owner/station receipt. The game module verifies actual ROAD terminal
+assignments and the newly created line in the held world. Focused model tests
+and mod review pass. No line action has run in TF3, and the local diagnostic
+runner still needs two observed target-owned station IDs before it can offer
+this action. Line edit/removal, vehicle assignment and service economy remain
+Stage 7 work.
+
 ## Ordered depot single-game acceptance — 25 September 2026
 
 The held Host-ordered road depot path now waits for the native callback and

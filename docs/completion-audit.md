@@ -1,5 +1,17 @@
 # Completion audit against the build prompt
 
+## Ordered ROAD line source integration — 25 September 2026
+
+The opt-in `road.line.create` source path now joins Host admission, queue owner
+rechecks, engine mailbox, one-use held native line creation, callback identity
+and held-world line/ROAD terminal/owner verification. Fourteen focused line
+tests and the 48-file mod review pass. No target-owned two-stop line has been
+created through this path in TF3, so this is model/source evidence only. The
+full suite was attempted outside the sandbox; two native runtime observer
+debugger fixture teardown tests failed reproducibly with target exit/Win32 121.
+Those fixtures are outside the new line path. The local line runner remains
+disabled until two target-owned station IDs are observed.
+
 ## Build 40401 no-hook diagnostic — 25 September 2026
 
 The exact build-40401 executable loaded a separate diagnostic runtime through

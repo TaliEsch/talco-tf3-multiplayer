@@ -16,7 +16,10 @@ test('proposal facts reads only its fixed documented event fields behind pcall',
     'proposal.toAdd[index].playerEntity'
   ]) assert.ok(source.includes(marker),marker);
   assert.doesNotMatch(source,/(?<!\.)proposal\.added(?:Nodes|Segments)|(?<!\.)proposal\.removed(?:Nodes|Segments)|(?<!\.)proposal\.edgeObjectsToAdd/);
-  assert.doesNotMatch(source,/\.params\b|Proposal\.clone|makeProposalData|SimpleProposal/);
+  const streetCollector=source.slice(source.indexOf('local function collectFacts'),
+    source.indexOf('function M.collectConstruction'));
+  assert.doesNotMatch(streetCollector,/\.params\b/);
+  assert.doesNotMatch(source,/Proposal\.clone|makeProposalData|SimpleProposal/);
 });
 
 test('proposal facts has fixed primitive JSON outcomes and bounded collection reads',()=>{

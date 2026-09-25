@@ -36,6 +36,7 @@ local record Tf3MpState
   nativeVehicleAttempted : boolean
   nativeVehicleReceipt : table
   phase2VehicleReceipt : table
+  nativeLineOrderAttempted : boolean
   nativeStationSlot1Attempted : boolean
   nativeStationSlot2Attempted : boolean
   nativeStationSlot1Receipt : table
@@ -126,6 +127,8 @@ local depotBuildOrderPrepare = ug_require "tf3mp_status_1::/tf3mp_depot_build_or
 local depotBuildOrderExecute = ug_require "tf3mp_status_1::/tf3mp_depot_build_order_execute.lua" as table
 local vehicleBuyOrderPrepare = ug_require "tf3mp_status_1::/tf3mp_vehicle_buy_order_prepare.lua" as table
 local vehicleBuyOrderExecute = ug_require "tf3mp_status_1::/tf3mp_vehicle_buy_order_execute.lua" as table
+local lineCreateOrderPrepare = ug_require "tf3mp_status_1::/tf3mp_line_create_order_prepare.lua" as table
+local lineCreateOrderExecute = ug_require "tf3mp_status_1::/tf3mp_line_create_order_execute.lua" as table
 local roadStopOrderExecute = ug_require "tf3mp_status_1::/tf3mp_road_stop_order_execute.lua" as table
 local function roadCaptureModelName(modelId : integer) : string
   return api.res.modelRep.getName(modelId)
@@ -1404,7 +1407,7 @@ local ret : GameScriptWithGui<Tf3MpState, Tf3MpGuiState> = {
       current = { schemaVersion = 1, tickCount = 0, updateCount = 0, lastDiagnosticUpdate = -1,
         probeNonce = "", probeRequestId = 0, probeTickCount = 0, probeUpdateCount = 0,
         eventSubscriptionsVersion = 0, probeScheduledUpdate = 0, probeOutcome = "applied",
-        probePending = false, probePreviousUpdate = 0, vehicleReceipt = {}, vehicleInbox = {}, companyTestAttempted = false, companyReceipt = {}, financeTestAttempted = false, financeReceipt = {}, phase2FundingAttempted = false, phase2FundingReceipt = {}, phase2CompanyFault = false, nativeDepotAttempted = false, nativeDepotReceipt = {}, phase2DepotReceipt = {}, nativeVehicleAttempted = false, nativeVehicleReceipt = {}, phase2VehicleReceipt = {}, nativeStationSlot1Attempted = false, nativeStationSlot2Attempted = false, nativeStationSlot1Receipt = {}, nativeStationSlot2Receipt = {}, nativeStationReceipt = {}, phase2StationReceipt = {}, phase2ServiceReceipt = {}, nativeServiceObservation = {}, nativeServiceObservationReceipt = {}, phase2ServiceObservationReceipt = {}, nativeServiceLineAttempted = false, nativeServiceAssignmentAttempted = false, nativeServiceReceipt = {}, pauseTestAttempted = false, scheduledPauseTestAttempted = false, pauseReceipt = {}, snapshotReceipt = {}, haltTestAttempted = false, haltReceipt = {}, stationTemplateAttempted = false, stationTemplateReceipt = {} }
+        probePending = false, probePreviousUpdate = 0, vehicleReceipt = {}, vehicleInbox = {}, companyTestAttempted = false, companyReceipt = {}, financeTestAttempted = false, financeReceipt = {}, phase2FundingAttempted = false, phase2FundingReceipt = {}, phase2CompanyFault = false, nativeDepotAttempted = false, nativeDepotReceipt = {}, phase2DepotReceipt = {}, nativeVehicleAttempted = false, nativeVehicleReceipt = {}, phase2VehicleReceipt = {}, nativeLineOrderAttempted = false, nativeStationSlot1Attempted = false, nativeStationSlot2Attempted = false, nativeStationSlot1Receipt = {}, nativeStationSlot2Receipt = {}, nativeStationReceipt = {}, phase2StationReceipt = {}, phase2ServiceReceipt = {}, nativeServiceObservation = {}, nativeServiceObservationReceipt = {}, phase2ServiceObservationReceipt = {}, nativeServiceLineAttempted = false, nativeServiceAssignmentAttempted = false, nativeServiceReceipt = {}, pauseTestAttempted = false, scheduledPauseTestAttempted = false, pauseReceipt = {}, snapshotReceipt = {}, haltTestAttempted = false, haltReceipt = {}, stationTemplateAttempted = false, stationTemplateReceipt = {} }
     end
     -- Preserve consumed replay state across loads; migrate only absent fields.
     if current.nativeRoadReplayAttempted == nil then current.nativeRoadReplayAttempted = false end
@@ -1453,6 +1456,10 @@ local ret : GameScriptWithGui<Tf3MpState, Tf3MpGuiState> = {
       state:subscribeToEvent("tf3mp_arm_vehicle_buy_hold")
       state:subscribeToEvent("tf3mp_execute_vehicle_buy")
       state:subscribeToEvent("tf3mp_observe_vehicle_buy")
+      state:subscribeToEvent("tf3mp_prepare_line_create")
+      state:subscribeToEvent("tf3mp_arm_line_create_hold")
+      state:subscribeToEvent("tf3mp_execute_line_create")
+      state:subscribeToEvent("tf3mp_observe_line_create")
       state:subscribeToEvent("tf3mp_arm_road_stop_hold")
       state:subscribeToEvent("tf3mp_execute_road_stop")
       state:subscribeToEvent("tf3mp_observe_road_stop")
@@ -1778,6 +1785,34 @@ local ret : GameScriptWithGui<Tf3MpState, Tf3MpGuiState> = {
         and receipt.status == "unknown"
         and (receipt.stage == "await_callback" or receipt.stage == "await_world") then
         pcall(function() vehicleBuyOrderExecute.observe(state, api) end)
+      end
+      return nil
+    end
+    if src == "tf3mp_status_1::/tf3mp_status.gs" and id == "tf3mp_engine_bridge" and name == "tf3mp_prepare_line_create" and type(param) == "table" then
+      pcall(function() lineCreateOrderPrepare.handle(state, param as table, api) end)
+      return nil
+    end
+    if src == "tf3mp_status_1::/tf3mp_status.gs" and id == "tf3mp_engine_bridge" and name == "tf3mp_arm_line_create_hold" and type(param) == "table" then
+      pcall(function() lineCreateOrderExecute.arm(state, param as table, api) end)
+      return nil
+    end
+    if src == "tf3mp_status_1::/tf3mp_status.gs" and id == "tf3mp_engine_bridge" and name == "tf3mp_execute_line_create" and type(param) == "table" then
+      pcall(function() lineCreateOrderExecute.execute(state, param as table, api) end)
+      return nil
+    end
+    if src == "tf3mp_status_1::/tf3mp_status.gs" and id == "tf3mp_engine_bridge" and name == "tf3mp_observe_line_create" and type(param) == "table" then
+      local request = param as table
+      local count : integer = 0
+      for key, _ in pairs(request) do
+        if key ~= "nonce" and key ~= "operationId" then return nil end
+        count = count + 1
+      end
+      local current = state:get()
+      local receipt = current and current.executionReceipt or {}
+      if count == 2 and request.nonce == receipt.nonce and request.operationId == receipt.operationId
+        and receipt.status == "unknown"
+        and (receipt.stage == "await_callback" or receipt.stage == "await_world") then
+        pcall(function() lineCreateOrderExecute.observe(state, api) end)
       end
       return nil
     end
