@@ -1,5 +1,31 @@
 # Completion audit against the build prompt
 
+## Revised 40401 passive Stop and assignment source — 25 September 2026
+
+A second no-control passive TF3 run (PID 3360) loaded the same disposable save
+and clicked Stop once for Road Vehicle 1, entity 66005. The visible state reached
+`Stopped`. Its 301 samples captured one Stop factory, admission, send, callback
+and marshaler return with no drops. The Stop stages used thread 34072; the
+qualified simulation boundary used thread 26924 (840 hits, no unaligned or
+cross-thread boundary, minimum reported stack headroom 325952 bytes). The
+previously missing adapter table/invoke RVAs are `0x3788840`/`0x27C8820`.
+Hash-pinned static review identifies a UI forwarding/queue adapter; normal
+success does not prove cancellation, replay or callback lifetime. The observer
+restored both sites (`passive-40401-stop 2 2`, `runtime-returned 12 0`). TF3
+closed without saving, the source save SHA-256 remained
+`CCBF4BEB740E53323E06D20890FD029C8E174D3E85EFB06801A8B4275C762FB5`,
+and the two diagnostic DLLs were unstaged. Private trace:
+`reports/native-passive-40401-adapter-20260925`. Production 40401 remains gated.
+
+Separately, `road.vehicle.assignLine` now has opt-in Host/queue/participant/
+mailbox wiring, saved one-use held execution, live ROAD vehicle and line owner
+rechecks before native send, and callback plus observed `vehicle.line` receipt.
+Twenty-four focused tests and the 50-file mod review pass. The full JS suite
+was attempted at this source integration point; the two native runtime observer
+debugger teardown fixtures failed with target exit/Win32 121, as at the prior
+integration milestone. They are outside the assignment path. No assignment has
+run in TF3.
+
 ## Build 40401 passive Stop observation — 25 September 2026
 
 One disposable-save TF3 run (PID 35408, exact build hash below) loaded

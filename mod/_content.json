@@ -47,6 +47,8 @@
     "tf3mp_vehicle_buy_order_prepare.lua",
     "tf3mp_vehicle_buy_order_wire.lua",
     "tf3mp_vehicle_command.lua",
+    "tf3mp_vehicle_line_assign_order.lua",
+    "tf3mp_vehicle_line_assign_wire.lua",
     "tf3mp_vehicle_test.res.lua",
     "tf3mp_vehicle_test.script.tl"
   ]

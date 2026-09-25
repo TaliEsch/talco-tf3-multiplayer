@@ -2,6 +2,26 @@
 
 ## Current build gate — 25 September 2026
 
+The revised passive 40401 run captured the missing adapter identity during one
+ordinary UI Stop: entity 66005 reached `Stopped`, with one correlated
+factory/admission/send/callback/marshaler chain and no drops. The adapter table
+was RVA `0x3788840`, invoking RVA `0x27C8820`; all Stop-specific stages ran on
+thread 34072. The boundary ran on thread 26924. A hash-pinned static audit
+identifies this adapter as a UI forwarding/queue wrapper, so callback lifetime
+and cancellation under substitution are still unqualified. The observer ended
+with both sites restored (`passive-40401-stop 2 2`, `runtime-returned 12 0`),
+the disposable source save hash was unchanged, and the two diagnostic DLLs
+were removed. Private trace: `reports/native-passive-40401-adapter-20260925`.
+Next qualify the exact adapter, callback and production boundary gates offline,
+then run a bounded hold/release without a vehicle mutation. This observation
+does not enable production 40401 gameplay or establish Host-ordered Stop.
+
+The opt-in `road.vehicle.assignLine` path is implemented from Host admission
+through a one-use held native send and observed vehicle/line ownership receipt.
+Twenty-four focused tests and 50-file mod review pass. It has not run in TF3;
+validate it with the ordered road service on a disposable save after the native
+build gate is qualified.
+
 Steam updated TF3 to build 40401 (SHA-256
 `6ABDEDD8FBBD3117FE909D8747BD2690A76B9098A251AABB1AE9BA6B4F9659CA`)
 during the funded depot and vehicle purchase launch. The launcher stopped at

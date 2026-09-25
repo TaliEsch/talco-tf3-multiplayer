@@ -51,6 +51,8 @@ const EXPECTED_CONTENT = Object.freeze([
   "tf3mp_vehicle_buy_order_prepare.lua",
   "tf3mp_vehicle_buy_order_wire.lua",
   "tf3mp_vehicle_command.lua",
+  "tf3mp_vehicle_line_assign_order.lua",
+  "tf3mp_vehicle_line_assign_wire.lua",
   "tf3mp_vehicle_test.res.lua",
   "tf3mp_vehicle_test.script.tl",
 ]);
@@ -412,6 +414,28 @@ export async function validateReviewPackage(root) {
     'observationEvent = "tf3mp_observe_line_create"',
     'receipt.snapshotVersion == 4'])
     if(!panelScript.includes(marker))throw new Error('ordered line create GUI route is missing');
+  const assignSource=await readFile(path.join(absoluteRoot,'content','tf3mp_vehicle_line_assign_order.lua'),'utf8');
+  for(const marker of ['current.nativeVehicleLineAssignAttempted=true',
+    'barrier.phase="consumed"','binding.phase="execution_unknown"',
+    'if not live(api,intent,true) then','api.cmd.makeVehicleSetLineCmd(r.entity,r.lineEntity,0)',
+    'if vehicle.line~=work.intent.lineEntity then'])
+    if(!assignSource.includes(marker))throw new Error('ordered vehicle assignment action is missing a safety check');
+  for(const marker of ['state:subscribeToEvent("tf3mp_prepare_vehicle_line_assign")',
+    'state:subscribeToEvent("tf3mp_arm_vehicle_line_assign_hold")',
+    'state:subscribeToEvent("tf3mp_execute_vehicle_line_assign")',
+    'state:subscribeToEvent("tf3mp_observe_vehicle_line_assign")',
+    'vehicleLineAssignOrder.prepare(state, param as table, api)',
+    'vehicleLineAssignOrder.arm(state, param as table, api)',
+    'vehicleLineAssignOrder.execute(state, param as table, api)',
+    'vehicleLineAssignOrder.observe(state, api)'])
+    if(!gameScript.includes(marker))throw new Error('ordered vehicle assignment game route is missing');
+  for(const marker of ['vehicleLineAssignWire.decode(request) == nil',
+    'eventName = "tf3mp_prepare_vehicle_line_assign"',
+    'eventName = "tf3mp_arm_vehicle_line_assign_hold"',
+    'eventName = "tf3mp_execute_vehicle_line_assign"',
+    'observationEvent = "tf3mp_observe_vehicle_line_assign"',
+    'receipt.snapshotVersion == 5'])
+    if(!panelScript.includes(marker))throw new Error('ordered vehicle assignment GUI route is missing');
   for(const marker of ['eventName = "tf3mp_arm_road_stop_hold"',
     'eventName = "tf3mp_execute_road_stop"'])
     if(!panelScript.includes(marker))throw new Error('ordered road Stop GUI execution route is missing');
