@@ -29,6 +29,7 @@ import {publishRoadStopReplayRequest,readRoadStopReplayReceipt} from './road-sto
 import {parseVehicleDiscoveryReceipt} from './vehicle-discovery-receipt.mjs';
 import {parseRoadPreflightReceipt} from './road-preflight-receipt.mjs';
 import {parseOrderedRoadReadback} from './ordered-road-readback.mjs';
+import {parseOrderedDepotReadback} from './ordered-depot-readback.mjs';
 import {setTimeout as delay} from 'node:timers/promises';
 
 const LIMIT = 4096;
@@ -125,6 +126,7 @@ export async function startGameBridge({ directory, logger = () => {}, intervalMs
   let vehicleDiscoveryBusy = false;
   let roadPreflightBusy = false;
   let orderedRoadReadbackBusy = false;
+  let orderedDepotReadbackBusy = false;
   let singleStopPermitBusy = false;
   let pauseTest = null;
   let controlLease = null;
@@ -848,6 +850,68 @@ export async function startGameBridge({ directory, logger = () => {}, intervalMs
         orderedRoadReadbackBusy=false;
       }
     },
+    async inspectOrderedDepotReadback({hostSequence,company,localCompany=company,construction,depot,update,
+      balance,charge,timeoutMs=10000}={}){
+      if(orderedDepotReadbackBusy)throw new Error('ORDERED_DEPOT_READBACK_BUSY');
+      const entity=n=>Number.isSafeInteger(n)&&n>0&&n<=2147483647;
+      if(![hostSequence,company,localCompany,construction,depot,charge].every(entity)
+        ||construction===depot||!Number.isSafeInteger(update)||update<0||update>2147483647
+        ||!Number.isSafeInteger(balance)||Math.abs(balance)>2147483647
+        ||!Number.isSafeInteger(timeoutMs)||timeoutMs<100||timeoutMs>30000)
+        throw new TypeError('INVALID_ORDERED_DEPOT_READBACK_REQUEST');
+      orderedDepotReadbackBusy=true;
+      try{
+        const observationDeadline=Date.now()+Math.min(timeoutMs,3000);
+        while(!stopped&&Date.now()<observationDeadline){
+          const observation=observations.status;
+          if(observation.available&&observation.sample.speedup===0
+            &&observation.sample.updateCount===update
+            &&observation.sample.companyEntity===localCompany)break;
+          await delay(50);
+        }
+        const start=pending.then(async()=>{
+          if(stopped||!connected||!coordinationLease?.active)
+            throw new Error('ORDERED_DEPOT_READBACK_CONTEXT_LOST');
+          const observation=observations.status;
+          if(!observation.available||observation.sample.speedup!==0
+            ||observation.sample.updateCount!==update
+            ||observation.sample.companyEntity!==localCompany
+            ||localCompany!==company&&(observation.sample.balanceKnown!==1
+              ||!Number.isSafeInteger(observation.sample.balance)
+              ||observation.sample.balance<0||observation.sample.balance>2147483647
+              ||![0,1].includes(observation.sample.balanceNegative)
+              ||observation.sample.balance===0&&observation.sample.balanceNegative!==0))
+            throw new Error('ORDERED_DEPOT_READBACK_CONTEXT_LOST');
+          const requestId=++requestSequence;
+          const request={schemaVersion:1,kind:'ordered_depot_readback_request',nonce,
+            requestId,hostSequence,company,localCompany,construction,depot,update,
+            balance:Math.abs(balance),balanceNegative:balance<0?1:0,
+            localBalance:localCompany===company?Math.abs(balance):observation.sample.balance,
+            localBalanceNegative:localCompany===company?(balance<0?1:0)
+              :observation.sample.balanceNegative,charge};
+          await publish(directory,'ordered_depot_readback_request.lua',request);
+          return request;
+        });
+        pending=start.catch(()=>{});
+        const request=await start;
+        const deadline=Date.now()+timeoutMs;
+        while(!stopped&&Date.now()<deadline){
+          const observation=observations.status;
+          if(!connected||!coordinationLease?.active||!observation.available
+            ||observation.sample.speedup!==0||observation.sample.updateCount!==update)
+            throw new Error('ORDERED_DEPOT_READBACK_CONTEXT_LOST');
+          try{
+            return parseOrderedDepotReadback(await readBounded(directory,
+              'ordered_depot_readback_receipt.lua'),request);
+          }catch{}
+          await delay(50);
+        }
+        throw new Error(stopped?'ORDERED_DEPOT_READBACK_CLOSED':'ORDERED_DEPOT_READBACK_TIMEOUT');
+      }finally{
+        await unlink(path.join(directory,'ordered_depot_readback_request.lua')).catch(()=>{});
+        orderedDepotReadbackBusy=false;
+      }
+    },
     get haltState() { return haltTest?.phase ?? "not_requested"; },
     get coordinationLeaseState() { return coordinationLease?.phase ?? "not_started"; },
     get coordinatorSetup() {
@@ -1327,6 +1391,7 @@ export async function startGameBridge({ directory, logger = () => {}, intervalMs
       await unlink(path.join(directory, 'vehicle_discovery_request.lua')).catch(() => {});
       await unlink(path.join(directory, 'road_preflight_request.lua')).catch(() => {});
       await unlink(path.join(directory, 'ordered_road_readback_request.lua')).catch(() => {});
+      await unlink(path.join(directory, 'ordered_depot_readback_request.lua')).catch(() => {});
       await unlink(path.join(directory, 'stop_permit_request.lua')).catch(() => {});
       await unlink(path.join(directory, 'stop_permit_receipt.lua')).catch(() => {});
       await unlink(path.join(directory, "bridge.lua")).catch(() => {});

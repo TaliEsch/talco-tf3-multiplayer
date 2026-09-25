@@ -20,7 +20,7 @@ function M.decode(wire)
   local x = numberText(wire.xText,100000)
   local y = numberText(wire.yText,100000)
   local z = numberText(wire.zText,10000)
-  local yaw = numberText(wire.yawText,math.pi)
+  local yaw = numberText(wire.yawText,math.pi+0.000001)
   if x == nil or y == nil or z == nil or yaw == nil then return nil end
   return {companyEntity=wire.companyEntity,resource=RESOURCE,
     x=x,y=y,z=z,yaw=yaw,seed=wire.seed}

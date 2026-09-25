@@ -27,8 +27,7 @@ export function verifyNativeDepotResult(binding,before,receipt){
     ||!money(receipt.originalAfter)||!money(receipt.targetAfter)
     ||receipt.originalBefore!==before.originalBalance||receipt.targetBefore!==before.targetBalance
     ||receipt.originalAfter!==before.originalBalance
-    ||receipt.targetAfter!==before.targetBalance-receipt.chargedCost
-    ||receipt.targetAfter<0)return unknown();
+    ||receipt.targetAfter!==before.targetBalance-receipt.chargedCost)return unknown();
   return Object.freeze({outcome:'verified',companyEntity:binding.targetCompany,
     constructionEntity:receipt.constructionEntity,depotEntity:receipt.depotEntity,
     chargedCost:receipt.chargedCost});

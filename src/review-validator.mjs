@@ -5,7 +5,9 @@ import { fileURLToPath } from "node:url";
 import { hashManifest } from "./manifest.mjs";
 
 const EXPECTED_CONTENT = Object.freeze([
+  "tf3mp_depot_build_order_execute.lua",
   "tf3mp_depot_build_order_prepare.lua",
+  "tf3mp_depot_build_order_readback.lua",
   "tf3mp_depot_build_order_wire.lua",
   "tf3mp_depot_command.lua",
   "tf3mp_depot_preview.script.lua",
@@ -112,8 +114,10 @@ export async function validateReviewPackage(root) {
     ['tf3mp_road_stop_order_prepare.lua', '497f694591b75bee5643529089f892a90059e46fadc6ca7ab1f3021af54a1519'],
     ['tf3mp_road_stop_outcome.lua', '621b114b67ce1ace2a6ed60ff21740bc42b91465c6d3700ea0e2aa606deba039'],
     ['tf3mp_road_stop_order_wire.lua', '259dff8e07ed89a3939a4cbe6b49af102ab3cb4b572a38685afb3feab2d296b5'],
-    ['tf3mp_depot_build_order_wire.lua', '410047511ad746ea0609f2c79bc4cd9319eab534f63430173acc1c71fd73dc2c'],
+    ['tf3mp_depot_build_order_wire.lua', 'e828279c7df6ab7dbc6bf55694126e62d0e69ac9f32fce49ad29db5fb4550d17'],
     ['tf3mp_depot_build_order_prepare.lua', '5bec5dd5a2b9bb394bd756d734e9346a22b6f61ba01487df5c16d37ffad41bfd'],
+    ['tf3mp_depot_build_order_execute.lua', '7e53e752ef4fb35fed31750606e4f08a7f5174d767495ea23974037c89ef279f'],
+    ['tf3mp_depot_build_order_readback.lua', 'ee8fafa52736e95d639cebf657aecc11454ca179c710a88b55e3d73068904a9f'],
     ['tf3mp_road_stop_simple_prepare.lua', 'b9de96bbb92f212b3d8cc83d97564f2b7a814cfd6aa65ac4116ad9208add382c'],
     ['tf3mp_road_stop_simple_dispatch.lua', 'c3b689756b181097b62ecc2b0477d490075a9e4e1d477be7ddb587f1632d5a6b'],
     ['tf3mp_road_stop_simple_result.lua', '4983caba98be57ad1cc69d9dfe919ceb75f52a454f9d6d8099b892dd61c9cdac'],
@@ -166,7 +170,7 @@ export async function validateReviewPackage(root) {
     'state:set(current)','stationProbe.inspect()']) if(!stationRegion.includes(marker))throw new Error('missing station probe guard');
   const depotAdapter=await readFile(path.join(absoluteRoot,'content','tf3mp_depot_command.lua'),'utf8');
   // Reviewed engine mutation module. Keep validation self-contained in distributions.
-  if(createHash('sha256').update(depotAdapter.replace(/\r\n/g,'\n')).digest('hex')!=='9af2637773cc091bf0ee6082f6225bb9c06c25d89085aa4825796134df5ed0ba')
+  if(createHash('sha256').update(depotAdapter.replace(/\r\n/g,'\n')).digest('hex')!=='8ca94ca2e836fd4f1a7a74605ad9ae0c2e72db0b1928afa3d2543283fa04f30b')
     throw new Error('depot adapter differs from reviewed source');
   for(const file of ['tf3mp_depot_preview.script.lua','tf3mp_depot_tools.script.lua']) {
     const source=await readFile(path.join(absoluteRoot,'content',file),'utf8');
@@ -182,7 +186,7 @@ export async function validateReviewPackage(root) {
   for (const event of ["tf3mp_engine_probe", "tf3mp_get_engine_receipt", "tf3mp_get_status", "tf3mp_vehicle_command", "tf3mp_get_vehicle_receipt", "tf3mp_company_probe", "tf3mp_get_company_receipt", "tf3mp_finance_probe", "tf3mp_get_finance_receipt"]) {
     if (!gameScript.includes(`state:subscribeToEvent("${event}")`)) throw new Error(`missing script event subscription: ${event}`);
   }
-  if (!gameScript.includes("current.eventSubscriptionsVersion ~= 25")) throw new Error("missing event subscription migration");
+  if (!gameScript.includes("current.eventSubscriptionsVersion ~= 26")) throw new Error("missing event subscription migration");
   for(const event of ['tf3mp_inspect_road_preflight','tf3mp_get_road_preflight'])
     if(!gameScript.includes(`state:subscribeToEvent("${event}")`))throw new Error('missing road preflight subscription');
   for (const event of ['tf3mp_native_road_stop_replay', 'tf3mp_get_native_road_stop_replay']) {

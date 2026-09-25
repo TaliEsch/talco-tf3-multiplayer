@@ -24,9 +24,11 @@ test('wrong correlation, spending, owner, identity and unconfirmed result remain
   assert.equal(verifyNativeDepotResult(binding,before,null).outcome,'unknown');
   assert.equal(verifyNativeDepotResult({...binding,targetCompany:10},before,receipt).outcome,'unknown');
 });
-test('overdraft and unidentified balance snapshots cannot pass',()=>{
+test('native debit into debt is accepted only at the exact signed balance',()=>{
   assert.equal(verifyNativeDepotResult(binding,{...before,targetBalance:100},
-    {...receipt,targetBefore:100,targetAfter:-4900}).outcome,'unknown');
+    {...receipt,targetBefore:100,targetAfter:-4900}).outcome,'verified');
+  assert.equal(verifyNativeDepotResult(binding,{...before,targetBalance:100},
+    {...receipt,targetBefore:100,targetAfter:-4899}).outcome,'unknown');
   assert.equal(verifyNativeDepotResult(binding,{...before,targetBalance:NaN},receipt).outcome,'unknown');
 });
 test('engine factory uses explicit owner/context and standard validation',async()=>{

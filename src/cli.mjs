@@ -28,6 +28,7 @@ import {createTwoCompanyHostCapture} from './two-company-host-capture.mjs';
 import {createHostRosterCapture} from './host-roster-capture.mjs';
 import {createHostCancelledStop} from './host-cancelled-stop.mjs';
 import {ROAD_STOP_MODEL} from './road-stop-order-payload.mjs';
+import {ROAD_DEPOT_RESOURCE,parseDepotBuildOrderPayload} from './depot-build-order-payload.mjs';
 import {createJoinEngineBootstrap} from './join-engine-bootstrap.mjs';
 import {fileURLToPath} from 'node:url';
 
@@ -260,16 +261,25 @@ if (command === "host" || command === "join") createInterface({ input: process.s
   else if(line.trim()==="coordinator-run-confirmed"||line.trim().startsWith("coordinator-run-confirmed ")
     ||line.trim().startsWith('coordinator-cancel-stop-confirmed ')
     ||line.trim().startsWith('coordinator-road-stop-confirmed ')
-    ||line.trim().startsWith('coordinator-remote-road-stop-confirmed ')) {
+    ||line.trim().startsWith('coordinator-remote-road-stop-confirmed ')
+    ||line.trim().startsWith('coordinator-depot-build-confirmed ')) {
     const args=line.trim().split(/\s+/);
     const cancelledRun=args[0]==='coordinator-cancel-stop-confirmed';
     const remoteRoadRun=args[0]==='coordinator-remote-road-stop-confirmed';
     const roadRun=args[0]==='coordinator-road-stop-confirmed'||remoteRoadRun;
-    const selectInGame=!cancelledRun&&!roadRun&&args.length===1;
-    let secondCompany=Number(args[1]),vehicleEntity=Number(args[2]);
+    const depotRun=args[0]==='coordinator-depot-build-confirmed';
+    const selectInGame=!cancelledRun&&!roadRun&&!depotRun&&args.length===1;
+    let secondCompany=Number(args[1]),vehicleEntity=depotRun?0:Number(args[2]);
+    let depotPlacement=null;
+    if(depotRun&&args.length===7){
+      try{depotPlacement=parseDepotBuildOrderPayload({companyEntity:secondCompany,
+        resource:ROAD_DEPOT_RESOURCE,x:Number(args[2]),y:Number(args[3]),
+        z:Number(args[4]),yaw:Number(args[5]),seed:Number(args[6])},secondCompany);}
+      catch{/* Invalid placement cannot become a native command. */}
+    }
     const secondRoadEntity=remoteRoadRun&&args.length===4?Number(args[3]):null;
     let localCompany=bridge?.engineObservation.sample?.companyEntity;
-    if(!selectInGame&&((args.length!==3&&!(remoteRoadRun&&args.length===4))
+    if(!selectInGame&&((depotRun?depotPlacement===null:args.length!==3&&!(remoteRoadRun&&args.length===4))
       ||![secondCompany,vehicleEntity,localCompany].every(n=>Number.isSafeInteger(n)&&n>=0&&n<=2147483647)
       ||secondCompany===localCompany||roadRun&&vehicleEntity<1
       ||secondRoadEntity!==null&&(!Number.isSafeInteger(secondRoadEntity)
@@ -277,7 +287,7 @@ if (command === "host" || command === "join") createInterface({ input: process.s
       rawLog({level:"warn",event:"coordinator_local_run",code:"VERIFIED_COMPANY_AND_VEHICLE_REQUIRED"});
     else if(command!=="host"||!bridge||!hostInstance||vehicleTestActive||integrationBatch||batchStarting
       ||hostInstance.coordinator.phase!=='lobby'
-      ||(cancelledRun||roadRun
+      ||(cancelledRun||roadRun||depotRun
         ?nativeGate?.ready!==true||hostInstance.authority.players().length!==1
           ||hostInstance.authority.players()[0].playerId!==hostLocalParticipant?.connection?.playerId
         :hostInstance.authority.players().length!==0))
@@ -307,7 +317,9 @@ if (command === "host" || command === "join") createInterface({ input: process.s
         coordinatorRun=await createLocalCoordinatorRun({directory:opt["bridge-dir"],bridge,playerId:"local",
           companies:new Map([["local",localCompany],["receipt-mirror",secondCompany]]),vehicleEntity,
           logger:rawLog,saveReport,metadata:{gameHash:observedGameHash,modManifestHash:opt["mod-hash"]},
-          commandLimit:secondRoadEntity!==null?2:cancelledRun||roadRun?1:4,
+          commandLimit:secondRoadEntity!==null?2:cancelledRun||roadRun||depotRun?1:4,
+          depotBuildOriginPlayerId:depotRun?'receipt-mirror':'local',
+          depotBuildPayload:depotPlacement,
           roadStopOriginPlayerId:remoteRoadRun?'receipt-mirror':'local',
           roadStopPayload:roadRun?[
             {edgeEntity:vehicleEntity,companyEntity:remoteRoadRun?secondCompany:localCompany,
@@ -318,7 +330,7 @@ if (command === "host" || command === "join") createInterface({ input: process.s
             nativeGate,bridge,entity,company,logger:value=>{
               rawLog(value);recordCancellationEvidence(value);
             }}):null,
-          nativeRuntime:cancelledRun||roadRun?{
+          nativeRuntime:cancelledRun||roadRun||depotRun?{
             client:nativeGate.client,binding:nativeGate.binding,
             sessionId:nativeGate.binding.sessionId,role:'host',logger:rawLog,
             gateControl:request=>nativeGate.gateControl(request),

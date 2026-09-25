@@ -28,7 +28,7 @@ function M.prepare(intent, binding)
   local speed = api.engine.getComponent(api.engine.util.getWorld(),api.type.ComponentType.GAME_SPEED)
   assert(speed and speed.speedup == 0, "HELD_ENGINE_REQUIRED")
   assert(finite(intent.x,100000) and finite(intent.y,100000)
-    and finite(intent.z,10000) and finite(intent.yaw,math.pi), "INVALID_POSITION")
+    and finite(intent.z,10000) and finite(intent.yaw,math.pi+0.000001), "INVALID_POSITION")
   assert(type(intent.resource) == "string" and #intent.resource <= 256
     and intent.resource == binding.resource
     and intent.resource:match("/road/road_depot/road_depot%.con$"), "RESOURCE_NOT_APPROVED")
@@ -182,8 +182,8 @@ function M.execute(state,intent,binding,consent)
       local charged = data.resultProposalData.costs
       assert(finite(charged,9007199254740991) and charged > 0 and charged == math.floor(charged),
         "COST_UNAVAILABLE")
-      assert(receipt.originalAfter == beforeOriginal and receipt.targetAfter == beforeTarget-charged
-        and receipt.targetAfter >= 0, "DEBIT_NOT_VERIFIED")
+      assert(receipt.originalAfter == beforeOriginal and receipt.targetAfter == beforeTarget-charged,
+        "DEBIT_NOT_VERIFIED")
       receipt.constructionEntity=constructionId; receipt.depotEntity=depotId
       receipt.constructionOwner=owner.player; receipt.depotOwner=depotOwner.player
       receipt.constructionMembershipPreserved=true; receipt.depotMembershipPreserved=true

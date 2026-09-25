@@ -20,7 +20,7 @@ test('depot engine event admits only the fixed, held, created-company request',a
   assert.ok(fn.indexOf('state:set(current)')<fn.indexOf('clock.tickCount < request.issuedTick'));
   assert.match(fn,/local saved = state:get\(\) or current/);
   assert.match(fn,/saved\.phase2CompanyFault = true/);
-  assert.match(source,/eventSubscriptionsVersion ~= 25/);
+  assert.match(source,/eventSubscriptionsVersion ~= 26/);
   for(const event of ['tf3mp_phase2_depot','tf3mp_get_phase2_depot'])assert.ok(source.includes(`state:subscribeToEvent("${event}")`));
   assert.match(source,/name == "tf3mp_get_phase2_depot"/);
   const handler=source.slice(source.indexOf('name == "tf3mp_phase2_depot"'),source.indexOf('name == "tf3mp_finance_probe"'));
@@ -43,5 +43,5 @@ test('depot GUI receipt has the flat correlated, signed-balance schema',async()=
 test('installed depot adapter is the review-pinned experimental source',async()=>{
   const [installed,experimental]=await Promise.all([readFile(moduleUrl),readFile(experimentalUrl)]);
   assert.deepEqual(installed,experimental);
-  assert.equal(createHash('sha256').update(installed).digest('hex'),'9af2637773cc091bf0ee6082f6225bb9c06c25d89085aa4825796134df5ed0ba');
+  assert.equal(createHash('sha256').update(installed).digest('hex'),'8ca94ca2e836fd4f1a7a74605ad9ae0c2e72db0b1928afa3d2543283fa04f30b');
 });

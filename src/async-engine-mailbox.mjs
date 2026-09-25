@@ -6,6 +6,7 @@ import { CommandQueue } from "./lockstep.mjs";
 import { decodeCheckpointReceipt } from "./coordinator-checkpoint.mjs";
 import { decodeExecutionReceipt } from "./coordinator-execution.mjs";
 import { decodeRoadExecutionReceipt } from './coordinator-road-execution.mjs';
+import {decodeDepotExecutionReceipt} from './coordinator-depot-execution.mjs';
 import { replaceUnpublished } from './unpublished-replace.mjs';
 import { decodeRoadStopFlat, encodeRoadStopFlat } from './road-stop-order-payload.mjs';
 import {decodeDepotBuildFlat,encodeDepotBuildFlat} from './depot-build-order-payload.mjs';
@@ -106,9 +107,10 @@ export async function isUnpublishedEngineSource(temporary,source) {
 }
 
 export async function createAsyncEngineMailbox({directory,nonce=randomBytes(16).toString("hex"),requireCheckpointSnapshot=true,
-  requireCompleteCheckpointCoverage=false,onCheckpointEvidence=()=>{},onExecutionEvidence=()=>{}}) {
+  requireCompleteCheckpointCoverage=false,onCheckpointEvidence=()=>{},onExecutionEvidence=()=>{},enableDepotBuild=false}) {
   if (!/^[0-9a-f]{32}$/.test(nonce)) throw new TypeError("invalid mailbox nonce");
   if(typeof requireCheckpointSnapshot!=='boolean'||typeof requireCompleteCheckpointCoverage!=='boolean'
+    ||typeof enableDepotBuild!=='boolean'
     ||typeof onCheckpointEvidence!=='function'||typeof onExecutionEvidence!=='function') throw new TypeError('invalid checkpoint evidence option');
   directory=await requirePlainDirectory(directory);
   const lockPath=path.join(directory,"coordination.lock"), requestPath=path.join(directory,"coordination_request.lua");
@@ -124,7 +126,7 @@ export async function createAsyncEngineMailbox({directory,nonce=randomBytes(16).
       if (closed) return Promise.reject(new Error("mailbox closed"));
       // Validate and snapshot before entering the serialized I/O queue.
       let source;
-      try { source=encodeAsyncEngineRequest(request,nonce); } catch(e) { return Promise.reject(e); }
+      try { source=encodeAsyncEngineRequest(request,nonce,{enableDepotBuild}); } catch(e) { return Promise.reject(e); }
       if (halting) return Promise.reject(new Error("mailbox halted; create a new verified session"));
       if(request.operation==='executeHeld')expectedExecution=Object.freeze({
         roundId:request.roundId,operationId:request.operationId,
@@ -202,12 +204,15 @@ export async function createAsyncEngineMailbox({directory,nonce=randomBytes(16).
         try {
           const expected=expectedExecution;
           const decoded=expected?.commandType==='road.stop.place'
-            ?decodeRoadExecutionReceipt(p):decodeExecutionReceipt(p);
+            ?decodeRoadExecutionReceipt(p):expected?.commandType==='road.depot.build'
+            ?decodeDepotExecutionReceipt(p):decodeExecutionReceipt(p);
           if(!expected||p.roundId!==expected.roundId||p.operationId!==expected.operationId
             ||p.hostSequence!==expected.hostSequence||p.updateCount!==expected.scheduledUpdate
             ||(expected.commandType==='road.stop.place'
               ?decoded.state.roadStop.sourceRoadEntity!==expected.entity
                 ||decoded.state.roadStop.ownerCompanyEntity!==expected.company
+              :expected.commandType==='road.depot.build'
+              ?expected.entity!==0||decoded.state.depot.ownerCompanyEntity!==expected.company
               :decoded.state.vehicle.entity!==expected.entity
                 ||decoded.state.vehicle.ownerCompanyEntity!==expected.company
                 ||decoded.state.vehicle.stopped!==expected.stopped))

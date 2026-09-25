@@ -12,7 +12,7 @@ export function parseDepotBuildOrderPayload(value,companyEntity){
     ||!entity(companyEntity)||value.companyEntity!==companyEntity
     ||value.resource!==ROAD_DEPOT_RESOURCE||!entity(value.seed)
     ||!finite(value.x,100000)||!finite(value.y,100000)
-    ||!finite(value.z,10000)||!finite(value.yaw,Math.PI))
+    ||!finite(value.z,10000)||!finite(value.yaw,Math.PI+0.000001))
     throw new TypeError('INVALID_DEPOT_BUILD_ORDER_PAYLOAD');
   return Object.freeze(Object.fromEntries(fields.map(key=>[key,value[key]])));
 }

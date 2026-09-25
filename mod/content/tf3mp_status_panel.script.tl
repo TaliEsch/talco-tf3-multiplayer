@@ -15,6 +15,7 @@ end
 local roadStopOutcome = ug_require "tf3mp_status_1::/tf3mp_road_stop_outcome.lua" as Tf3MpRoadStopOutcome
 local roadStopOrderWire = ug_require "tf3mp_status_1::/tf3mp_road_stop_order_wire.lua" as table
 local depotBuildOrderWire = ug_require "tf3mp_status_1::/tf3mp_depot_build_order_wire.lua" as table
+local depotBuildOrderReadback = ug_require "tf3mp_status_1::/tf3mp_depot_build_order_readback.lua" as table
 
 local record Tf3MpPanelState
   tickCount : integer
@@ -80,6 +81,7 @@ local vehiclePhaseKey = ""
 local vehicleDiscoverySent : integer = 0
 local roadPreflightSent : integer = 0
 local orderedRoadReadbackSent : integer = 0
+local orderedDepotReadbackSent : integer = 0
 local companyProbeSent : integer = 0
 local phase2FundingSent : integer = 0
 local phase2FundingReported : integer = 0
@@ -417,9 +419,22 @@ local function exchangeOrderedRoadReadback() : nil
   app.saveUserdata("tf3mp_status_1", "ordered_road_readback_receipt", result)
   return nil
 end
+local function exchangeOrderedDepotReadback() : nil
+  if #bridgeNonce ~= 32 or not userdataExists("ordered_depot_readback_request") then return nil end
+  local request = app.loadUserdata("tf3mp_status_1", "ordered_depot_readback_request")
+  if type(request) ~= "table" or request.kind ~= "ordered_depot_readback_request"
+    or request.nonce ~= bridgeNonce or type(request.requestId) ~= "number"
+    or request.requestId < 1 or request.requestId > 2147483647
+    or request.requestId % 1 ~= 0 or request.requestId <= orderedDepotReadbackSent then return nil end
+  orderedDepotReadbackSent = request.requestId as integer
+  local result = depotBuildOrderReadback.probe(api, request as table)
+  app.saveUserdata("tf3mp_status_1", "ordered_depot_readback_receipt", result)
+  return nil
+end
 local function flushRoadCapture() : nil
   pcall(exchangeRoadOutcome)
   pcall(exchangeOrderedRoadReadback)
+  pcall(exchangeOrderedDepotReadback)
   if not preActionFinished then
     local probeOk = pcall(exchangeRoadPreAction)
     if not probeOk then preActionFinished = true end
@@ -963,6 +978,9 @@ local function dispatchExecutionAtUpdate() : nil
   if request.commandType == "road.stop.place" then
     expectedCount = 18 + request.nameChunkCount
     eventName = "tf3mp_execute_road_stop"
+  elseif request.commandType == "road.depot.build" then
+    expectedCount = 19
+    eventName = "tf3mp_execute_depot_build"
   end
   if count ~= expectedCount then return nil end
   api.cmd.sendCommand(api.cmd.makeScriptingSendEventCmd("tf3mp_status_1::/tf3mp_status.gs", "tf3mp_engine_bridge", eventName, request))
@@ -991,6 +1009,11 @@ local function exchangeExecution() : nil
         local key = "nameChunk" .. tostring(index)
         payload[key] = request[key]
       end
+    elseif request.commandType == "road.depot.build" then
+      if depotBuildOrderWire.decode(request) == nil then return nil end
+      eventName = "tf3mp_arm_depot_build_hold"
+      expectedCount = 19
+      for _, key in ipairs({"xText","yText","zText","yawText","seed"}) do payload[key] = request[key] end
     else return nil end
     for _, key in ipairs({ "roundId", "operationId", "originPlayerId", "requestMessageId" }) do
       if type(request[key]) ~= "string" or #request[key] < 1 or #request[key] > 128 or not string.match(request[key] as string, "^[A-Za-z0-9_.:-]+$") then return nil end
@@ -1052,6 +1075,12 @@ local function exchangeExecution() : nil
   end
   if receipt.status == "ok" and receipt.snapshotVersion == 2 then
     for _, key in ipairs({ "snapshotVersion", "hostSequence", "entity", "ownerCompanyEntity", "stopEntity", "roadEntity", "chargedCost", "balance", "negative" }) do
+      local number = receipt[key]
+      if type(number) ~= "number" or number < 0 or number > 9007199254740991 or number % 1 ~= 0 then return nil end
+      payload[key] = number
+    end
+  elseif receipt.status == "ok" and receipt.snapshotVersion == 3 then
+    for _, key in ipairs({ "snapshotVersion", "hostSequence", "entity", "ownerCompanyEntity", "constructionEntity", "depotEntity", "chargedCost", "balance", "negative" }) do
       local number = receipt[key]
       if type(number) ~= "number" or number < 0 or number > 9007199254740991 or number % 1 ~= 0 then return nil end
       payload[key] = number
@@ -2143,6 +2172,7 @@ local function exchangeTelemetry(tickCount : integer, updateCount : integer) : s
     vehicleDiscoverySent = 0
     roadPreflightSent = 0
     orderedRoadReadbackSent = 0
+    orderedDepotReadbackSent = 0
     companyProbeSent = 0
     phase2FundingSent = 0
     phase2FundingReported = 0

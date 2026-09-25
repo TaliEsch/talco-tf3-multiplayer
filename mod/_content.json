@@ -1,7 +1,9 @@
 {
   "archives": null,
   "files": [
+    "tf3mp_depot_build_order_execute.lua",
     "tf3mp_depot_build_order_prepare.lua",
+    "tf3mp_depot_build_order_readback.lua",
     "tf3mp_depot_build_order_wire.lua",
     "tf3mp_depot_command.lua",
     "tf3mp_depot_preview.script.lua",

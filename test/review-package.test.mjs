@@ -154,7 +154,7 @@ test("review requires receipt subscription and migration for existing saves", as
     const source = await readFile(file, "utf8");
     await writeFile(file, source.replace('state:subscribeToEvent("tf3mp_get_engine_receipt")', ''));
     await assert.rejects(validateReviewPackage(root), /missing script event subscription/);
-    await writeFile(file, source.replace('current.eventSubscriptionsVersion ~= 25', 'false'));
+    await writeFile(file, source.replace('current.eventSubscriptionsVersion ~= 26', 'false'));
     await assert.rejects(validateReviewPackage(root), /missing event subscription migration/);
     await writeFile(file, source.replace('roadStopOrderPrepare.handle(state, param as table, api)', 'nil'));
     await assert.rejects(validateReviewPackage(root), /ordered road Stop preparation route/);
@@ -176,7 +176,7 @@ test("review rejects unsupported log.info in the engine script", async () => {
 test("source mod package passes controlled-load review validation", async () => {
   const result = await validateReviewPackage(new URL("../mod", import.meta.url));
   assert.equal(result.modId, "tf3mp_status_1");
-  assert.equal(result.contentFiles, 38);
+  assert.equal(result.contentFiles, 40);
   assert.equal(result.executableFiles, 0);
   assert.equal(result.readyForControlledLoadReview, true);
 });

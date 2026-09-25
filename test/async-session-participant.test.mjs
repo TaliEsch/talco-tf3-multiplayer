@@ -4,6 +4,7 @@ import { AsyncSessionParticipant } from "../src/async-session-participant.mjs";
 import { SessionCoordinator } from "../src/session-coordinator.mjs";
 import { EngineOperationJournal } from "../src/engine-operation-journal.mjs";
 import { ROAD_STOP_MODEL } from '../src/road-stop-order-payload.mjs';
+import {ROAD_DEPOT_RESOURCE} from '../src/depot-build-order-payload.mjs';
 const checkpointHash = "a".repeat(64), stateHash = "b".repeat(64), roundId = "round";
 const companies = new Map([["a",10],["b",11]]);
 const command = (hostSequence = 1, scheduledUpdate = 108) => ({protocolVersion:2,hostSequence,scheduledUpdate,
@@ -64,10 +65,10 @@ function receipt(r, extra = {}) {
   if (r.operation === "halt") p.held = true;
   return {...p,...extra};
 }
-function fixture() {
+function fixture(enableDepotBuild=false) {
   let time = 0, closed = 0;
   const requests = [], sends = [];
-  const p = new AsyncSessionParticipant({playerId:"a",companies,now:() => time,
+  const p = new AsyncSessionParticipant({playerId:"a",companies,now:() => time,enableDepotBuild,
     publish:r => {requests.push(r); return Promise.resolve();},send:(kind,payload) => sends.push({kind,payload}),disconnect:() => closed++});
   const reply = extra => p.receiveEngine(receipt(requests.at(-1),extra));
   const start = () => {
@@ -92,6 +93,24 @@ test('road Stop prepare uses the ordered participant and requires an engine comp
   assert.equal(accepted.p.phase,'prepared');
   const rejected=fixture();rejected.start();
   rejected.p.receive('command_prepare',{roundId,command:road});
+  rejected.reply({ownerCompanyEntity:11});
+  assert.equal(rejected.p.fault,'INVALID_PREPARE_RECEIPT');
+});
+
+test('depot preparation is opt-in and requires the bound engine company receipt',()=>{
+  const depot={...command(),targetEntity:0,commandType:'road.depot.build',
+    payload:{companyEntity:10,resource:ROAD_DEPOT_RESOURCE,
+      x:-812.891541,y:-3142.25684,z:23.3068237,yaw:Math.PI,seed:1}};
+  const disabled=fixture();disabled.start();
+  disabled.p.receive('command_prepare',{roundId,command:depot});
+  assert.equal(disabled.p.fault,'INVALID_COMMAND_PREPARE');
+  const accepted=fixture(true);accepted.start();
+  accepted.p.receive('command_prepare',{roundId,command:depot});
+  assert.equal(accepted.requests.at(-1).operation,'prepare');
+  accepted.reply({ownerCompanyEntity:10});
+  assert.equal(accepted.p.phase,'prepared');
+  const rejected=fixture(true);rejected.start();
+  rejected.p.receive('command_prepare',{roundId,command:depot});
   rejected.reply({ownerCompanyEntity:11});
   assert.equal(rejected.p.fault,'INVALID_PREPARE_RECEIPT');
 });

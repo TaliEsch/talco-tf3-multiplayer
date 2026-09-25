@@ -31,6 +31,10 @@ function decode(wire){
 
 test('TF3-side decoder reconstructs the observed stock depot placement',()=>{
   assert.deepEqual(decode(source),payload);
+  const f32Yaw=-3.1415927410125732;
+  const exact=encodeAsyncEngineRequest({...request,command:{...request.command,
+    payload:{...payload,yaw:f32Yaw}}},'a'.repeat(32),{enableDepotBuild:true});
+  assert.equal(decode(exact).yaw,f32Yaw);
 });
 
 test('TF3-side decoder rejects wrong company, target, seed and geometry',()=>{
