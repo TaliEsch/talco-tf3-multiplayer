@@ -8,6 +8,7 @@ import { decodeExecutionReceipt } from "./coordinator-execution.mjs";
 import { decodeRoadExecutionReceipt } from './coordinator-road-execution.mjs';
 import { replaceUnpublished } from './unpublished-replace.mjs';
 import { decodeRoadStopFlat, encodeRoadStopFlat } from './road-stop-order-payload.mjs';
+import {decodeDepotBuildFlat,encodeDepotBuildFlat} from './depot-build-order-payload.mjs';
 
 const exact = (p, names) => p && Object.keys(p).sort().join(",") === names.split(",").sort().join(",");
 const uint = n => Number.isSafeInteger(n) && n >= 0 && n <= 2147483647;
@@ -18,7 +19,8 @@ const hash = s => typeof s === "string" && /^[0-9a-f]{64}$/.test(s);
 // Development mod consumes bindSession,
 // prepare, held checkpoint capture/release, executeHeld and terminal halt under
 // a live lease. Engine command cycles remain unverified in TF3.
-export function encodeAsyncEngineRequest(r, nonce) {
+export function encodeAsyncEngineRequest(r, nonce, {enableDepotBuild=false}={}) {
+  if(typeof enableDepotBuild!=='boolean')throw new TypeError('invalid depot capability');
   if (!/^[0-9a-f]{32}$/.test(nonce) || !r || r.schemaVersion !== 1 || !ident(r.roundId) || !ident(r.operationId)) throw new TypeError("invalid engine request identity");
   const common = "schemaVersion,roundId,operationId,operation";
   let p = {schemaVersion:1,nonce,roundId:r.roundId,operationId:r.operationId,operation:r.operation};
@@ -43,13 +45,15 @@ export function encodeAsyncEngineRequest(r, nonce) {
   } else if (["prepare","executeHeld"].includes(r.operation)) {
     const c=r.command;
     if (!exact(r,common+",command") || !exact(c,"protocolVersion,hostSequence,scheduledUpdate,originPlayerId,targetCompanyEntity,targetEntity,commandType,payload,clientSequence,requestMessageId")
-      || !['vehicle.setRunning','road.stop.place'].includes(c.commandType)
+      || !['vehicle.setRunning','road.stop.place',...(enableDepotBuild?['road.depot.build']:[])].includes(c.commandType)
       || !ident(c.originPlayerId) || !ident(c.requestMessageId)
       || ![c.hostSequence,c.scheduledUpdate,c.targetCompanyEntity,c.targetEntity,c.clientSequence].every(uint)) throw new TypeError("invalid bounded command");
-    if (!new CommandQueue().enqueue(c,new Map([[c.originPlayerId,c.targetCompanyEntity]]),() => c.targetCompanyEntity)) throw new TypeError("invalid command sequence");
+    if (!new CommandQueue({enableDepotBuild}).enqueue(c,new Map([[c.originPlayerId,c.targetCompanyEntity]]),() => c.targetCompanyEntity)) throw new TypeError("invalid command sequence");
     Object.assign(p,{hostSequence:c.hostSequence,scheduledUpdate:c.scheduledUpdate,companyEntity:c.targetCompanyEntity,
       entity:c.targetEntity,...(c.commandType==='road.stop.place'
         ?encodeRoadStopFlat(c.payload,c.targetEntity,c.targetCompanyEntity)
+        :c.commandType==='road.depot.build'
+        ?encodeDepotBuildFlat(c.payload,c.targetCompanyEntity)
         :{running:c.payload.running}),clientSequence:c.clientSequence,
       originPlayerId:c.originPlayerId,requestMessageId:c.requestMessageId,protocolVersion:c.protocolVersion,commandType:c.commandType});
   } else if (r.operation !== "halt" || !exact(r,common)) throw new TypeError("unsupported engine operation");
@@ -60,7 +64,8 @@ export function encodeAsyncEngineRequest(r, nonce) {
 // Lossless data-only inverse used to audit the engine-facing wire contract.
 // This validates shape/identity, not authorization: the engine must compare
 // originPlayerId with its independently established company bindings and live owner.
-export function decodeAsyncEngineRequest(source, nonce) {
+export function decodeAsyncEngineRequest(source, nonce, {enableDepotBuild=false}={}) {
+  if(typeof enableDepotBuild!=='boolean')throw new TypeError('invalid depot capability');
   const p=parseFlatDataFile(source);
   if(p.nonce!==nonce) throw new TypeError("engine request nonce mismatch");
   const r={schemaVersion:p.schemaVersion,roundId:p.roundId,operationId:p.operationId,operation:p.operation};
@@ -73,10 +78,11 @@ export function decodeAsyncEngineRequest(source, nonce) {
     protocolVersion:p.protocolVersion,hostSequence:p.hostSequence,scheduledUpdate:p.scheduledUpdate,
     originPlayerId:p.originPlayerId,targetCompanyEntity:p.companyEntity,targetEntity:p.entity,
     commandType:p.commandType,payload:p.commandType==='road.stop.place'
-      ?decodeRoadStopFlat(p):{running:p.running},
+      ?decodeRoadStopFlat(p):p.commandType==='road.depot.build'&&enableDepotBuild
+      ?decodeDepotBuildFlat(p):{running:p.running},
     clientSequence:p.clientSequence,requestMessageId:p.requestMessageId,
   };
-  const validated=parseFlatDataFile(encodeAsyncEngineRequest(r,nonce));
+  const validated=parseFlatDataFile(encodeAsyncEngineRequest(r,nonce,{enableDepotBuild}));
   if(Object.keys(p).sort().join(",")!==Object.keys(validated).sort().join(",")
     ||Object.keys(validated).some(key=>p[key]!==validated[key])) throw new TypeError("noncanonical engine request fields");
   return r;

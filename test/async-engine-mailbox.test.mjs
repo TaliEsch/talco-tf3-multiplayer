@@ -101,6 +101,23 @@ test('road Stop scalar codec publishes bounded prepare and held execution',async
   }
 });
 
+test('road depot scalar codec is lossless and disabled on the live mailbox path',()=>{
+  const command={protocolVersion:2,hostSequence:1,scheduledUpdate:108,originPlayerId:'player-b',
+    targetCompanyEntity:55652,targetEntity:0,commandType:'road.depot.build',
+    payload:{companyEntity:55652,resource:'::/depots/road/road_depot/road_depot.con',
+      x:-812.891541,y:-3142.25684,z:23.3068237,yaw:Math.PI,seed:1},
+    clientSequence:11,requestMessageId:'depot-11'};
+  for(const operation of ['prepare','executeHeld']){
+    const request={schemaVersion:1,roundId:'round',operationId:operation,operation,command};
+    assert.throws(()=>encodeAsyncEngineRequest(request,nonce));
+    const source=encodeAsyncEngineRequest(request,nonce,{enableDepotBuild:true});
+    assert.deepEqual(decodeAsyncEngineRequest(source,nonce,{enableDepotBuild:true}),request);
+    assert.throws(()=>decodeAsyncEngineRequest(source,nonce));
+    assert.throws(()=>decodeAsyncEngineRequest(source.replace('xText="-812.891541"','xText="-0812.891541"'),nonce,{enableDepotBuild:true}));
+    assert.throws(()=>decodeAsyncEngineRequest(source.replace('seed=1','seed=0'),nonce,{enableDepotBuild:true}));
+  }
+});
+
 test('largest accepted road Stop name remains inside the coordination IPC bound',()=>{
   const command={protocolVersion:2,hostSequence:1,scheduledUpdate:108,originPlayerId:'player-a',
     targetCompanyEntity:3141,targetEntity:53417,commandType:'road.stop.place',

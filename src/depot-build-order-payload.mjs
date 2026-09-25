@@ -16,3 +16,24 @@ export function parseDepotBuildOrderPayload(value,companyEntity){
     throw new TypeError('INVALID_DEPOT_BUILD_ORDER_PAYLOAD');
   return Object.freeze(Object.fromEntries(fields.map(key=>[key,value[key]])));
 }
+
+// The coordination mailbox accepts identifier strings and integers only.
+// Carry canonical number spellings; the stock resource is implicit on the wire.
+export function encodeDepotBuildFlat(value,companyEntity){
+  const p=parseDepotBuildOrderPayload(value,companyEntity);
+  return Object.freeze({xText:String(p.x),yText:String(p.y),zText:String(p.z),
+    yawText:String(p.yaw),seed:p.seed});
+}
+
+export function decodeDepotBuildFlat(value){
+  const numeric={};
+  for(const [key,textKey] of [['x','xText'],['y','yText'],['z','zText'],['yaw','yawText']]){
+    const text=value?.[textKey];
+    if(typeof text!=='string'||!/^-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:e-[0-9]+)?$/.test(text))
+      throw new TypeError('INVALID_DEPOT_BUILD_ORDER_WIRE');
+    numeric[key]=Number(text);
+    if(String(numeric[key])!==text)throw new TypeError('INVALID_DEPOT_BUILD_ORDER_WIRE');
+  }
+  return parseDepotBuildOrderPayload({companyEntity:value.companyEntity,
+    resource:ROAD_DEPOT_RESOURCE,...numeric,seed:value.seed},value.companyEntity);
+}

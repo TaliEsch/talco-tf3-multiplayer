@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { hashManifest } from "./manifest.mjs";
 
 const EXPECTED_CONTENT = Object.freeze([
+  "tf3mp_depot_build_order_wire.lua",
   "tf3mp_depot_command.lua",
   "tf3mp_depot_preview.script.lua",
   "tf3mp_depot_tools.res.lua",
@@ -110,6 +111,7 @@ export async function validateReviewPackage(root) {
     ['tf3mp_road_stop_order_prepare.lua', '497f694591b75bee5643529089f892a90059e46fadc6ca7ab1f3021af54a1519'],
     ['tf3mp_road_stop_outcome.lua', '621b114b67ce1ace2a6ed60ff21740bc42b91465c6d3700ea0e2aa606deba039'],
     ['tf3mp_road_stop_order_wire.lua', '259dff8e07ed89a3939a4cbe6b49af102ab3cb4b572a38685afb3feab2d296b5'],
+    ['tf3mp_depot_build_order_wire.lua', '410047511ad746ea0609f2c79bc4cd9319eab534f63430173acc1c71fd73dc2c'],
     ['tf3mp_road_stop_simple_prepare.lua', 'b9de96bbb92f212b3d8cc83d97564f2b7a814cfd6aa65ac4116ad9208add382c'],
     ['tf3mp_road_stop_simple_dispatch.lua', 'c3b689756b181097b62ecc2b0477d490075a9e4e1d477be7ddb587f1632d5a6b'],
     ['tf3mp_road_stop_simple_result.lua', '4983caba98be57ad1cc69d9dfe919ceb75f52a454f9d6d8099b892dd61c9cdac'],
