@@ -39,7 +39,8 @@ local before=result.before(api,input,players)
 exists[24]=nil;components.BASE_EDGE[24]=nil;exists[25]=true;exists[81]=true;stops={80,81};map[81]=25;balances[10]=32500
 local data={resultProposalData={costs=67500},proposal={streetProposal={edgeObjectsToAdd={{resultEntity=81}}}}};local success=true;local entities={{25,1},{81,1}}
 ${change}
-local after=result.after(api,before,input,data,success,entities)
+local captured=result.capture(data,success,entities)
+local after=result.afterCaptured(api,before,input,captured)
 return before.code,after.code,after.stopEntity or 0,after.chargedCost or 0,calls`;
   const L=lauxlib.luaL_newstate();lualib.luaL_openlibs(L);
   try{
@@ -70,6 +71,14 @@ test('allows TF3 to reuse the removed road ID for a non-road entity',()=>{
   assert.deepEqual(run('exists[24]=true'),
     {before:'observed',after:'verified',stop:81,cost:67500,calls:0});
 });
+test('accepts removed source road when TF3 rejects component lookup on its absent ID',()=>{
+  const guard=`local originalGet=api.engine.getComponent
+api.engine.getComponent=function(id,kind)
+  if id==24 and exists[id]~=true then error('missing entity') end
+  return originalGet(id,kind)
+end`;
+  assert.deepEqual(run(guard),{before:'observed',after:'verified',stop:81,cost:67500,calls:0});
+});
 test('refuses a mismatched replacement road or preexisting stop on the selected geometry',()=>{
   assert.equal(run('components.BASE_EDGE[25].position1={x=11,y=1,z=2}').after,'unknown');
   assert.equal(run('', 'map[80]=25;components.EDGE_OBJECT[80]={param=.5};components.PLAYER_OWNED[80]={player=10};components.MODEL_INSTANCE_LIST[80]={fatInstances={{modelId=7}}};components.BASE_EDGE[25].objects={{80,1}};exists[25]=true').before,'unknown');
@@ -86,16 +95,23 @@ test('callback and state discrepancies remain unknown, without a mutation',()=>{
     'components.MODEL_INSTANCE_LIST[81].fatInstances={{modelId=8}}',
     'components.EDGE_OBJECT[81].param=.3',
     'entities={{25,1}};data.proposal.streetProposal.edgeObjectsToAdd[1].resultEntity=82',
-    'entities={{25,1}};data.proposal.streetProposal.edgeObjectsToAdd={}',
     'entities={{25,1},{81,1},{82,1}};components.EDGE_OBJECT[82]={param=.5}',
     'exists[24]=true;components.BASE_EDGE[24]={}',
     'exists[24]=nil;components.BASE_EDGE[24]={}',
-    'update=51','data.resultProposalData.costs=0',
+    'update=51','data.resultProposalData.costs=7',
   ]){
     const observed=run(change);
     assert.equal(observed.after,'unknown',change);
     assert.equal(observed.calls,0,change);
   }
+});
+test('world debit and unique owned Stop qualify incomplete optional callback fields',()=>{
+  for(const change of [
+    'data.resultProposalData.costs=0',
+    'data.resultProposalData=nil',
+    'data.proposal.streetProposal.edgeObjectsToAdd={}',
+    'entities=nil',
+  ]) assert.equal(run(change).after,'verified',change);
 });
 test('changing the bound road or company between snapshots leaves the outcome unknown',()=>{
   for(const change of ['input.companyEntity=11','input.edgeEntity=25',

@@ -32,6 +32,6 @@ test("station template receipt is flat, bounded, and sanitizes failed inspection
   assert.match(region, /moduleCount=0, subconstructionCount=0, costKnown=0, cost=0, templateIndex=0, platforms=1/);
   assert.match(region, /observation\.code ~= "TEMPLATE_EVALUATED"/);
   assert.match(region, /observation\.moduleCount > 256/);
-  assert.match(source, /eventSubscriptionsVersion ~= 22/);
-  assert.match(source, /current\.eventSubscriptionsVersion = 22/);
+  assert.match(source, /eventSubscriptionsVersion ~= 23/);
+  assert.match(source, /current\.eventSubscriptionsVersion = 23/);
 });

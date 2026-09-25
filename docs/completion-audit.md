@@ -1,5 +1,28 @@
 # Completion audit against the build prompt
 
+## Successful single-game Host-ordered road Stop — 25 September 2026
+
+On exact TF3 build 40396, the production Host assigned sequence 1 to one road
+Stop in a disposable source save. The qualified engine prepared it, executed
+it held at scheduled update 3058, and returned a successful receipt containing
+the Stop and replacement-road identities, charged cost and balance readback.
+The coordinator released at update 3060 and confirmed its native terminal
+halt. `reports/local-batch-8546e5a3-35da-47f3-b5b5-b0879cc964c0/report.json`
+records the one-engine run and its exact update agreement. Focused road
+fixtures and mod review passed. This is one real engine plus one simulated
+participant; `gameplayVerified` and `multiGameVerified` are false. An extra
+independent outcome probe returned `unknown` at `world_clock` because the
+terminal park left game speedup at 1. TF3's later save stayed in progress and
+the exact disposable game process was stopped; the original source save hash
+remained `CCBF4BEB740E53323E06D20890FD029C8E174D3E85EFB06801A8B4275C762FB5`.
+Do not infer two-instance synchronization or a durable outcome save from this
+run. The elevated full suite ran 1,021 tests: 1,014 passed, five previously
+observed native debugger/controller fixture tests failed, and two were
+skipped. The sandboxed suite attempt hit native-process permission errors and
+was stopped after it stalled; it is not a regression count. The next
+verification should capture an independent game-world postcondition before
+terminal park, without repeating the accepted action.
+
 ## Callback treatment of reused road IDs — 25 September 2026
 
 The saved Host-ordered outcome has the original road ID present as a non-road

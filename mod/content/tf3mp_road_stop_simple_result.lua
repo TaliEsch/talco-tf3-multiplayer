@@ -1,5 +1,5 @@
 -- Read-only postcondition for one guarded SimpleStreetProposal stop command.
--- No native object survives either call; an uncertain callback remains unknown.
+-- Native callback objects are reduced to bounded scalars before later readback.
 local M = {}
 local function fail() error("road stop result unavailable", 0) end
 local function native(v) return type(v) == "table" or type(v) == "userdata" end
@@ -143,6 +143,60 @@ function M.before(api, input, companies)
   if ok then return value end
   return {code="unknown", stage=progress.stage}
 end
+
+-- The callback can precede TF3's visible world commit. Keep only plain scalar
+-- evidence so the later game boundary never dereferences native userdata.
+function M.capture(data, success, resultEntities)
+  if success ~= true then return nil end
+  local costOk, cost = pcall(function()
+    local proposal = native(data) and data.resultProposalData
+    return native(proposal) and proposal.costs
+  end)
+  local callbackCost = costOk and integer(cost) and cost ~= 0 and math.abs(cost) or nil
+  local affected = {}
+  if dense(resultEntities, 64) then
+    for _, item in ipairs(resultEntities) do
+      if type(item) == "table" then
+        if not dense(item, 2) or #item ~= 2 or not entity(item[1])
+          or not integer(item[2]) then affected = {}; break end
+        affected[#affected+1] = {item[1], item[2]}
+      else
+        if not entity(item) then affected = {}; break end
+        affected[#affected+1] = item
+      end
+    end
+  end
+  local resultOk, resultId = pcall(function()
+    local completed = native(data) and data.proposal
+    local street = native(completed) and completed.streetProposal
+    local added = native(street) and street.edgeObjectsToAdd
+    if dense(added, 1) and #added == 1 and native(added[1]) then
+      return added[1].resultEntity
+    end
+  end)
+  if not resultOk or not integer(resultId) then resultId = nil end
+  return {success=true, callbackCost=callbackCost, entities=affected, resultId=resultId}
+end
+
+function M.afterCaptured(api, before, input, captured)
+  if type(captured) ~= "table" or captured.success ~= true
+    or type(before) ~= "table" or type(before.balances) ~= "table"
+    or type(input) ~= "table" or not dense(captured.entities, 64) then
+    return {code="unknown",stage="callback_capture"}
+  end
+  local prior = before.balances[input.companyEntity]
+  local ok, current = pcall(balance, api, input.companyEntity)
+  local cost = ok and integer(prior) and prior - current or nil
+  if not integer(cost) or cost <= 0 or current < 0
+    or captured.callbackCost ~= nil and captured.callbackCost ~= cost then
+    return {code="unknown",stage="result_cost"}
+  end
+  local data = {resultProposalData={costs=cost}}
+  if captured.resultId ~= nil then
+    data.proposal={streetProposal={edgeObjectsToAdd={{resultEntity=captured.resultId}}}}
+  end
+  return M.after(api, before, input, data, true, captured.entities)
+end
 local function verify(api, before, input, data, success, resultEntities, progress)
   progress.stage = "result_shape"
   if type(before) ~= "table" or before.code ~= "observed" or success ~= true
@@ -158,8 +212,15 @@ local function verify(api, before, input, data, success, resultEntities, progres
   -- TF3 may reuse the removed road's entity ID during the same proposal.
   -- Its continued existence is safe only when it no longer names a road.
   local originalExists = api.engine.entityExists(input.edgeEntity)
-  if originalExists ~= true and originalExists ~= false then fail() end
-  if component(api, input.edgeEntity, "BASE_EDGE") ~= nil then fail() end
+  if originalExists ~= true and originalExists ~= false then
+    progress.stage = "result_road_existence"; fail()
+  end
+  -- TF3 can reject getComponent on a removed entity. Absence is established
+  -- by entityExists; still reject a road component if the API returns one.
+  local roadRead, oldRoad = pcall(component, api, input.edgeEntity, "BASE_EDGE")
+  if (originalExists == true and not roadRead) or (roadRead and oldRoad ~= nil) then
+    progress.stage = "result_road_present"; fail()
+  end
   progress.stage = "result_model"
   if api.res.modelRep.find(input.model) ~= before.modelId then fail() end
   progress.stage = "result_cost"
@@ -194,9 +255,9 @@ local function verify(api, before, input, data, success, resultEntities, progres
   local matches = matchingStops(api, input, before.modelId, before.geometry)
   if #matches ~= 1 then fail() end
   local stop, road = matches[1].stop, matches[1].road
-  local completed = native(data) and data.proposal
-  local completedStreet = native(completed) and completed.streetProposal
-  local addedObjects = native(completedStreet) and completedStreet.edgeObjectsToAdd
+  local completed = native(data) and data.proposal or nil
+  local completedStreet = native(completed) and completed.streetProposal or nil
+  local addedObjects = native(completedStreet) and completedStreet.edgeObjectsToAdd or nil
   if addedObjects ~= nil then
     if not dense(addedObjects, 1) or #addedObjects ~= 1 or not native(addedObjects[1]) then fail() end
     local resultId = addedObjects[1].resultEntity

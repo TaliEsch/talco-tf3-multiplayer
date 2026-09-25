@@ -106,13 +106,13 @@ export async function validateReviewPackage(root) {
     ['tf3mp_road_replay_prepare.lua', 'b6738a73e3306ca6aa734c63438c91ed5b54ade321eede31c920103eab67ab25'],
     ['tf3mp_road_replay_rebuild.lua', 'f6de6ff3edff7f05199bf34dfeb699bbb81147e26d4f9257e0f81110a24ae028'],
     ['tf3mp_road_replay_result.lua', '201bd6cc15b2cf137e63a557f8e23254bee19e449d4bf57c2b363f5f37b428fa'],
-    ['tf3mp_road_stop_order_execute.lua', '61c646cacd55d19ab9a461494a12181834f38434ce29d5d27b16d94abae4c49e'],
+    ['tf3mp_road_stop_order_execute.lua', '6329a41cf103f548e9a8990e41b66df332d03cd70ebab6873a0b00de43a74f85'],
     ['tf3mp_road_stop_order_prepare.lua', '4b4dcc049178590feb60acd2902983090e069133ce9b954f9e15653236e76ee3'],
     ['tf3mp_road_stop_outcome.lua', '99d39c50ea9e0cb2219bfaaf26d3640f2b42619f8952a864394fa3e7a0e6c552'],
     ['tf3mp_road_stop_order_wire.lua', '259dff8e07ed89a3939a4cbe6b49af102ab3cb4b572a38685afb3feab2d296b5'],
     ['tf3mp_road_stop_simple_prepare.lua', 'b9de96bbb92f212b3d8cc83d97564f2b7a814cfd6aa65ac4116ad9208add382c'],
     ['tf3mp_road_stop_simple_dispatch.lua', 'c3b689756b181097b62ecc2b0477d490075a9e4e1d477be7ddb587f1632d5a6b'],
-    ['tf3mp_road_stop_simple_result.lua', 'e4f04bb767fa1afaf2b6433244cae0a28f3a469a453a846021b900e5aa8da6e4'],
+    ['tf3mp_road_stop_simple_result.lua', '9d62d22dc698c1d26bad911593ab781ef818560083ae0ef95bdc8f00056371c6'],
   ]) {
     const source = await readFile(path.join(absoluteRoot, 'content', file), 'utf8');
     if (createHash('sha256').update(source.replace(/\r\n/g, '\n')).digest('hex') !== digest)
@@ -178,7 +178,7 @@ export async function validateReviewPackage(root) {
   for (const event of ["tf3mp_engine_probe", "tf3mp_get_engine_receipt", "tf3mp_get_status", "tf3mp_vehicle_command", "tf3mp_get_vehicle_receipt", "tf3mp_company_probe", "tf3mp_get_company_receipt", "tf3mp_finance_probe", "tf3mp_get_finance_receipt"]) {
     if (!gameScript.includes(`state:subscribeToEvent("${event}")`)) throw new Error(`missing script event subscription: ${event}`);
   }
-  if (!gameScript.includes("current.eventSubscriptionsVersion ~= 22")) throw new Error("missing event subscription migration");
+  if (!gameScript.includes("current.eventSubscriptionsVersion ~= 23")) throw new Error("missing event subscription migration");
   for (const event of ['tf3mp_native_road_stop_replay', 'tf3mp_get_native_road_stop_replay']) {
     if (!gameScript.includes(`state:subscribeToEvent("${event}")`)) throw new Error('missing road replay subscription');
   }
@@ -326,6 +326,7 @@ export async function validateReviewPackage(root) {
     throw new Error('ordered road Stop preparation route is missing');
   for(const marker of ['state:subscribeToEvent("tf3mp_arm_road_stop_hold")',
     'state:subscribeToEvent("tf3mp_execute_road_stop")',
+    'state:subscribeToEvent("tf3mp_observe_road_stop")',
     'roadStopOrderExecute.arm(state, param as table, api)',
     'roadStopOrderExecute.execute(state, param as table, api)'])
     if(!gameScript.includes(marker))throw new Error('ordered road Stop execution route is missing');

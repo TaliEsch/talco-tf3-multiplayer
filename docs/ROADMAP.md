@@ -2,6 +2,21 @@
 
 ## Current direction — 25 September 2026
 
+A fresh controlled build-40396 single-game run accepted one Host-ordered road
+Stop as sequence 1 and executed it at the scheduled update 3058. The game
+returned a successful held execution receipt with a qualified replacement
+road, Stop entity, native debit and company balance; the coordinator released
+at update 3060 and confirmed its native terminal halt. The local test report
+is `reports/local-batch-8546e5a3-35da-47f3-b5b5-b0879cc964c0/report.json`.
+It uses one real engine and one simulated participant, so it does not prove
+two-instance agreement. The subsequent independent world probe was
+inconclusive because the native terminal halt retained speedup 1, which the
+probe rejects, and TF3 could not finish saving after the terminal park. The
+source save hash stayed unchanged. Next preserve a correlated independent
+postcondition at the action boundary or before the terminal park, then extend
+the same ordered path toward separate-company road gameplay. Two-instance
+testing remains deferred by the user. Readiness is about 6.6/10.
+
 The callback verifier previously required the removed source road's entity ID
 to cease existing. TF3's saved ordered outcome shows that ID still exists but
 no longer has a road component. The verifier now requires the old ID to have

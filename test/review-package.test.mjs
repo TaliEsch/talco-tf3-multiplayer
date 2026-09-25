@@ -154,7 +154,7 @@ test("review requires receipt subscription and migration for existing saves", as
     const source = await readFile(file, "utf8");
     await writeFile(file, source.replace('state:subscribeToEvent("tf3mp_get_engine_receipt")', ''));
     await assert.rejects(validateReviewPackage(root), /missing script event subscription/);
-    await writeFile(file, source.replace('current.eventSubscriptionsVersion ~= 22', 'false'));
+    await writeFile(file, source.replace('current.eventSubscriptionsVersion ~= 23', 'false'));
     await assert.rejects(validateReviewPackage(root), /missing event subscription migration/);
     await writeFile(file, source.replace('roadStopOrderPrepare.handle(state, param as table, api)', 'nil'));
     await assert.rejects(validateReviewPackage(root), /ordered road Stop preparation route/);

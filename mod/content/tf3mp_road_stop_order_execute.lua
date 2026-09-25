@@ -3,6 +3,7 @@ local M = {}
 local wire = ug_require("tf3mp_status_1::/tf3mp_road_stop_order_wire.lua")
 local prepare = ug_require("tf3mp_status_1::/tf3mp_road_stop_simple_prepare.lua")
 local results = ug_require("tf3mp_status_1::/tf3mp_road_stop_simple_result.lua")
+local pending = nil -- Transient readback only; reload keeps the durable unknown latch.
 local function integer(v)
   return type(v) == "number" and v == math.floor(v) and v >= 0 and v <= 2147483647
 end
@@ -156,6 +157,7 @@ local function execute(state,request,api)
   local operation=request.operationId
   current.executionReceipt.stage="send_attempt"
   state:set(current)
+  pending=nil
   api.cmd.sendCommand(constructed.command,function(data,success,entities)
     pcall(function()
       local saved=state:get()
@@ -166,33 +168,62 @@ local function execute(state,request,api)
       if receipt.operationId ~= operation or receipt.status ~= "unknown"
         or savedBinding.phase ~= "execution_unknown" or savedBarrier.phase ~= "consumed"
         or savedBarrier.operationId ~= operation then return end
-      local observed=results.after(api,before,capture,data,success,entities)
-      if type(observed) ~= "table" or observed.code ~= "verified"
-        or not entity(observed.stopEntity) or not entity(observed.edgeEntity)
-        or not integer(observed.chargedCost) or observed.chargedCost < 1
-        or observed.updateCount ~= request.scheduledUpdate then
-        receipt.stage="after_unknown"
-        if type(observed) == "table" and type(observed.stage) == "string" then
-          receipt.stage="after_"..observed.stage
-        end
-        state:set(saved)
-        return
-      end
-      receipt.stage="balance"
-      state:set(saved)
-      local balance=api.engine.util.finance.getPlayersBalance(request.companyEntity)
-      if type(balance) ~= "number" or balance ~= math.floor(balance)
-        or math.abs(balance) > 9007199254740991 then return end
-      receipt.snapshotVersion=2; receipt.hostSequence=request.hostSequence
-      receipt.entity=request.entity; receipt.ownerCompanyEntity=request.companyEntity
-      receipt.stopEntity=observed.stopEntity; receipt.roadEntity=observed.edgeEntity
-      receipt.chargedCost=observed.chargedCost
-      receipt.balance=math.abs(balance); receipt.negative=balance < 0 and 1 or 0
-      receipt.updateCount=observed.updateCount; receipt.held=true; receipt.status="ok"; receipt.stage=nil
-      savedBinding.phase="action_held"
+      local captured=results.capture(data,success,entities)
+      if type(captured) ~= "table" then receipt.stage="callback_capture"; state:set(saved); return end
+      pending={operationId=operation,before=before,capture=capture,
+        callback=captured,request=request,attempts=0}
+      receipt.stage="await_world"
       state:set(saved)
     end)
   end)
+  return true
+end
+
+local function observe(state,api)
+  local work=pending
+  if work == nil then return false end
+  local saved=state:get()
+  if type(saved) ~= "table" then pending=nil; return false end
+  local receipt=saved.executionReceipt or {}
+  local binding=saved.coordinationBinding or {}
+  local barrier=saved.executionBarrier or {}
+  local lease=saved.watchdogLease or {}
+  if receipt.operationId ~= work.operationId or receipt.status ~= "unknown"
+    or receipt.stage ~= "await_world" or binding.phase ~= "execution_unknown"
+    or barrier.phase ~= "consumed" or barrier.operationId ~= work.operationId
+    or lease.phase ~= "active" or saved.haltTestAttempted == true then
+    pending=nil; return false
+  end
+  work.attempts=work.attempts+1
+  local observed=results.afterCaptured(api,work.before,work.capture,work.callback)
+  if type(observed) ~= "table" or observed.code ~= "verified"
+    or not entity(observed.stopEntity) or not entity(observed.edgeEntity)
+    or not integer(observed.chargedCost) or observed.chargedCost < 1
+    or observed.updateCount ~= work.request.scheduledUpdate then
+    local stage=type(observed) == "table" and observed.stage or nil
+    -- The callback and first GUI events can all precede TF3's world commit.
+    -- Keep checking only the road publication state; the coordinator deadline
+    -- still bounds this observation and the native command is never resent.
+    if type(stage) == "string" and stage:match("^result_road")
+      and work.attempts < 24 then return false end
+    receipt.stage=type(stage) == "string" and "after_"..stage or "after_unknown"
+    pending=nil; state:set(saved); return false
+  end
+  receipt.stage="balance"
+  state:set(saved)
+  local balance=api.engine.util.finance.getPlayersBalance(work.request.companyEntity)
+  if type(balance) ~= "number" or balance ~= math.floor(balance)
+    or math.abs(balance) > 9007199254740991 then
+    pending=nil; return false
+  end
+  receipt.snapshotVersion=2; receipt.hostSequence=work.request.hostSequence
+  receipt.entity=work.request.entity; receipt.ownerCompanyEntity=work.request.companyEntity
+  receipt.stopEntity=observed.stopEntity; receipt.roadEntity=observed.edgeEntity
+  receipt.chargedCost=observed.chargedCost
+  receipt.balance=math.abs(balance); receipt.negative=balance < 0 and 1 or 0
+  receipt.updateCount=observed.updateCount; receipt.held=true; receipt.status="ok"; receipt.stage=nil
+  binding.phase="action_held"
+  pending=nil; state:set(saved)
   return true
 end
 function M.arm(state,request,api)
@@ -201,6 +232,11 @@ function M.arm(state,request,api)
 end
 function M.execute(state,request,api)
   local ok,result=pcall(execute,state,request,api)
+  return ok and result == true
+end
+
+function M.observe(state,api)
+  local ok,result=pcall(observe,state,api)
   return ok and result == true
 end
 return M

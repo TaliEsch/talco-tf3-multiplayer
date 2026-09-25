@@ -17,12 +17,23 @@ const command={protocolVersion:2,hostSequence:1,scheduledUpdate:108,
 const encoded=encodeAsyncEngineRequest({schemaVersion:1,roundId:'round',operationId:'execute',
   operation:'executeHeld',command},nonce);
 
-function run(change=''){
+test('held Stop readback event is subscribed and routed from GUI to game state',async()=>{
+  const game=await readFile(new URL('../mod/content/tf3mp_status.script.tl',import.meta.url),'utf8');
+  const panel=await readFile(new URL('../mod/content/tf3mp_status_panel.script.tl',import.meta.url),'utf8');
+  assert.match(game,/current\.eventSubscriptionsVersion ~= 23/);
+  assert.match(game,/state:subscribeToEvent\("tf3mp_observe_road_stop"\)/);
+  assert.match(game,/name == "tf3mp_observe_road_stop"[\s\S]*?roadStopOrderExecute\.observe\(state, api\)/);
+  assert.match(panel,/"tf3mp_observe_road_stop", \{[\s\S]*?nonce = bridgeNonce, operationId = executionSent/);
+});
+
+function run(change='',observeCount=1){
   const script=`local wire=(function() ${wire} end)()
 local sends=0;local saves=0;local callback=nil
 local result={before=function()return{code='observed',updateCount=108}end,
  after=function()return{code='verified',stopEntity=73312,edgeEntity=73313,
  chargedCost=46348,updateCount=108}end}
+result.capture=function(_,success)if success then return{cost=46348,entities={}}end end
+result.afterCaptured=function(...)return result.after(...)end
 local prep={prepare=function()return{code='prepared',command='native-command'}end}
 ug_require=function(name)
  if name:find('order_wire')then return wire end
@@ -63,25 +74,30 @@ local executed=executor.execute(state,request,api)
 local consumed=current.executionBarrier and current.executionBarrier.phase or ''
 local duplicate=executor.execute(state,request,api)
 if callback then callback({},true,{}) end
+local pendingStatus=current.executionReceipt.status or ''
+local pendingStage=current.executionReceipt.stage or ''
+for i=1,${observeCount} do executor.observe(state,api) end
 return armed,executed,duplicate,consumed,current.executionReceipt.status or '',
  current.coordinationBinding.phase,sends,saves,current.executionReceipt.stopEntity or 0,
- current.executionReceipt.stage or ''`;
+ current.executionReceipt.stage or '',pendingStatus,pendingStage`;
   const L=lauxlib.luaL_newstate();lualib.luaL_openlibs(L);
   try{
     lua.lua_sethook(L,()=>lauxlib.luaL_error(L,to_luastring('TEST_INSTRUCTION_LIMIT')),lua.LUA_MASKCOUNT,1_000_000);
     assert.equal(lauxlib.luaL_loadstring(L,to_luastring(script)),lua.LUA_OK,lua.lua_tojsstring(L,-1));
-    assert.equal(lua.lua_pcall(L,0,10,0),lua.LUA_OK,lua.lua_tojsstring(L,-1));
-    return {armed:lua.lua_toboolean(L,-10),executed:lua.lua_toboolean(L,-9),
-      duplicate:lua.lua_toboolean(L,-8),consumed:lua.lua_tojsstring(L,-7),
-      status:lua.lua_tojsstring(L,-6),phase:lua.lua_tojsstring(L,-5),
-      sends:lua.lua_tonumber(L,-4),saves:lua.lua_tonumber(L,-3),
-      stop:lua.lua_tonumber(L,-2),stage:lua.lua_tojsstring(L,-1)};
+    assert.equal(lua.lua_pcall(L,0,12,0),lua.LUA_OK,lua.lua_tojsstring(L,-1));
+    return {armed:lua.lua_toboolean(L,-12),executed:lua.lua_toboolean(L,-11),
+      duplicate:lua.lua_toboolean(L,-10),consumed:lua.lua_tojsstring(L,-9),
+      status:lua.lua_tojsstring(L,-8),phase:lua.lua_tojsstring(L,-7),
+      sends:lua.lua_tonumber(L,-6),saves:lua.lua_tonumber(L,-5),
+      stop:lua.lua_tonumber(L,-4),stage:lua.lua_tojsstring(L,-3),
+      pendingStatus:lua.lua_tojsstring(L,-2),pendingStage:lua.lua_tojsstring(L,-1)};
   }finally{lua.lua_close(L);}
 }
 
 test('held road execution consumes before one native send and correlates callback receipt',()=>{
   assert.deepEqual(run(),{armed:true,executed:true,duplicate:false,consumed:'consumed',
-    status:'ok',phase:'action_held',sends:1,saves:8,stop:73312,stage:''});
+    status:'ok',phase:'action_held',sends:1,saves:9,stop:73312,stage:'',
+    pendingStatus:'unknown',pendingStage:'await_world'});
   assert.equal(run('request.clientSequence=0;current.preparedCommand.clientSequence=0').status,'ok');
 });
 test('changed road, company, revision or receipt cannot authorize native send',()=>{
@@ -113,4 +129,20 @@ test('readback failure records a bounded post-send stage without another command
   assert.equal(observed.stage,'after_result_entities');
   assert.equal(observed.status,'unknown');
   assert.equal(observed.sends,1);
+});
+
+test('read-only world checks can outlast the callback without replaying Stop',()=>{
+  const delayed="local reads=0;result.after=function()reads=reads+1;if reads==1 then return{code='unknown',stage='result_road'}end return{code='verified',stopEntity=73312,edgeEntity=73313,chargedCost=46348,updateCount=108}end";
+  const observed=run(delayed,2);
+  assert.equal(observed.pendingStage,'await_world');
+  assert.equal(observed.status,'ok');
+  assert.equal(observed.sends,1);
+  const stillPending=run("result.after=function()return{code='unknown',stage='result_road_present'}end",3);
+  assert.equal(stillPending.status,'unknown');
+  assert.equal(stillPending.stage,'await_world');
+  assert.equal(stillPending.sends,1);
+  const unresolved=run("result.after=function()return{code='unknown',stage='result_road_present'}end",24);
+  assert.equal(unresolved.status,'unknown');
+  assert.equal(unresolved.stage,'after_result_road_present');
+  assert.equal(unresolved.sends,1);
 });

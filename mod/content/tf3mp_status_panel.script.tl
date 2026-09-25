@@ -108,6 +108,7 @@ local coordinationSent = ""
 local bindingSent = ""
 local preparationSent = ""
 local executionSent = ""
+local roadStopObservationAttempts : integer = 0
 local pendingExecution : table = {}
 local pendingCheckpoint : table = {}
 local checkpointSent = ""
@@ -984,6 +985,7 @@ local function exchangeExecution() : nil
     for key, _ in pairs(request) do if payload[key] == nil then return nil end; count = count + 1 end
     if count ~= expectedCount then return nil end
     executionSent = request.operationId as string
+    roadStopObservationAttempts = 0
     pendingExecution = payload -- Transient GUI delivery, never persisted executable work.
     api.cmd.sendCommand(api.cmd.makeScriptingSendEventCmd("tf3mp_status_1::/tf3mp_status.gs", "tf3mp_engine_bridge", eventName, payload))
   end
@@ -1003,6 +1005,20 @@ local function exchangeExecution() : nil
     end
   end
   if receipt.schemaVersion ~= 1 or receipt.nonce ~= bridgeNonce or receipt.operationId ~= executionSent or receipt.operation ~= "executeHeld" then return nil end
+  -- The one-use action is already latched, but game-side readback may not yet
+  -- see TF3's committed road. The existing coordinator deadline bounds this wait.
+  if receipt.status == "unknown" and receipt.stage == "await_world" then
+    if liveRequest.commandType == "road.stop.place" and coordinationSent == "" then
+      -- This exchange already runs only every 30 GUI steps. Observe once per
+      -- exchange so the held-world receipt can arrive before the deadline.
+      if roadStopObservationAttempts < 24 then
+        roadStopObservationAttempts = roadStopObservationAttempts + 1
+        api.cmd.sendCommand(api.cmd.makeScriptingSendEventCmd("tf3mp_status_1::/tf3mp_status.gs", "tf3mp_engine_bridge", "tf3mp_observe_road_stop", {
+          nonce = bridgeNonce, operationId = executionSent }))
+      end
+    end
+    return nil
+  end
   if type(receipt.roundId) ~= "string" or #receipt.roundId < 1 or #receipt.roundId > 128 or not string.match(receipt.roundId as string, "^[A-Za-z0-9_.:-]+$") then return nil end
   if (receipt.status ~= "ok" and receipt.status ~= "unknown") or type(receipt.held) ~= "boolean" then return nil end
   if type(receipt.updateCount) ~= "number" or receipt.updateCount < 0 or receipt.updateCount > 2147483647 or receipt.updateCount % 1 ~= 0 then return nil end
@@ -2088,6 +2104,7 @@ local function exchangeTelemetry(tickCount : integer, updateCount : integer) : s
     bindingSent = ""
     preparationSent = ""
     executionSent = ""
+    roadStopObservationAttempts = 0
     pendingExecution = {}
     pendingCheckpoint = {}
     checkpointSent = ""
