@@ -1051,13 +1051,17 @@ local function exchangeExecution() : nil
   if receipt.schemaVersion ~= 1 or receipt.nonce ~= bridgeNonce or receipt.operationId ~= executionSent or receipt.operation ~= "executeHeld" then return nil end
   -- The one-use action is already latched, but game-side readback may not yet
   -- see TF3's committed road. The existing coordinator deadline bounds this wait.
-  if receipt.status == "unknown" and receipt.stage == "await_world" then
-    if liveRequest.commandType == "road.stop.place" and coordinationSent == "" then
+  if receipt.status == "unknown" and (receipt.stage == "await_world"
+    or receipt.stage == "await_callback") then
+    if (liveRequest.commandType == "road.stop.place" or liveRequest.commandType == "road.depot.build")
+      and coordinationSent == "" then
       -- This exchange already runs only every 30 GUI steps. Observe once per
       -- exchange so the held-world receipt can arrive before the deadline.
       if roadStopObservationAttempts < 24 then
         roadStopObservationAttempts = roadStopObservationAttempts + 1
-        api.cmd.sendCommand(api.cmd.makeScriptingSendEventCmd("tf3mp_status_1::/tf3mp_status.gs", "tf3mp_engine_bridge", "tf3mp_observe_road_stop", {
+        local observationEvent = liveRequest.commandType == "road.depot.build"
+          and "tf3mp_observe_depot_build" or "tf3mp_observe_road_stop"
+        api.cmd.sendCommand(api.cmd.makeScriptingSendEventCmd("tf3mp_status_1::/tf3mp_status.gs", "tf3mp_engine_bridge", observationEvent, {
           nonce = bridgeNonce, operationId = executionSent }))
       end
     end

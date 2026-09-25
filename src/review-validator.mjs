@@ -116,7 +116,7 @@ export async function validateReviewPackage(root) {
     ['tf3mp_road_stop_order_wire.lua', '259dff8e07ed89a3939a4cbe6b49af102ab3cb4b572a38685afb3feab2d296b5'],
     ['tf3mp_depot_build_order_wire.lua', 'e828279c7df6ab7dbc6bf55694126e62d0e69ac9f32fce49ad29db5fb4550d17'],
     ['tf3mp_depot_build_order_prepare.lua', '5bec5dd5a2b9bb394bd756d734e9346a22b6f61ba01487df5c16d37ffad41bfd'],
-    ['tf3mp_depot_build_order_execute.lua', '425108747c34ced15c5325c911a05ed72f4fd963629d5536bb605f930943f02e'],
+    ['tf3mp_depot_build_order_execute.lua', '9e5f90479dddd37c37c3399e64eda33becac75ad9034473457c748f80b9fdff9'],
     ['tf3mp_depot_build_order_readback.lua', 'ee8fafa52736e95d639cebf657aecc11454ca179c710a88b55e3d73068904a9f'],
     ['tf3mp_road_stop_simple_prepare.lua', 'b9de96bbb92f212b3d8cc83d97564f2b7a814cfd6aa65ac4116ad9208add382c'],
     ['tf3mp_road_stop_simple_dispatch.lua', 'c3b689756b181097b62ecc2b0477d490075a9e4e1d477be7ddb587f1632d5a6b'],
@@ -186,7 +186,7 @@ export async function validateReviewPackage(root) {
   for (const event of ["tf3mp_engine_probe", "tf3mp_get_engine_receipt", "tf3mp_get_status", "tf3mp_vehicle_command", "tf3mp_get_vehicle_receipt", "tf3mp_company_probe", "tf3mp_get_company_receipt", "tf3mp_finance_probe", "tf3mp_get_finance_receipt"]) {
     if (!gameScript.includes(`state:subscribeToEvent("${event}")`)) throw new Error(`missing script event subscription: ${event}`);
   }
-  if (!gameScript.includes("current.eventSubscriptionsVersion ~= 26")) throw new Error("missing event subscription migration");
+  if (!gameScript.includes("current.eventSubscriptionsVersion ~= 27")) throw new Error("missing event subscription migration");
   for(const event of ['tf3mp_inspect_road_preflight','tf3mp_get_road_preflight'])
     if(!gameScript.includes(`state:subscribeToEvent("${event}")`))throw new Error('missing road preflight subscription');
   for (const event of ['tf3mp_native_road_stop_replay', 'tf3mp_get_native_road_stop_replay']) {
@@ -350,6 +350,7 @@ export async function validateReviewPackage(root) {
   for(const marker of ['state:subscribeToEvent("tf3mp_arm_road_stop_hold")',
     'state:subscribeToEvent("tf3mp_execute_road_stop")',
     'state:subscribeToEvent("tf3mp_observe_road_stop")',
+    'state:subscribeToEvent("tf3mp_observe_depot_build")',
     'roadStopOrderExecute.arm(state, param as table, api)',
     'roadStopOrderExecute.execute(state, param as table, api)'])
     if(!gameScript.includes(marker))throw new Error('ordered road Stop execution route is missing');

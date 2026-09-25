@@ -1,5 +1,23 @@
 # Completion audit against the build prompt
 
+## Held, ordered second-company depot accepted — 25 September 2026
+
+The new callback lifecycle and six-field proposal adapter passed one controlled
+build-40396 TF3 run. Host sequence 1 executed at held update 3066. The engine
+receipt identified construction 8826, depot 73803, owner company 55652 and
+native charge 314,650; the target company's observed balance was -314,650.
+The separate GUI world readback returned `observed` for the same sequence and
+update. Native terminal halt was confirmed. Private report:
+`reports/local-batch-968a3554-6cd1-4e71-b3a4-7d3e6cf5ad6c/report.json`.
+The source save SHA-256 remained
+`CCBF4BEB740E53323E06D20890FD029C8E174D3E85EFB06801A8B4275C762FB5`;
+the game closed without saving and the loader was unstaged. This qualifies
+one-game separate-company depot execution, not two-game synchronization or
+other construction families. The immediately preceding run stopped before a
+native send at `proposal_prepare` because the admission-only company field
+reached the six-field proposal builder; private report:
+`reports/local-batch-9aced017-025c-4e28-84cf-32c9b53c3770/report.json`.
+
 ## First held, ordered depot attempt — 25 September 2026
 
 Commit `70b69e7` added a one-use ordered stock depot path and independent

@@ -1,5 +1,19 @@
 # TalCo TF3 multiplayer — current delivery plan
 
+## Ordered depot single-game acceptance — 25 September 2026
+
+The held Host-ordered road depot path now waits for the native callback and
+checks the committed construction, depot ownership and exact native debit
+before accepting. A fresh build-40396 TF3 run accepted Host sequence 1 at
+update 3066 for company 55652: construction 8826, depot 73803 and charge
+314,650. Independent held-world readback returned `observed`; native terminal
+halt was confirmed. The disposable source save remained unchanged. This is
+one real engine with a simulated participant, so two-instance agreement and
+general construction support remain open. Next extend the same admitted,
+ordered, one-use path to the road loop's line and vehicle actions, then verify
+service economy. Do not validate every building separately; add construction
+families as their gameplay path requires.
+
 ## Ordered depot result — 25 September 2026
 
 One build-40396 disposable TF3 run accepted company 55652 at prepare and held

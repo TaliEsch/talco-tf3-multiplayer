@@ -1391,7 +1391,7 @@ local ret : GameScriptWithGui<Tf3MpState, Tf3MpGuiState> = {
     -- GUI events use the script's event subscriptions too. Existing saves may
     -- already have the engine-only subscription, so hasEventSubscriptions alone
     -- is not sufficient when adding the receipt/status events.
-    if not state:hasEventSubscriptions() or current.eventSubscriptionsVersion ~= 26 then
+    if not state:hasEventSubscriptions() or current.eventSubscriptionsVersion ~= 27 then
       state:subscribeToEvent("tf3mp_native_road_stop_replay")
       state:subscribeToEvent("tf3mp_get_native_road_stop_replay")
       state:subscribeToEvent("tf3mp_placement_observer_selftest")
@@ -1419,6 +1419,7 @@ local ret : GameScriptWithGui<Tf3MpState, Tf3MpGuiState> = {
       state:subscribeToEvent("tf3mp_prepare_depot_build")
       state:subscribeToEvent("tf3mp_arm_depot_build_hold")
       state:subscribeToEvent("tf3mp_execute_depot_build")
+      state:subscribeToEvent("tf3mp_observe_depot_build")
       state:subscribeToEvent("tf3mp_arm_road_stop_hold")
       state:subscribeToEvent("tf3mp_execute_road_stop")
       state:subscribeToEvent("tf3mp_observe_road_stop")
@@ -1453,7 +1454,7 @@ local ret : GameScriptWithGui<Tf3MpState, Tf3MpGuiState> = {
       state:subscribeToEvent("tf3mp_get_pause_receipt")
       state:subscribeToEvent("tf3mp_station_template_probe")
       state:subscribeToEvent("tf3mp_get_station_template")
-      current.eventSubscriptionsVersion = 26
+      current.eventSubscriptionsVersion = 27
     end
     if subscriptionsMissing or current.readbackEventVersion ~= 3 then
       state:subscribeToEvent("tf3mp_stop_readback")
@@ -1701,6 +1702,22 @@ local ret : GameScriptWithGui<Tf3MpState, Tf3MpGuiState> = {
     end
     if src == "tf3mp_status_1::/tf3mp_status.gs" and id == "tf3mp_engine_bridge" and name == "tf3mp_execute_depot_build" and type(param) == "table" then
       pcall(function() depotBuildOrderExecute.execute(state, param as table, api) end)
+      return nil
+    end
+    if src == "tf3mp_status_1::/tf3mp_status.gs" and id == "tf3mp_engine_bridge" and name == "tf3mp_observe_depot_build" and type(param) == "table" then
+      local request = param as table
+      local count : integer = 0
+      for key, _ in pairs(request) do
+        if key ~= "nonce" and key ~= "operationId" then return nil end
+        count = count + 1
+      end
+      local current = state:get()
+      local receipt = current and current.executionReceipt or {}
+      if count == 2 and request.nonce == receipt.nonce and request.operationId == receipt.operationId
+        and receipt.status == "unknown"
+        and (receipt.stage == "await_callback" or receipt.stage == "await_world") then
+        pcall(function() depotBuildOrderExecute.observe(state, api) end)
+      end
       return nil
     end
     if src == "tf3mp_status_1::/tf3mp_status.gs" and id == "tf3mp_engine_bridge" and name == "tf3mp_arm_road_stop_hold" and type(param) == "table" then

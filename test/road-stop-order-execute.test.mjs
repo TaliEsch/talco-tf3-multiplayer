@@ -20,10 +20,10 @@ const encoded=encodeAsyncEngineRequest({schemaVersion:1,roundId:'round',operatio
 test('held Stop readback event is subscribed and routed from GUI to game state',async()=>{
   const game=await readFile(new URL('../mod/content/tf3mp_status.script.tl',import.meta.url),'utf8');
   const panel=await readFile(new URL('../mod/content/tf3mp_status_panel.script.tl',import.meta.url),'utf8');
-  assert.match(game,/current\.eventSubscriptionsVersion ~= 26/);
+  assert.match(game,/current\.eventSubscriptionsVersion ~= 27/);
   assert.match(game,/state:subscribeToEvent\("tf3mp_observe_road_stop"\)/);
   assert.match(game,/name == "tf3mp_observe_road_stop"[\s\S]*?roadStopOrderExecute\.observe\(state, api\)/);
-  assert.match(panel,/"tf3mp_observe_road_stop", \{[\s\S]*?nonce = bridgeNonce, operationId = executionSent/);
+  assert.match(panel,/"tf3mp_observe_road_stop"[\s\S]*?observationEvent, \{[\s\S]*?nonce = bridgeNonce, operationId = executionSent/);
 });
 
 function run(change='',observeCount=1,early=''){

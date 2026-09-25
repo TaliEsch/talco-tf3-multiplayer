@@ -17,7 +17,7 @@ test('vehicle purchase uses the exact, expiring request and verified created dep
   assert.match(fn,/validCost\(native\.chargedCost\)/);
   assert.match(fn,/\.mdl\$/);
   assert.ok(fn.includes('^[A-Za-z0-9_.:/%-]+%.mdl$'),'namespaced resource IDs must remain accepted');
-  assert.match(source,/eventSubscriptionsVersion ~= 26/);
+  assert.match(source,/eventSubscriptionsVersion ~= 27/);
   for(const event of ['tf3mp_phase2_vehicle','tf3mp_get_phase2_vehicle']) assert.ok(source.includes(`state:subscribeToEvent("${event}")`));
   assert.match(source,/name == "tf3mp_get_phase2_vehicle"/);
 });
