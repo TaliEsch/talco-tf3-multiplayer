@@ -9,16 +9,20 @@ import {ownerProofClockCurrent} from './vehicle-owner-proof.mjs';
 // This remains useful as a regression harness after real network integration.
 export async function createLocalCoordinatorRun({directory,bridge,playerId,companies,vehicleEntity,
   logger=()=>{},saveReport,now=Date.now,leadUpdates=60,metadata={},
-  beforeFirstCommand=null,commandLimit=4,nativeRuntime=null,roadStopPayload=null}) {
+  beforeFirstCommand=null,commandLimit=4,nativeRuntime=null,roadStopPayload=null,
+  roadStopOriginPlayerId=playerId}) {
   if(!(companies instanceof Map)||companies.size!==2||!companies.has(playerId)
     ||!Number.isSafeInteger(vehicleEntity)||vehicleEntity<0||vehicleEntity>2147483647
     ||!Number.isSafeInteger(leadUpdates)||leadUpdates<40||leadUpdates>150
     ||(beforeFirstCommand!==null&&typeof beforeFirstCommand!=='function')
     ||!Number.isSafeInteger(commandLimit)||commandLimit<1||commandLimit>4
-    ||typeof saveReport!=='function'||roadStopPayload!==null&&(commandLimit!==1||beforeFirstCommand!==null))
+    ||typeof saveReport!=='function'||roadStopPayload!==null&&(commandLimit!==1||beforeFirstCommand!==null)
+    ||!companies.has(roadStopOriginPlayerId)
+    ||roadStopPayload===null&&roadStopOriginPlayerId!==playerId)
     throw new TypeError('INVALID_LOCAL_RUN_OPTIONS');
+  const roadCompany=companies.get(roadStopOriginPlayerId);
   const roadStop=roadStopPayload===null?null:parseRoadStopOrderPayload(
-    roadStopPayload,vehicleEntity,companies.get(playerId));
+    roadStopPayload,vehicleEntity,roadCompany);
   const messages=[],reports=[];
   const hash=value=>typeof value==='string'&&/^[a-f0-9]{64}$/.test(value)?value:null;
   const report={schemaVersion:1,batchId:randomUUID(),scope:roadStop
@@ -103,7 +107,7 @@ export async function createLocalCoordinatorRun({directory,bridge,playerId,compa
       if(roadStop&&(!state||state.scope!=='held_road_stop_company_balance_v1'
         ||state.hostSequence!==payload.hostSequence||state.updateCount!==payload.updateCount
         ||state.roadStop?.sourceRoadEntity!==vehicleEntity
-        ||state.roadStop?.ownerCompanyEntity!==companies.get(playerId)
+        ||state.roadStop?.ownerCompanyEntity!==roadCompany
         ||!Number.isSafeInteger(state.roadStop?.stopEntity)||state.roadStop.stopEntity<1
         ||!Number.isSafeInteger(state.roadStop?.roadEntity)||state.roadStop.roadEntity<1
         ||state.roadStop.roadEntity===vehicleEntity
@@ -113,6 +117,7 @@ export async function createLocalCoordinatorRun({directory,bridge,playerId,compa
       if(roadStop){
         const readback=await bridge.inspectOrderedRoadReadback({hostSequence:payload.hostSequence,
           company:state.roadStop.ownerCompanyEntity,
+          localCompany:companies.get(playerId),
           sourceRoad:state.roadStop.sourceRoadEntity,road:state.roadStop.roadEntity,
           stop:state.roadStop.stopEntity,update:payload.updateCount,
           balance:state.company.balance,charge:state.roadStop.chargedCost});
@@ -200,10 +205,10 @@ export async function createLocalCoordinatorRun({directory,bridge,playerId,compa
         if(roadStop&&roadPreflight==='pending'){
           roadPreflight='checking';
           Promise.resolve().then(()=>bridge.inspectRoadPreflight({entity:vehicleEntity,
-            company:companies.get(playerId)})).then(receipt=>{
+            company:roadCompany})).then(receipt=>{
             if(closed||phase==='failed')return;
             if(receipt?.outcome!=='found'||receipt.entity!==vehicleEntity
-              ||receipt.company!==companies.get(playerId)
+              ||receipt.company!==roadCompany
               ||receipt.ownerCompany!==0&&receipt.ownerCompany!==receipt.company)
               throw new Error('ROAD_PREFLIGHT_NOT_CONFIRMED');
             roadPreflight=receipt;
@@ -229,7 +234,8 @@ export async function createLocalCoordinatorRun({directory,bridge,playerId,compa
         coordinator.setResumeSpeed(resumeSpeed);
         timings.set(sequence,{proposedAt:now(),proposedUpdate:update,scheduledUpdate:update+lead,sourceSpeed:speed,measuredUpdatesPerSecond,requestedReleaseSpeed:resumeSpeed});
         coordinator.propose({protocolVersion:2,hostSequence:sequence,scheduledUpdate:update+lead,
-          originPlayerId:playerId,targetCompanyEntity:companies.get(playerId),targetEntity:vehicleEntity,
+          originPlayerId:roadStop?roadStopOriginPlayerId:playerId,
+          targetCompanyEntity:roadStop?roadCompany:companies.get(playerId),targetEntity:vehicleEntity,
           commandType:roadStop?'road.stop.place':'vehicle.setRunning',
           payload:roadStop??{running:sequence%2===0},clientSequence:sequence,
           requestMessageId:'local-run:'+sequence},update);

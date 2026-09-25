@@ -259,10 +259,12 @@ if (command === "host" || command === "join") createInterface({ input: process.s
   else if(coordinatorRun||coordinatorStarting) rawLog({level:"warn",event:"coordinator_local_run",code:"RUN_OWNS_HELPER_STOP_TO_EXIT"});
   else if(line.trim()==="coordinator-run-confirmed"||line.trim().startsWith("coordinator-run-confirmed ")
     ||line.trim().startsWith('coordinator-cancel-stop-confirmed ')
-    ||line.trim().startsWith('coordinator-road-stop-confirmed ')) {
+    ||line.trim().startsWith('coordinator-road-stop-confirmed ')
+    ||line.trim().startsWith('coordinator-remote-road-stop-confirmed ')) {
     const args=line.trim().split(/\s+/);
     const cancelledRun=args[0]==='coordinator-cancel-stop-confirmed';
-    const roadRun=args[0]==='coordinator-road-stop-confirmed';
+    const remoteRoadRun=args[0]==='coordinator-remote-road-stop-confirmed';
+    const roadRun=args[0]==='coordinator-road-stop-confirmed'||remoteRoadRun;
     const selectInGame=!cancelledRun&&!roadRun&&args.length===1;
     let secondCompany=Number(args[1]),vehicleEntity=Number(args[2]);
     let localCompany=bridge?.engineObservation.sample?.companyEntity;
@@ -301,7 +303,8 @@ if (command === "host" || command === "join") createInterface({ input: process.s
           companies:new Map([["local",localCompany],["receipt-mirror",secondCompany]]),vehicleEntity,
           logger:rawLog,saveReport,metadata:{gameHash:observedGameHash,modManifestHash:opt["mod-hash"]},
           commandLimit:cancelledRun||roadRun?1:4,
-          roadStopPayload:roadRun?{edgeEntity:vehicleEntity,companyEntity:localCompany,
+          roadStopOriginPlayerId:remoteRoadRun?'receipt-mirror':'local',
+          roadStopPayload:roadRun?{edgeEntity:vehicleEntity,companyEntity:remoteRoadRun?secondCompany:localCompany,
             param:0.5,left:true,oneWay:false,model:ROAD_STOP_MODEL,name:'TalCo Road Stop'}:null,
           beforeFirstCommand:cancelledRun?({entity,company,recordCancellationEvidence})=>cancelOneLocalStop({
             nativeGate,bridge,entity,company,logger:value=>{
@@ -356,6 +359,17 @@ if (command === "host" || command === "join") createInterface({ input: process.s
     if (!bridge) log({ level: "warn", event: "company_inspection_result", code: "BRIDGE_OFFLINE" });
     else bridge.inspectCompanies().catch(error => log({ level: "warn", event: "company_inspection_result",
       code: ["OBSERVATION_REQUIRED", "INSPECTION_BUSY"].includes(error.message) ? error.message : "INSPECTION_UNAVAILABLE" }));
+  }
+  else if (/^road-preflight-readonly [1-9][0-9]* [1-9][0-9]*$/.test(line.trim())) {
+    const [, companyText, entityText] = line.trim().split(' ');
+    if (command !== 'host' || !bridge) rawLog({level:'warn',event:'road_preflight_result',code:'HOST_BRIDGE_REQUIRED'});
+    else bridge.inspectRoadPreflight({company:Number(companyText),entity:Number(entityText)})
+      .then(receipt=>rawLog({level:'info',event:'road_preflight_result',
+        company:receipt.company,entity:receipt.entity,ownerCompany:receipt.ownerCompany,
+        revision:receipt.revision,issuedUpdate:receipt.issuedUpdate,
+        receiptUpdate:receipt.updateCount,outcome:receipt.outcome,gameplayVerified:false}))
+      .catch(error=>rawLog({level:'warn',event:'road_preflight_result',
+        code:error?.message??'ROAD_PREFLIGHT_UNAVAILABLE',gameplayVerified:false}));
   }
   else if (["company-test-create-confirmed", "finance-test-confirmed"].includes(line.trim())) {
     const finance = line.trim() === "finance-test-confirmed";

@@ -1,5 +1,33 @@
 # TalCo TF3 multiplayer — current delivery plan
 
+## Separate-company ordered Stop checkpoint — 25 September 2026
+
+The one-engine ordered road Stop harness now proposes as its simulated remote
+player for the mapped second company. Its independent held-world probe checks
+the local GUI company separately from the target Stop owner and accepts signed
+target-company balances.
+
+One build-40396 TF3 read-only run inspected both companies and road 53417
+through nonce-bound game-side requests. The local company 3141 had balance
+40,229,553; second company 55652 existed with balance 0 and no assets,
+vehicles or lines. The road was `found` for company 55652, with public owner
+0 and revision 23. A first ordered Stop reached TF3 but ended `unknown` at
+`after_result_cost`: TF3 had debited company 55652 to -46,348 while the
+verifier rejected all negative balances. The one-use latch halted it and no
+action was retried in that process. The verifier now requires the exact native
+debit without imposing a nonnegative target balance.
+
+A fresh controlled load of the unchanged disposable source save then passed:
+Host sequence 1 executed at held update 3076, creating company-55652 Stop
+72897 on replacement road 73804 for native cost 46,348 and target balance
+-46,348. An independent nonce-bound world probe observed those same entities,
+owner and signed balance at update 3076 before release; the native terminal
+halt was confirmed. The report is
+`reports/local-batch-09a10505-cd2b-46a7-b27a-d8d0bbba8742/report.json`.
+This is one real engine plus a simulated participant. Next extend separate
+company road and economy play beyond one Stop, then compare two real TF3
+instances when the user resumes that test. Do not infer two-instance proof.
+
 ## Current direction — 25 September 2026
 
 The next separate-company safety gate is implemented in the ordered road
@@ -22,7 +50,8 @@ This is one engine plus a simulated participant, so multi-instance gameplay
 remains unverified and the user has deferred that test. Next extend the
 verified ordering and readback path to separate-company road gameplay and
 economy while keeping the two-instance comparison ready for when permitted.
-Readiness is approximately 6.7/10, not stage 7 completion.
+The previous host-company Stop remains verified; the separate-company result
+above is the current one-engine checkpoint. Stage 7 remains open.
 
 The revised production Host telemetry panel returned two read-only TF3
 receipts on build 40396 without changing the source save: road 53417 was

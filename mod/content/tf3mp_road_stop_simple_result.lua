@@ -187,7 +187,7 @@ function M.afterCaptured(api, before, input, captured)
   local prior = before.balances[input.companyEntity]
   local ok, current = pcall(balance, api, input.companyEntity)
   local cost = ok and integer(prior) and prior - current or nil
-  if not integer(cost) or cost <= 0 or current < 0
+  if not integer(cost) or cost <= 0
     or captured.callbackCost ~= nil and captured.callbackCost ~= cost then
     return {code="unknown",stage="result_cost"}
   end
@@ -234,7 +234,7 @@ local function verify(api, before, input, data, success, resultEntities, progres
   for id, prior in pairs(before.balances) do
     local current = balance(api, id)
     if id == input.companyEntity then
-      if current ~= prior - cost or current < 0 then fail() end
+      if current ~= prior - cost then fail() end
     elseif current ~= prior then fail() end
   end
   progress.stage = "result_entities"

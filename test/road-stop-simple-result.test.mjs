@@ -58,6 +58,13 @@ test('bound remote company may place its own stop while the local player differs
   assert.deepEqual(run('', 'api.engine.util.getPlayer=function()return 11 end'),
     {before:'observed',after:'verified',stop:81,cost:67500,calls:0});
 });
+test('accepts TF3 native debit into debt only when the exact target balance changes',()=>{
+  const zeroStart='balances[10]=0;api.engine.util.getPlayer=function()return 11 end';
+  assert.deepEqual(run('balances[10]=-67500',zeroStart),
+    {before:'observed',after:'verified',stop:81,cost:67500,calls:0});
+  assert.equal(run('balances[10]=-67501',zeroStart).after,'unknown');
+  assert.equal(run('balances[10]=-67500;balances[11]=69999',zeroStart).after,'unknown');
+});
 test('accepts the completed proposal exact stop ID when the callback omits that object',()=>{
   assert.deepEqual(run('entities={{25,1}}'),{before:'observed',after:'verified',stop:81,cost:67500,calls:0});
 });

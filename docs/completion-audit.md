@@ -1,5 +1,54 @@
 # Completion audit against the build prompt
 
+## Successful one-engine separate-company ordered Stop — 25 September 2026
+
+The local one-engine coordinator harness now assigns a road Stop to the
+simulated remote player and target company; the preflight, proposal, held
+execution receipt and independent readback all carry that company. The
+readback keeps the selected local GUI company separate from the target company
+and encodes negative balances as magnitude plus sign. Focused extension tests
+passed 18/18.
+
+In one exact build-40396 TF3 process, direct read-only game requests returned
+nonce-bound receipts for local company 3141 and second company 55652 at
+updates 3239 and 3240. Company 3141 had balance 40,229,553, five assets,
+one vehicle and one line. Company 55652 was known, had balance 0 and no
+assets, vehicles or lines. Road 53417 was `found` for company 55652, with
+public owner 0 and revision 23. The source save SHA-256 remained
+`CCBF4BEB740E53323E06D20890FD029C8E174D3E85EFB06801A8B4275C762FB5`.
+The private raw receipts are in `reports/remote-road-readonly-20260925/`.
+The launcher session's stdin was closed, so this first run did not exercise
+production Host admission or a paid action.
+
+A following one-engine Host run admitted and prepared a simulated remote-player
+Stop on public road 53417 for company 55652, but returned `unknown` at held
+update 3078, stage `after_result_cost`. A separate read-only bridge inspection
+at that update found company 55652 at -46,348 with two assets (from zero),
+host company 3141 unchanged at 40,229,553, and source road 53417 missing.
+The verifier had required nonnegative target balance even when TF3 made the
+native debit. The unknown latch halted the game; this action was not retried
+in that process. Its private report is
+`reports/local-batch-c406b85f-9399-41a1-9f0b-714541dba1fe/report.json`.
+
+After removing only that verifier restriction, a fresh load of the unchanged
+disposable source save passed the complete one-engine ordered path. Host
+sequence 1 was scheduled and executed at update 3076. TF3 returned Stop
+72897, replacement road 73804, target owner 55652, native cost 46,348 and
+target balance -46,348. The independent held-world probe returned `observed`
+with the same sequence, update, entities, owner and signed balance before
+release. The native terminal halt was confirmed. The report is
+`reports/local-batch-09a10505-cd2b-46a7-b27a-d8d0bbba8742/report.json`;
+the raw readback is private in `reports/remote-road-readonly-20260925/`.
+The source save SHA-256 remained
+`CCBF4BEB740E53323E06D20890FD029C8E174D3E85EFB06801A8B4275C762FB5`.
+The new receipt is real single-game evidence with a simulated participant;
+there is no two-instance agreement claim. Focused verifier and executor tests
+passed 25/25 and mod review accepted manifest
+`5712434abaa0666289cde04d09b7e0082dcad124ad4d9802689aaf9e13036ab7`.
+The full suite was run and failed in the five previously observed native
+Windows debugger/controller fixture tests; the ordered-road focused tests
+passed. Two-instance tests remain deferred by the user.
+
 ## Separate-company road ownership recheck — 25 September 2026
 
 The game-side ordered Stop preparation and held execution now read the road's

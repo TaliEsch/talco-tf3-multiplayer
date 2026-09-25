@@ -168,20 +168,23 @@ function M.probeOrdered(api, request)
   local function inspect()
     if type(request) ~= "table" or getmetatable(request) ~= nil then fail() end
     local allowed = {schemaVersion=true, kind=true, nonce=true, requestId=true,
-      hostSequence=true, company=true, sourceRoad=true, road=true, stop=true,
-      update=true, balance=true, charge=true}
+      hostSequence=true, company=true, localCompany=true, sourceRoad=true, road=true, stop=true,
+      update=true, balance=true, balanceNegative=true, charge=true}
     local fields = 0
     for key in pairs(request) do if not allowed[key] then fail() end; fields = fields + 1 end
-    if fields ~= 12 or request.schemaVersion ~= 1
+    if fields ~= 14 or request.schemaVersion ~= 1
       or request.kind ~= "ordered_road_readback_request"
       or type(request.nonce) ~= "string" or #request.nonce ~= 32
       or not request.nonce:match("^[0-9a-f]+$")
       or not entity(request.requestId) or not entity(request.hostSequence)
-      or not entity(request.company) or not entity(request.sourceRoad)
+      or not entity(request.company) or not entity(request.localCompany)
+      or not entity(request.sourceRoad)
       or not entity(request.road) or not entity(request.stop)
       or request.sourceRoad == request.road
       or not integer(request.update) or request.update < 0
       or not integer(request.balance) or request.balance < 0
+      or (request.balanceNegative ~= 0 and request.balanceNegative ~= 1)
+      or request.balance == 0 and request.balanceNegative ~= 0
       or not integer(request.charge) or request.charge < 1 then fail() end
     progress.stage = "clock"
     local world = api.engine.util.getWorld()
@@ -189,9 +192,10 @@ function M.probeOrdered(api, request)
     local time = component(api, world, "GAME_TIME")
     if not native(speed) or speed.speedup ~= 0
       or not native(time) or time.updateCount ~= request.update
-      or api.engine.util.getPlayer() ~= request.company then fail() end
+      or api.engine.util.getPlayer() ~= request.localCompany then fail() end
     progress.stage = "balance"
-    if api.engine.util.finance.getPlayersBalance(request.company) ~= request.balance then fail() end
+    local signedBalance = request.balanceNegative == 1 and -request.balance or request.balance
+    if api.engine.util.finance.getPlayersBalance(request.company) ~= signedBalance then fail() end
     progress.stage = "source_road"
     local sourcePresent = api.engine.entityExists(request.sourceRoad)
     if type(sourcePresent) ~= "boolean" then fail() end
@@ -214,8 +218,10 @@ function M.probeOrdered(api, request)
     if attached ~= 1 then fail() end
     return {schemaVersion=1, kind="ordered_road_readback_receipt", code="observed",
       nonce=request.nonce, requestId=request.requestId, hostSequence=request.hostSequence,
-      company=request.company, sourceRoad=request.sourceRoad, road=request.road,
+      company=request.company, localCompany=request.localCompany,
+      sourceRoad=request.sourceRoad, road=request.road,
       stop=request.stop, update=request.update, balance=request.balance,
+      balanceNegative=request.balanceNegative,
       charge=request.charge}
   end
   local ok, result = pcall(inspect)

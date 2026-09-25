@@ -4,7 +4,7 @@ const entity=value=>Number.isSafeInteger(value)&&value>0&&value<=2147483647;
 const nonnegative=value=>Number.isSafeInteger(value)&&value>=0&&value<=2147483647;
 const keys=value=>Object.keys(value).sort().join(',');
 const observedFields=['schemaVersion','kind','code','nonce','requestId','hostSequence',
-  'company','sourceRoad','road','stop','update','balance','charge'];
+  'company','localCompany','sourceRoad','road','stop','update','balance','balanceNegative','charge'];
 const unknownFields=['schemaVersion','kind','code','nonce','requestId','stage'];
 const stages=new Set(['request','clock','balance','source_road','stop','attachment']);
 
@@ -16,14 +16,19 @@ export function parseOrderedRoadReadback(source,request){
   if(value.code==='unknown'&&keys(value)===unknownFields.sort().join(',')
     &&stages.has(value.stage))return Object.freeze({...value});
   if(value.code!=='observed'||keys(value)!==observedFields.sort().join(',')
-    ||!entity(value.hostSequence)||!entity(value.company)||!entity(value.sourceRoad)
+    ||!entity(value.hostSequence)||!entity(value.company)||!entity(value.localCompany)
+    ||!entity(value.sourceRoad)
     ||!entity(value.road)||!entity(value.stop)||!nonnegative(value.update)
     ||!Number.isSafeInteger(value.balance)||value.balance<0
+    ||![0,1].includes(value.balanceNegative)
+    ||value.balance===0&&value.balanceNegative!==0
     ||!Number.isSafeInteger(value.charge)||value.charge<1
     ||value.hostSequence!==request.hostSequence||value.company!==request.company
+    ||value.localCompany!==request.localCompany
     ||value.sourceRoad!==request.sourceRoad||value.road!==request.road
     ||value.stop!==request.stop||value.update!==request.update
-    ||value.balance!==request.balance||value.charge!==request.charge)
+    ||value.balance!==request.balance||value.balanceNegative!==request.balanceNegative
+    ||value.charge!==request.charge)
     throw new TypeError('INVALID_ORDERED_ROAD_READBACK');
   return Object.freeze({...value});
 }

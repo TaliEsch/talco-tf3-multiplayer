@@ -786,12 +786,12 @@ export async function startGameBridge({ directory, logger = () => {}, intervalMs
         roadPreflightBusy=false;
       }
     },
-    async inspectOrderedRoadReadback({hostSequence,company,sourceRoad,road,stop,update,
+    async inspectOrderedRoadReadback({hostSequence,company,localCompany=company,sourceRoad,road,stop,update,
       balance,charge,timeoutMs=10000}={}){
       if(orderedRoadReadbackBusy)throw new Error('ORDERED_ROAD_READBACK_BUSY');
-      if(![hostSequence,company,sourceRoad,road,stop].every(n=>Number.isSafeInteger(n)&&n>0&&n<=2147483647)
+      if(![hostSequence,company,localCompany,sourceRoad,road,stop].every(n=>Number.isSafeInteger(n)&&n>0&&n<=2147483647)
         ||!Number.isSafeInteger(update)||update<0||update>2147483647
-        ||!Number.isSafeInteger(balance)||balance<0
+        ||!Number.isSafeInteger(balance)
         ||!Number.isSafeInteger(charge)||charge<1
         ||!Number.isSafeInteger(timeoutMs)||timeoutMs<100||timeoutMs>30000)
         throw new TypeError('INVALID_ORDERED_ROAD_READBACK_REQUEST');
@@ -802,7 +802,7 @@ export async function startGameBridge({ directory, logger = () => {}, intervalMs
           const observation=observations.status;
           if(observation.available&&observation.sample.speedup===0
             &&observation.sample.updateCount===update
-            &&observation.sample.companyEntity===company)break;
+            &&observation.sample.companyEntity===localCompany)break;
           await delay(50);
         }
         const start=pending.then(async()=>{
@@ -811,11 +811,12 @@ export async function startGameBridge({ directory, logger = () => {}, intervalMs
           const observation=observations.status;
           if(!observation.available||observation.sample.speedup!==0
             ||observation.sample.updateCount!==update
-            ||observation.sample.companyEntity!==company)
+            ||observation.sample.companyEntity!==localCompany)
             throw new Error('ORDERED_ROAD_READBACK_CONTEXT_LOST');
           const requestId=++requestSequence;
           const request={schemaVersion:1,kind:'ordered_road_readback_request',nonce,
-            requestId,hostSequence,company,sourceRoad,road,stop,update,balance,charge};
+            requestId,hostSequence,company,localCompany,sourceRoad,road,stop,update,
+            balance:Math.abs(balance),balanceNegative:balance<0?1:0,charge};
           await publish(directory,'ordered_road_readback_request.lua',request);
           return request;
         });

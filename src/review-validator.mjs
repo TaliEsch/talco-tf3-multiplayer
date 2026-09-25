@@ -108,11 +108,11 @@ export async function validateReviewPackage(root) {
     ['tf3mp_road_replay_result.lua', '201bd6cc15b2cf137e63a557f8e23254bee19e449d4bf57c2b363f5f37b428fa'],
     ['tf3mp_road_stop_order_execute.lua', 'e068d2dcb5e02dbbe7c800860d9b33f4b5f505046fb8e007a73a75b378aa4918'],
     ['tf3mp_road_stop_order_prepare.lua', '497f694591b75bee5643529089f892a90059e46fadc6ca7ab1f3021af54a1519'],
-    ['tf3mp_road_stop_outcome.lua', '3dd4f2adebc1f6052b070a4ee8af7bb29d0217f75b9feddc7544fb7f7323930f'],
+    ['tf3mp_road_stop_outcome.lua', 'cd654e364885beded2d9834b1f556d19b5c664341b1bae7403600f6a59c8be0c'],
     ['tf3mp_road_stop_order_wire.lua', '259dff8e07ed89a3939a4cbe6b49af102ab3cb4b572a38685afb3feab2d296b5'],
     ['tf3mp_road_stop_simple_prepare.lua', 'b9de96bbb92f212b3d8cc83d97564f2b7a814cfd6aa65ac4116ad9208add382c'],
     ['tf3mp_road_stop_simple_dispatch.lua', 'c3b689756b181097b62ecc2b0477d490075a9e4e1d477be7ddb587f1632d5a6b'],
-    ['tf3mp_road_stop_simple_result.lua', '9d62d22dc698c1d26bad911593ab781ef818560083ae0ef95bdc8f00056371c6'],
+    ['tf3mp_road_stop_simple_result.lua', '4983caba98be57ad1cc69d9dfe919ceb75f52a454f9d6d8099b892dd61c9cdac'],
   ]) {
     const source = await readFile(path.join(absoluteRoot, 'content', file), 'utf8');
     if (createHash('sha256').update(source.replace(/\r\n/g, '\n')).digest('hex') !== digest)

@@ -10,16 +10,18 @@ import {startGameBridge} from '../src/game-bridge.mjs';
 const lua=value=>`function data() return {${Object.entries(value).map(([k,v])=>`${k}=${JSON.stringify(v)},`).join('')}} end`;
 const nonce='a'.repeat(32);
 const request={schemaVersion:1,kind:'ordered_road_readback_request',nonce,requestId:3,
-  hostSequence:1,company:10,sourceRoad:24,road:25,stop:81,update:50,
-  balance:53652,charge:46348};
+  hostSequence:1,company:10,localCompany:10,sourceRoad:24,road:25,stop:81,update:50,
+  balance:53652,balanceNegative:0,charge:46348};
 const observed={...request,kind:'ordered_road_readback_receipt',code:'observed'};
 
 test('ordered road readback binds every field and exposes bounded unknown stage',()=>{
   assert.equal(parseOrderedRoadReadback(lua(observed),request).code,'observed');
   for(const change of [{nonce:'b'.repeat(32)},{requestId:4},{hostSequence:2},
-    {company:11},{sourceRoad:26},{road:27},{stop:82},{update:51},
-    {balance:1},{charge:1},{extra:1}])
+    {company:11},{localCompany:11},{sourceRoad:26},{road:27},{stop:82},{update:51},
+    {balance:1},{balanceNegative:1},{charge:1},{extra:1}])
     assert.throws(()=>parseOrderedRoadReadback(lua({...observed,...change}),request));
+  assert.equal(parseOrderedRoadReadback(lua({...observed,balanceNegative:1}),
+    {...request,balanceNegative:1}).code,'observed');
   const unknown={schemaVersion:1,kind:'ordered_road_readback_receipt',code:'unknown',
     nonce,requestId:3,stage:'attachment'};
   assert.equal(parseOrderedRoadReadback(lua(unknown),request).stage,'attachment');
@@ -52,13 +54,13 @@ test('bridge obtains one receipt while held and removes request',async()=>{
     await until(()=>lease.active);
     await publishObservation(0,101);
     await until(()=>bridge.engineObservation.sample?.speedup===0);
-    const awaiting=bridge.inspectOrderedRoadReadback({...request,timeoutMs:1000});
+    const awaiting=bridge.inspectOrderedRoadReadback({...request,company:9,timeoutMs:1000});
     await until(async()=>{try{return (await readFile(path.join(directory,
       'ordered_road_readback_request.lua'),'utf8')).includes('hostSequence = 1');}catch{return false;}});
     const issued=parseFlatDataFile(await readFile(path.join(directory,
       'ordered_road_readback_request.lua'),'utf8'));
     await writeFile(path.join(directory,'ordered_road_readback_receipt.lua'),lua({
-      ...observed,nonce:bridge.nonce,requestId:issued.requestId}));
+      ...observed,company:9,nonce:bridge.nonce,requestId:issued.requestId}));
     assert.equal((await awaiting).code,'observed');
     await assert.rejects(readFile(path.join(directory,'ordered_road_readback_request.lua')),{code:'ENOENT'});
   }finally{await bridge.close();await rm(root,{recursive:true,force:true});}
