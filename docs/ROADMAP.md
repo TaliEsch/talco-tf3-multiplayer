@@ -2,6 +2,14 @@
 
 ## Current direction — 25 September 2026
 
+The ordered vehicle path is explicitly vehicle-only at Host admission,
+participant validation, engine mailbox encoding and game-side preparation /
+execution. The road Stop currently uses a separate one-use disposable-save
+executor and has no Host sequence. Extend those existing boundaries with a
+bounded road command, live company and road preflight, a consumed sequence and
+native postcondition receipt before the next paid TF3 attempt. Do not count
+transport acceptance alone as road execution.
+
 The road Stop callback verifier now has an offline-tested fallback for TF3's
 incomplete result-entity vector: it requires one owned Stop attached to a
 replacement road with the source road's exact observed node geometry, plus
