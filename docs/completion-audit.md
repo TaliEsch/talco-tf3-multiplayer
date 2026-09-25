@@ -12,6 +12,12 @@ TF2's state-based street result lookup idea; no TF2 code was copied. Focused
 fixtures passed 20/20 and mod review passed. This revision has not run in
 TF3, and no host-ordered road Stop or two-instance result is claimed.
 
+The matching Stop scan was narrowed to the selected road's exact geometry.
+Other roads can already carry the same model at the same relative position;
+one preexisting or ambiguous Stop on the selected geometry still rejects.
+This refinement is fixture-tested only and does not change the real-game
+evidence boundary above.
+
 ## Source/outcome road geometry correlation — 25 September 2026
 
 In TF3 build 40396, nonce-bound read-only probes inspected the untouched

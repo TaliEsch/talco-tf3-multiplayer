@@ -63,17 +63,18 @@ local function matchingStops(api, input, modelId, geometry)
                 or street.getEdgeForEdgeObject(objectId) ~= roadId then fail() end
               local edge = component(api, roadId, "BASE_EDGE")
               if not native(edge) or not dense(edge.objects, 64) then fail() end
-              local side = input.left and api.type.enum.EdgeObjectType.STOP_LEFT
-                or api.type.enum.EdgeObjectType.STOP_RIGHT
-              local attached = 0
-              for _, pair in ipairs(edge.objects) do
-                if not dense(pair, 2) or #pair ~= 2 then fail() end
-                if pair[1] == objectId and pair[2] == side then attached = attached + 1 end
+              if sameGeometry(geometry, roadGeometry(edge)) then
+                local side = input.left and api.type.enum.EdgeObjectType.STOP_LEFT
+                  or api.type.enum.EdgeObjectType.STOP_RIGHT
+                local attached = 0
+                for _, pair in ipairs(edge.objects) do
+                  if not dense(pair, 2) or #pair ~= 2 then fail() end
+                  if pair[1] == objectId and pair[2] == side then attached = attached + 1 end
+                end
+                if attached ~= 1 then fail() end
+                matches[#matches+1] = {stop=objectId, road=roadId}
+                if #matches > 1 then fail() end
               end
-              if attached ~= 1 then fail() end
-              if geometry and not sameGeometry(geometry, roadGeometry(edge)) then fail() end
-              matches[#matches+1] = {stop=objectId, road=roadId}
-              if #matches > 1 then fail() end
               break
             end
           end
@@ -127,7 +128,7 @@ local function snapshot(api, input, companies, progress)
   local model = api.res.modelRep.find(input.model)
   if not integer(model) or model < 0 or model > 2147483647 then fail() end
   progress.stage = "existing_stop"
-  if #matchingStops(api, input, model) ~= 0 then fail() end
+  if #matchingStops(api, input, model, geometry) ~= 0 then fail() end
   local players = roster(api, companies, input.companyEntity, progress)
   local balances = {}
   progress.stage = "balances"

@@ -62,10 +62,14 @@ test('locates the unique TF3 stop after an empty or scalar callback vector',()=>
   }
   assert.equal(run('entities={};data.proposal.streetProposal.edgeObjectsToAdd[1].resultEntity=-400000000').after,'verified');
 });
-test('refuses a mismatched replacement road or preexisting matching stop',()=>{
+test('refuses a mismatched replacement road or preexisting stop on the selected geometry',()=>{
   assert.equal(run('components.BASE_EDGE[25].position1={x=11,y=1,z=2}').after,'unknown');
   assert.equal(run('', 'map[80]=25;components.EDGE_OBJECT[80]={param=.5};components.PLAYER_OWNED[80]={player=10};components.MODEL_INSTANCE_LIST[80]={fatInstances={{modelId=7}}};components.BASE_EDGE[25].objects={{80,1}};exists[25]=true').before,'unknown');
-  assert.equal(run('map[82]=26;exists[82]=true;exists[26]=true;components.EDGE_OBJECT[82]={param=.5};components.PLAYER_OWNED[82]={player=10};components.MODEL_INSTANCE_LIST[82]={fatInstances={{modelId=7}}};components.BASE_EDGE[26]={objects={{82,1}},node0=31,node1=32,position0={x=99,y=1,z=2},position1=geo.position1,tangent0=geo.tangent0,tangent1=geo.tangent1}').after,'unknown');
+  assert.equal(run('map[82]=26;exists[82]=true;exists[26]=true;components.EDGE_OBJECT[82]={param=.5};components.PLAYER_OWNED[82]={player=10};components.MODEL_INSTANCE_LIST[82]={fatInstances={{modelId=7}}};components.BASE_EDGE[26]={objects={{82,1}},node0=31,node1=32,position0=geo.position0,position1=geo.position1,tangent0=geo.tangent0,tangent1=geo.tangent1}').after,'unknown');
+});
+test('other roads may already have the same model and relative position',()=>{
+  const other='map[80]=26;exists[80]=true;exists[26]=true;components.EDGE_OBJECT[80]={param=.5};components.PLAYER_OWNED[80]={player=10};components.MODEL_INSTANCE_LIST[80]={fatInstances={{modelId=7}}};components.BASE_EDGE[26]={objects={{80,1}},node0=31,node1=32,position0={x=99,y=1,z=2},position1=geo.position1,tangent0=geo.tangent0,tangent1=geo.tangent1}';
+  assert.deepEqual(run('',other),{before:'observed',after:'verified',stop:81,cost:67500,calls:0});
 });
 test('callback and state discrepancies remain unknown, without a mutation',()=>{
   for(const change of [
