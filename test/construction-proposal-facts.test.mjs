@@ -8,7 +8,8 @@ const source=await readFile(new URL('../mod/content/tf3mp_proposal_facts.lua',im
 
 function collect(change='') {
   const script=`local facts=(function() ${source} end)()
-    local proposal={toAdd={{fileName='base::/depots/road/road_depot/road_depot.con',playerEntity=3141}},toRemove={}}
+    local proposal={toAdd={{fileName='base::/depots/road/road_depot/road_depot.con',playerEntity=3141,
+      transf={1,0,0,0,0,1,0,0,0,0,1,0,2240,795,23,1},construction={params={seed=7}}}},toRemove={}}
     local data={costs=446291,errorState={critical=false}}
     local result={40001}
     ${change}
@@ -24,7 +25,16 @@ function collect(change='') {
 test('construction observer copies bounded owner, resource, cost and result shape',()=>{
   assert.deepEqual(collect(),{schemaVersion:1,code:'constructionReadable',constructions:1,
     removals:0,resultCount:1,ownerCompany:3141,
-    resource:'base::/depots/road/road_depot/road_depot.con',cost:446291,critical:false});
+    resource:'base::/depots/road/road_depot/road_depot.con',cost:446291,critical:false,
+    geometryCode:'readable',transform:[1,0,0,0,0,1,0,0,0,0,1,0,2240,795,23,1],seed:7});
+});
+
+test('unreadable geometry preserves the qualified construction owner and cost',()=>{
+  const facts=collect('proposal.toAdd[1].transf=nil');
+  assert.equal(facts.code,'constructionReadable');
+  assert.equal(facts.ownerCompany,3141);
+  assert.equal(facts.cost,446291);
+  assert.equal(facts.geometryCode,'unavailable');
 });
 
 test('construction observer fails closed on ambiguous or unsafe native values',()=>{

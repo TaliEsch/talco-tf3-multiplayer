@@ -127,7 +127,8 @@ test('revision seven accepts the revision-six facts event shape across readiness
 test('construction proposal facts preserve bounded TF3 depot evidence only for constructionBuilder',()=>{
   const r={...ready,observerRevision:7};
   const facts={schemaVersion:1,code:'constructionReadable',constructions:1,removals:0,resultCount:1,
-    ownerCompany:3141,resource:'::/depots/road/road_depot/road_depot.con',cost:454977,critical:false};
+    ownerCompany:3141,resource:'::/depots/road/road_depot/road_depot.con',cost:454977,critical:false,
+    geometryCode:'readable',transform:[1,0,0,0,0,1,0,0,0,0,1,0,2240,795,23,1],seed:7};
   const observed={...event,observerRevision:7,builderId:'constructionBuilder',payloadType:'table',
     shapeInspected:true,proposalFacts:facts};
   const report=parse(lines(r,observed));
@@ -135,7 +136,8 @@ test('construction proposal facts preserve bounded TF3 depot evidence only for c
   assert.equal(report.rejectedRecords,0);
   assert.equal(report.gameplayVerified,false);
   for(const change of [{resource:'private\\path'},{resource:'x'.repeat(257)},{ownerCompany:0},
-    {constructions:2},{cost:-1},{secret:'private'}]){
+    {constructions:2},{cost:-1},{seed:0},{transform:[1]},{geometryCode:'unknown'},
+    {secret:'private'}]){
     const bad=parse(lines(r,{...observed,proposalFacts:{...facts,...change}}));
     assert.equal(bad.samples[0].proposalFacts.code,'invalid');
     assert.equal(bad.rejectedRecords,1);
@@ -144,6 +146,9 @@ test('construction proposal facts preserve bounded TF3 depot evidence only for c
   const wrongBuilder=parse(lines(r,{...observed,builderId:'streetTerminalBuilder'}));
   assert.equal(wrongBuilder.samples[0].proposalFacts.code,'invalid');
   assert.equal(wrongBuilder.rejectedRecords,1);
+  const unavailable={...facts,geometryCode:'unavailable'};
+  delete unavailable.transform;delete unavailable.seed;
+  assert.deepEqual(parse(lines(r,{...observed,proposalFacts:unavailable})).samples[0].proposalFacts,unavailable);
   assert.equal(parse(lines(r,{...observed,proposalFacts:{schemaVersion:1,code:'unavailable',field:'resource'}}))
     .samples[0].proposalFacts.field,'resource');
 });

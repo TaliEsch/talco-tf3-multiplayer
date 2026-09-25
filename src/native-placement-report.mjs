@@ -10,13 +10,19 @@ function readProposalFacts(value) {
     return null;
   }
   if(value.code==='constructionReadable'){
-    const keys=['schemaVersion','code','constructions','removals','resultCount','ownerCompany','resource','cost','critical'];
+    const base=['schemaVersion','code','constructions','removals','resultCount','ownerCompany','resource','cost','critical'];
+    const geometry=value.geometryCode==='readable'?['geometryCode','transform','seed']:
+      value.geometryCode==='unavailable'?['geometryCode']:[];
+    const keys=[...base,...geometry];
     if(Object.keys(value).length!==keys.length||Object.keys(value).some(k=>!keys.includes(k))
       ||value.constructions!==1||!['removals','resultCount'].every(k=>Number.isInteger(value[k])&&value[k]>=0&&value[k]<=64)
       ||!Number.isInteger(value.ownerCompany)||value.ownerCompany<1||value.ownerCompany>2147483647
       ||typeof value.resource!=='string'||value.resource.length<1||value.resource.length>256
       ||!/^[A-Za-z0-9_./:%-]+$/.test(value.resource)
-      ||!Number.isSafeInteger(value.cost)||value.cost<0||typeof value.critical!=='boolean')return null;
+      ||!Number.isSafeInteger(value.cost)||value.cost<0||typeof value.critical!=='boolean'
+      ||value.geometryCode==='readable'&&(!Array.isArray(value.transform)||value.transform.length!==16
+        ||!value.transform.every(n=>typeof n==='number'&&Number.isFinite(n)&&Math.abs(n)<=100000)
+        ||!Number.isInteger(value.seed)||value.seed<1||value.seed>2147483647))return null;
     return Object.fromEntries(keys.map(k=>[k,value[k]]));
   }
   const keys=['schemaVersion','code',...factCounts,'cost','critical','ownerCompany'];

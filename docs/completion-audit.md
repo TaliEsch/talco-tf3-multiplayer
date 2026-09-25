@@ -1,5 +1,21 @@
 # Completion audit against the build prompt
 
+## Stock depot transform and seed — 25 September 2026
+
+A protected optional read of the native construction proposal now copies a
+bounded transform and seed without discarding the existing owner, resource and
+cost facts if geometry is unavailable. One exact build-40396 TF3 run produced
+two local company-3141 depot applies on an unsaved disposable world. Native
+costs matched the two GUI debits: 454,977 and 449,160. Geometry was unavailable
+for the first apply; the second apply exposed seed 1 and a 16-value transform,
+including translation (-812.891541, -3142.25684, 23.3068237). The bounded
+report parser returned `CREATE_AND_APPLY_OBSERVED` with eight construction
+samples and zero rejected records. TF3 exited, and the source save SHA-256
+remained `CCBF4BEB740E53323E06D20890FD029C8E174D3E85EFB06801A8B4275C762FB5`.
+These are local UI observations. No host-ordered, target-company or two-instance
+depot result is claimed. The next test should compare the existing scripted
+proposal to the concrete stock placement rather than guessing another location.
+
 ## Road depot construction diagnostic — 25 September 2026
 
 The read-only `constructionBuilder` observer now emits a fixed, bounded native

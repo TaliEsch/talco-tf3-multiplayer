@@ -1,5 +1,19 @@
 # TalCo TF3 multiplayer — current delivery plan
 
+## Stock road depot geometry diagnostic — 25 September 2026
+
+The passive construction observer now attempts to copy the stock proposal's
+bounded 16-value transform and seed while retaining owner/cost facts if that
+optional read fails. In one build-40396 TF3 run, two local road depots were
+placed at the same screen area on a disposable, unsaved world. The first apply
+reported native cost 454,977 but geometry unavailable. The second apply
+reported cost 449,160, seed 1 and a readable transform with translation
+(-812.891541, -3142.25684, 23.3068237). The report parser accepted all eight
+construction samples with zero rejected records. This is a stock UI baseline
+for comparing the earlier scripted `Collision`; it does not establish
+host-ordered depot construction. Next compare this concrete placement with the
+scripted proposal and qualify target-company ownership/debit in a fresh run.
+
 ## Road depot proposal observation — 25 September 2026
 
 The passive native construction observer now copies bounded owner, resource,

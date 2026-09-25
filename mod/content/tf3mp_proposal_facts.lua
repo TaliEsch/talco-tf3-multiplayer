@@ -151,10 +151,29 @@ function M.collectConstruction(proposal, data, result)
     activeField = "critical"
     local errorState = data.errorState
     if errorState == nil or type(errorState.critical) ~= "boolean" then return failure("unavailable", activeField) end
+    -- The stock placement transform is the missing input for comparing the
+    -- earlier collided scripted proposal. A failed optional read leaves the
+    -- already-qualified owner/cost facts intact.
+    local geometry = ',"geometryCode":"unavailable"'
+    local geometryOk, geometryValue = pcall(function()
+      local transform = construction.transf
+      local values = {}
+      for index = 1, 16 do
+        local value = transform[index]
+        if type(value) ~= "number" or value ~= value or math.abs(value) > 100000 then return nil end
+        values[index] = string.format("%.9g", value)
+      end
+      local seed = construction.construction.params.seed
+      if not integer(seed, 1, MAX_ENTITY) then return nil end
+      return ',"geometryCode":"readable","transform":[' .. table.concat(values, ',')
+        .. '],"seed":' .. tostring(seed)
+    end)
+    if geometryOk and type(geometryValue) == "string" then geometry = geometryValue end
     return '{"schemaVersion":1,"code":"constructionReadable","constructions":1,"removals":'
       .. tostring(removals) .. ',"resultCount":' .. tostring(resultCount)
       .. ',"ownerCompany":' .. tostring(ownerCompany) .. ',"resource":"' .. resource
-      .. '","cost":' .. tostring(cost) .. ',"critical":' .. tostring(errorState.critical) .. '}'
+      .. '","cost":' .. tostring(cost) .. ',"critical":' .. tostring(errorState.critical)
+      .. geometry .. '}'
   end)
   if not ok or type(facts) ~= "string" then return fixed("unavailable", activeField) end
   return facts

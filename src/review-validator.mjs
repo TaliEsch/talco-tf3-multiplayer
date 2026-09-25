@@ -118,7 +118,7 @@ export async function validateReviewPackage(root) {
     if (createHash('sha256').update(source.replace(/\r\n/g, '\n')).digest('hex') !== digest)
       throw new Error(`road replay ${file} differs from reviewed source`);
   }
-  if (createHash('sha256').update(factsSource.replace(/\r\n/g, '\n')).digest('hex') !== '19db55804d2be6ec681fecf1c449915a08563da041841cb95a04f3c7ab9bffea') {
+  if (createHash('sha256').update(factsSource.replace(/\r\n/g, '\n')).digest('hex') !== 'a317bd356f53694c392ee40ff24f234479ce09136ca8be3b03cddfcf0bc18c8b') {
     throw new Error('proposal facts collector differs from reviewed passive source');
   }
   for (const [kind, digest] of [
