@@ -17,14 +17,14 @@ const command={protocolVersion:2,hostSequence:1,scheduledUpdate:108,
 const encoded=encodeAsyncEngineRequest({schemaVersion:1,roundId:'round',
   operationId:'execute',operation:'executeHeld',command},nonce,{enableDepotBuild:true});
 
-function run(change='',outcome='verified'){
+function run(change='',outcome='verified',nativeCode='NATIVE_BUILD_ACCOUNTING_VERIFIED'){
   const script=`local wire=(function() ${wire} end)()
 local sends=0;local consumedBeforeSend=false
 local depot={execute=function(state,intent,binding,consent)
   sends=sends+1
   consumedBeforeSend=state:get().executionBarrier.phase=='consumed'
     and state:get().executionReceipt.status=='unknown'
-  return {outcome='${outcome}',code='NATIVE_BUILD_ACCOUNTING_VERIFIED',
+  return {outcome='${outcome}',code='${nativeCode}',
     constructionEntity=123,depotEntity=124,constructionOwner=55652,depotOwner=55652,
     chargedCost=449160,targetBefore=1000000,targetAfter=550840,
     originalBefore=40000000,originalAfter=40000000}
@@ -58,23 +58,25 @@ ${change}
 local armed=executor.arm(state,request,api)
 if armed then current.executionBarrier.phase='held';update=108;speedup=0 end
 local applied=executor.execute(state,request,api)
-return armed,applied,sends,consumedBeforeSend,current.executionBarrier.phase or '',
-  current.executionReceipt.status or '',current.coordinationBinding.phase,saved`;
+  return armed,applied,sends,consumedBeforeSend,current.executionBarrier.phase or '',
+  current.executionReceipt.status or '',current.coordinationBinding.phase,saved,
+  current.executionReceipt.stage or ''`;
   const L=lauxlib.luaL_newstate();lualib.luaL_openlibs(L);
   try{
     lua.lua_sethook(L,()=>lauxlib.luaL_error(L,to_luastring('TEST_INSTRUCTION_LIMIT')),lua.LUA_MASKCOUNT,1_000_000);
     assert.equal(lauxlib.luaL_loadstring(L,to_luastring(script)),lua.LUA_OK,lua.lua_tojsstring(L,-1));
-    assert.equal(lua.lua_pcall(L,0,8,0),lua.LUA_OK,lua.lua_tojsstring(L,-1));
-    return {armed:lua.lua_toboolean(L,-8),applied:lua.lua_toboolean(L,-7),
-      sends:lua.lua_tonumber(L,-6),consumedBeforeSend:lua.lua_toboolean(L,-5),
-      barrier:lua.lua_tojsstring(L,-4),status:lua.lua_tojsstring(L,-3),
-      phase:lua.lua_tojsstring(L,-2),saved:lua.lua_tonumber(L,-1)};
+    assert.equal(lua.lua_pcall(L,0,9,0),lua.LUA_OK,lua.lua_tojsstring(L,-1));
+    return {armed:lua.lua_toboolean(L,-9),applied:lua.lua_toboolean(L,-8),
+      sends:lua.lua_tonumber(L,-7),consumedBeforeSend:lua.lua_toboolean(L,-6),
+      barrier:lua.lua_tojsstring(L,-5),status:lua.lua_tojsstring(L,-4),
+      phase:lua.lua_tojsstring(L,-3),saved:lua.lua_tonumber(L,-2),
+      stage:lua.lua_tojsstring(L,-1)};
   }finally{lua.lua_close(L);}
 }
 
 test('held depot executes once only after the sequence barrier is consumed',()=>{
   assert.deepEqual(run(),{armed:true,applied:true,sends:1,consumedBeforeSend:true,
-    barrier:'consumed',status:'ok',phase:'action_held',saved:4});
+    barrier:'consumed',status:'ok',phase:'action_held',saved:4,stage:''});
 });
 
 test('depot native unknown stays latched and cannot be resent',()=>{
@@ -85,6 +87,9 @@ test('depot native unknown stays latched and cannot be resent',()=>{
   assert.equal(result.barrier,'consumed');
   assert.equal(result.status,'unknown');
   assert.equal(result.phase,'execution_unknown');
+  assert.equal(result.stage,'native_receipt_unknown');
+  assert.equal(run('','unknown','NATIVE_REJECTION_REASON_UNVERIFIED').stage,
+    'NATIVE_REJECTION_REASON_UNVERIFIED');
 });
 
 test('changed company, roster, placement and lease never reach native send',()=>{

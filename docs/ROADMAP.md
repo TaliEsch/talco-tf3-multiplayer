@@ -1,5 +1,17 @@
 # TalCo TF3 multiplayer — current delivery plan
 
+## Ordered depot result — 25 September 2026
+
+One build-40396 disposable TF3 run accepted company 55652 at prepare and held
+Host sequence 1 at update 3058, then returned `ENGINE_OUTCOME_UNKNOWN` at the
+native depot attempt. Terminal halt was confirmed; no replay or independent
+postcondition occurred. The source save stayed unchanged. The next step is to
+carry the adapter's bounded native outcome code into the report and compare
+the stock TF3 proposal with TF2's working construction plus connected street
+replay. Adapt a shared construction action path where build-specific evidence
+permits, rather than validating every building independently. Keep the
+one-use unknown latch and do not rerun this action unchanged.
+
 ## Stock road depot geometry diagnostic — 25 September 2026
 
 The passive construction observer now attempts to copy the stock proposal's

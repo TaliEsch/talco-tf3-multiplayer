@@ -82,12 +82,18 @@ lines.on('line',async line=>{
     host.on('exit',(code,signal)=>{process.stdout.write(`HOST_EXIT ${code??signal}\n`);host=null;hostReady=false;});
     return;
   }
-  if((command.startsWith('RUN ')||command.startsWith('ROAD '))&&host&&hostReady&&!runSent){
-    const [,second,entity]=command.split(/\s+/);
-    if(!/^[1-9][0-9]*$/.test(second??'')||!/^[1-9][0-9]*$/.test(entity??''))
-      throw new Error('RUN_REQUIRES_SECOND_COMPANY_AND_TARGET_ENTITY');
+  if((command.startsWith('RUN ')||command.startsWith('ROAD ')||command.startsWith('DEPOT '))&&host&&hostReady&&!runSent){
+    const parts=command.split(/\s+/);
+    const [,second,entity]=parts;
+    if(!/^[1-9][0-9]*$/.test(second??'')
+      ||(command.startsWith('DEPOT ')
+        ?parts.length!==7||parts.slice(2).some(value=>!Number.isFinite(Number(value)))
+        :!/^[1-9][0-9]*$/.test(entity??'')))
+      throw new Error('RUN_REQUIRES_VALID_SECOND_COMPANY_AND_TARGET');
     runSent=true;
-    host.stdin.write(command.startsWith('ROAD ')
+    host.stdin.write(command.startsWith('DEPOT ')
+      ?`coordinator-depot-build-confirmed ${parts.slice(1).join(' ')}\n`
+      :command.startsWith('ROAD ')
       ?`coordinator-road-stop-confirmed ${second} ${entity}\n`
       :`coordinator-cancel-stop-confirmed ${second} ${entity}\n`);
     return;
@@ -96,5 +102,5 @@ lines.on('line',async line=>{
     host?.stdin.write('stop\n');
     return;
   }
-  process.stdout.write('Expected START_HOST, RUN <second-company> <vehicle-entity>, ROAD <second-company> <road-entity>, or STOP.\n');
+  process.stdout.write('Expected START_HOST, RUN <second-company> <vehicle-entity>, ROAD <second-company> <road-entity>, DEPOT <second-company> <x> <y> <z> <yaw> <seed>, or STOP.\n');
 });

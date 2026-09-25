@@ -119,10 +119,22 @@ local function execute(state,request,api)
   state:set(saved)
   -- The adapter rechecks the two live companies and held speed before creating
   -- the proposal, then persists its own company-wide attempt latch before send.
-  local nativeReceipt=depot.execute(state,intent,bound,consent)
+  local nativeOk,nativeReceipt=pcall(depot.execute,state,intent,bound,consent)
   saved=state:get()
   local receipt=saved.executionReceipt or {}
   local savedBinding=saved.coordinationBinding or {}
+  if not nativeOk then
+    receipt.stage="adapter_exception"
+    state:set(saved)
+    return false
+  end
+  if type(nativeReceipt)=="table" and nativeReceipt.outcome=="unknown" then
+    local diagnostic={ENGINE_OUTCOME_UNKNOWN=true,NATIVE_REJECTION_REASON_UNVERIFIED=true,
+      ENGINE_CALLBACK_MISSING=true,ENGINE_SEND_FAILED=true}
+    receipt.stage=diagnostic[nativeReceipt.code] and nativeReceipt.code or "native_receipt_unknown"
+    state:set(saved)
+    return false
+  end
   if type(nativeReceipt) ~= "table" or nativeReceipt.outcome ~= "verified"
     or nativeReceipt.code ~= "NATIVE_BUILD_ACCOUNTING_VERIFIED"
     or receipt.operationId ~= request.operationId or receipt.status ~= "unknown"

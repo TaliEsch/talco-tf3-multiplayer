@@ -1,5 +1,23 @@
 # Completion audit against the build prompt
 
+## First held, ordered depot attempt — 25 September 2026
+
+Commit `70b69e7` added a one-use ordered stock depot path and independent
+held-world readback. The controlled build-40396 TF3 run used an unchanged
+disposable source save, local company 3141 and mapped company 55652. Native
+binding, held checkpoint and preparation succeeded. Host sequence 1 reached
+scheduled held update 3058, but the engine execution receipt was `unknown`
+at `native_attempt`. The helper confirmed a terminal hold and did not retry.
+There is no accepted depot receipt or independent depot readback, so no
+construction, ownership or debit claim. Private report:
+`reports/local-batch-a62f0c62-194b-4728-9c8c-c67ffdbe58c7/report.json`.
+The source save SHA-256 remained
+`CCBF4BEB740E53323E06D20890FD029C8E174D3E85EFB06801A8B4275C762FB5`.
+Next expose the adapter's bounded native outcome code on unknown, inspect the
+TF2 proposal path for required connected street payload, then decide the
+smallest TF3 fix before another disposable attempt. The generic construction
+path is still unqualified.
+
 ## Stock depot transform and seed — 25 September 2026
 
 A protected optional read of the native construction proposal now copies a
