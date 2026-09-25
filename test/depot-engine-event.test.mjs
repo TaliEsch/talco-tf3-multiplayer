@@ -20,7 +20,7 @@ test('depot engine event admits only the fixed, held, created-company request',a
   assert.ok(fn.indexOf('state:set(current)')<fn.indexOf('clock.tickCount < request.issuedTick'));
   assert.match(fn,/local saved = state:get\(\) or current/);
   assert.match(fn,/saved\.phase2CompanyFault = true/);
-  assert.match(source,/eventSubscriptionsVersion ~= 24/);
+  assert.match(source,/eventSubscriptionsVersion ~= 25/);
   for(const event of ['tf3mp_phase2_depot','tf3mp_get_phase2_depot'])assert.ok(source.includes(`state:subscribeToEvent("${event}")`));
   assert.match(source,/name == "tf3mp_get_phase2_depot"/);
   const handler=source.slice(source.indexOf('name == "tf3mp_phase2_depot"'),source.indexOf('name == "tf3mp_finance_probe"'));

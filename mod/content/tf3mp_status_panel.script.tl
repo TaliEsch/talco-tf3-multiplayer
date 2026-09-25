@@ -14,6 +14,7 @@ local record Tf3MpRoadStopOutcome
 end
 local roadStopOutcome = ug_require "tf3mp_status_1::/tf3mp_road_stop_outcome.lua" as Tf3MpRoadStopOutcome
 local roadStopOrderWire = ug_require "tf3mp_status_1::/tf3mp_road_stop_order_wire.lua" as table
+local depotBuildOrderWire = ug_require "tf3mp_status_1::/tf3mp_depot_build_order_wire.lua" as table
 
 local record Tf3MpPanelState
   tickCount : integer
@@ -877,6 +878,11 @@ local function exchangePreparation() : nil
         local key = "nameChunk" .. tostring(index)
         payload[key] = request[key]
       end
+    elseif request.commandType == "road.depot.build" then
+      if depotBuildOrderWire.decode(request) == nil then return nil end
+      eventName = "tf3mp_prepare_depot_build"
+      expectedCount = 19
+      for _, key in ipairs({"xText","yText","zText","yawText","seed"}) do payload[key] = request[key] end
     else return nil end
     for _, key in ipairs({ "roundId", "operationId", "originPlayerId", "requestMessageId" }) do
       if type(request[key]) ~= "string" or #request[key] < 1 or #request[key] > 128 or not string.match(request[key] as string, "^[A-Za-z0-9_.:-]+$") then return nil end

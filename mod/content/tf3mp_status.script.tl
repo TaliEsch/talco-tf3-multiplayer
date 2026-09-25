@@ -122,6 +122,7 @@ end
 local stopReadback = ug_require "tf3mp_status_1::/tf3mp_stop_readback.lua" as Tf3MpStopReadback
 local roadStopSimplePrepare = ug_require "tf3mp_status_1::/tf3mp_road_stop_simple_prepare.lua" as table
 local roadStopOrderPrepare = ug_require "tf3mp_status_1::/tf3mp_road_stop_order_prepare.lua" as table
+local depotBuildOrderPrepare = ug_require "tf3mp_status_1::/tf3mp_depot_build_order_prepare.lua" as table
 local roadStopOrderExecute = ug_require "tf3mp_status_1::/tf3mp_road_stop_order_execute.lua" as table
 local function roadCaptureModelName(modelId : integer) : string
   return api.res.modelRep.getName(modelId)
@@ -1389,7 +1390,7 @@ local ret : GameScriptWithGui<Tf3MpState, Tf3MpGuiState> = {
     -- GUI events use the script's event subscriptions too. Existing saves may
     -- already have the engine-only subscription, so hasEventSubscriptions alone
     -- is not sufficient when adding the receipt/status events.
-    if not state:hasEventSubscriptions() or current.eventSubscriptionsVersion ~= 24 then
+    if not state:hasEventSubscriptions() or current.eventSubscriptionsVersion ~= 25 then
       state:subscribeToEvent("tf3mp_native_road_stop_replay")
       state:subscribeToEvent("tf3mp_get_native_road_stop_replay")
       state:subscribeToEvent("tf3mp_placement_observer_selftest")
@@ -1414,6 +1415,7 @@ local ret : GameScriptWithGui<Tf3MpState, Tf3MpGuiState> = {
       state:subscribeToEvent("tf3mp_get_binding_receipt")
       state:subscribeToEvent("tf3mp_prepare_command")
       state:subscribeToEvent("tf3mp_prepare_road_stop")
+      state:subscribeToEvent("tf3mp_prepare_depot_build")
       state:subscribeToEvent("tf3mp_arm_road_stop_hold")
       state:subscribeToEvent("tf3mp_execute_road_stop")
       state:subscribeToEvent("tf3mp_observe_road_stop")
@@ -1448,7 +1450,7 @@ local ret : GameScriptWithGui<Tf3MpState, Tf3MpGuiState> = {
       state:subscribeToEvent("tf3mp_get_pause_receipt")
       state:subscribeToEvent("tf3mp_station_template_probe")
       state:subscribeToEvent("tf3mp_get_station_template")
-      current.eventSubscriptionsVersion = 24
+      current.eventSubscriptionsVersion = 25
     end
     if subscriptionsMissing or current.readbackEventVersion ~= 3 then
       state:subscribeToEvent("tf3mp_stop_readback")
@@ -1684,6 +1686,10 @@ local ret : GameScriptWithGui<Tf3MpState, Tf3MpGuiState> = {
     end
     if src == "tf3mp_status_1::/tf3mp_status.gs" and id == "tf3mp_engine_bridge" and name == "tf3mp_prepare_road_stop" and type(param) == "table" then
       pcall(function() roadStopOrderPrepare.handle(state, param as table, api) end)
+      return nil
+    end
+    if src == "tf3mp_status_1::/tf3mp_status.gs" and id == "tf3mp_engine_bridge" and name == "tf3mp_prepare_depot_build" and type(param) == "table" then
+      pcall(function() depotBuildOrderPrepare.handle(state, param as table, api) end)
       return nil
     end
     if src == "tf3mp_status_1::/tf3mp_status.gs" and id == "tf3mp_engine_bridge" and name == "tf3mp_arm_road_stop_hold" and type(param) == "table" then
