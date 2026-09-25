@@ -95,11 +95,17 @@ struct Snapshot {
     std::uint8_t latest_post_send_body_stopped;
     bool latest_post_send_body_valid;
     std::uint32_t latest_post_send_body_thread;
+    // Bounded image-relative observation, including unrecognized adapters.
+    // Zero means unavailable/outside image. These do not authorize execution.
+    std::uint32_t latest_adapter_table_rva;
+    std::uint32_t latest_adapter_invoke_rva;
+    std::uint32_t latest_correlated_factory_thread;
 };
 
 // Exact-build, passive observation only. No engine pointer escapes this API.
 // Start/Stop must run on an ordinary worker, never DllMain or an engine callback.
 Status Start() noexcept;
+Status Start40401Passive() noexcept;
 Status Stop() noexcept;
 Snapshot Read() noexcept;
 // A request is accepted at most once in a process lifetime. It atomically

@@ -23,6 +23,88 @@ namespace {
 
 HMODULE runtime_module = nullptr;
 
+DWORD Run40401Passive() {
+    // Independent terminal experiment: no probe, IPC, production gate or provider.
+    if (tf3postobserver::Diagnose40401WithoutHooks() != tf3postobserver::Status::started)
+        return TF3_INPROCESS_RUNTIME_UNSUPPORTED_EXECUTABLE;
+    static volatile LONG attempted = 0;
+    if (InterlockedCompareExchange(&attempted, 1, 0) != 0)
+        return TF3_INPROCESS_RUNTIME_PASSIVE_FAILED;
+    wchar_t directory[MAX_PATH]{}, path[MAX_PATH]{};
+    const DWORD length = GetTempPathW(_countof(directory), directory);
+    if (!length || length >= _countof(directory) ||
+        swprintf_s(path, L"%stf3mp-passive40401-%lu.jsonl", directory, GetCurrentProcessId()) < 0)
+        return TF3_INPROCESS_RUNTIME_PASSIVE_FAILED;
+    HANDLE file = CreateFileW(path, GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_NEW,
+                               FILE_ATTRIBUTE_TEMPORARY, nullptr);
+    if (file == INVALID_HANDLE_VALUE) return TF3_INPROCESS_RUNTIME_PASSIVE_FAILED;
+    // Qualify every vehicle site while the shared post-site byte is pristine.
+    const auto vehicle = tf3vehicleobserver::Start40401Passive();
+    const auto post = vehicle == tf3vehicleobserver::Status::started
+        ? tf3postobserver::Start40401Passive() : tf3postobserver::Status::never_started;
+    TraceNativeStart(L"-runtime-passive-start.txt", "passive-40401-start",
+        static_cast<unsigned>(vehicle), static_cast<unsigned>(post));
+    bool ok = vehicle == tf3vehicleobserver::Status::started && post == tf3postobserver::Status::started;
+    try {
+        // At most 301 bounded records over five minutes. Snapshots are observations,
+        // not an atomic transaction or gameplay receipts. No borrowed pointer escapes.
+        for (unsigned sample = 0; ok && sample <= 300; ++sample) {
+            const auto p = tf3postobserver::ReadSnapshot();
+            const auto v = tf3vehicleobserver::Read();
+            std::string line = "{";
+            const auto field = [&line](const char* name, auto value) {
+                if (line.size() > 1) line += ',';
+                line += '\"'; line += name; line += "\":"; line += std::to_string(value);
+            };
+            field("sample", sample); field("tickMs", GetTickCount64());
+            FILETIME wall{}; GetSystemTimeAsFileTime(&wall);
+            field("filetime", (static_cast<unsigned long long>(wall.dwHighDateTime) << 32) | wall.dwLowDateTime);
+            field("boundaryHits", p.hits); field("headroom", p.minimum_stack_headroom);
+            field("boundaryThread", p.owner_thread); field("unaligned", p.unaligned_stack);
+            field("boundaryCrossThread", p.cross_thread); field("boundarySaturated", p.saturated);
+            field("cfgKnown", p.cfg_known); field("cfg", p.cfg_flags);
+            field("cetKnown", p.cet_known); field("cet", p.cet_flags);
+            field("factory", v.factory_hits); field("admission", v.admission_hits);
+            field("correlated", v.correlated_hits); field("dropped", v.dropped_candidates);
+            field("vehicleThread", v.owner_thread); field("vehicleCrossThread", v.cross_thread);
+            field("vehicleSaturated", v.saturated); field("entity", v.latest_entity);
+            field("stopped", v.latest_stopped); field("valid", v.latest_valid);
+            field("entryZero", v.latest_entry_result_zero); field("callbackShape", v.latest_callback_shape_matches);
+            field("adapterTableRva", v.latest_adapter_table_rva);
+            field("adapterInvokeRva", v.latest_adapter_invoke_rva);
+            field("factoryThread", v.latest_correlated_factory_thread);
+            field("progressKnown", v.latest_admission_progress_known); field("progressEmpty", v.latest_admission_progress_empty);
+            field("admissionToken", v.latest_correlated_admission_invocation);
+            field("admissionThread", v.latest_correlated_admission_thread);
+            field("callback", v.callback_hits); field("callbackThread", v.callback_thread);
+            field("callbackValid", v.latest_callback_valid); field("callbackResult", v.latest_callback_result);
+            field("callbackMatches", v.latest_callback_matches_admission_storage);
+            field("send", v.send_return_hits); field("sendToken", v.latest_send_return_invocation);
+            field("sendMatches", v.latest_send_return_matches_admission_storage);
+            field("marshaler", v.marshaler_return_hits); field("marshalerValid", v.latest_marshaler_valid);
+            field("marshalerResult", v.latest_marshaler_result);
+            field("marshalerAdmissionMatches", v.latest_marshaler_matches_admission_storage);
+            field("marshalerCallbackMatches", v.latest_marshaler_matches_callback_storage);
+            field("body", v.post_send_body_hits); field("bodyCorrelated", v.post_send_body_correlated_hits);
+            field("bodyToken", v.latest_post_send_body_invocation); field("bodyValid", v.latest_post_send_body_valid);
+            field("bodyEntity", v.latest_post_send_body_entity); field("bodyStopped", v.latest_post_send_body_stopped);
+            field("bodyThread", v.latest_post_send_body_thread);
+            line += "}\n";
+            DWORD written = 0;
+            ok = line.size() <= 4096 && WriteFile(file, line.data(), static_cast<DWORD>(line.size()), &written, nullptr)
+                && written == line.size() && FlushFileBuffers(file);
+            if (ok && sample < 300) Sleep(1000);
+        }
+    } catch (...) { ok = false; }
+    const auto post_stop = tf3postobserver::Stop();
+    const auto vehicle_stop = tf3vehicleobserver::Stop();
+    CloseHandle(file);
+    TraceNativeStart(L"-runtime-passive-stop.txt", "passive-40401-stop",
+        static_cast<unsigned>(vehicle_stop), static_cast<unsigned>(post_stop));
+    return ok && post_stop == tf3postobserver::Status::stopped && vehicle_stop == tf3vehicleobserver::Status::stopped
+        ? TF3_INPROCESS_RUNTIME_PASSIVE_COMPLETE : TF3_INPROCESS_RUNTIME_PASSIVE_FAILED;
+}
+
 bool CopyBounded(const wchar_t* source, std::size_t maximum, std::wstring* output) {
     if (source == nullptr) return false;
     const std::size_t length = wcsnlen_s(source, maximum + 1);
@@ -286,8 +368,8 @@ extern "C" __declspec(dllexport) DWORD WINAPI Tf3InProcessRuntimeV1(
         return TF3_INPROCESS_RUNTIME_INVALID_CREDENTIALS;
     }
 
-    // A diagnostic request always terminates here, even if malformed or the
-    // image is unsupported. No probe DLL, hooks, server or providers are started.
+    // Diagnostic requests terminate before the production path. The original
+    // diagnostic has no hooks; the separate passive selector observes only.
     wchar_t diagnostic[16]{};
     SetLastError(ERROR_SUCCESS);
     const DWORD diagnostic_length = GetEnvironmentVariableW(
@@ -301,6 +383,13 @@ extern "C" __declspec(dllexport) DWORD WINAPI Tf3InProcessRuntimeV1(
                                                   diagnostic_pipe) == 0;
     const bool environment_diagnostic = diagnostic_length != 0 ||
         diagnostic_error != ERROR_ENVVAR_NOT_FOUND;
+    constexpr wchar_t passive_pipe[] = L"tf3mp_passive40401_";
+    if (pipe.compare(0, _countof(passive_pipe) - 1, passive_pipe) == 0) {
+        // Environment ambiguity is terminal; only the explicit one-use pipe
+        // selector authorizes passive instrumentation across Steam relaunches.
+        if (environment_diagnostic) return TF3_INPROCESS_RUNTIME_INVALID_DIAGNOSTIC;
+        return Run40401Passive();
+    }
     if (handoff_diagnostic || environment_diagnostic) {
         if (environment_diagnostic &&
             (diagnostic_length != 5 || wcscmp(diagnostic, L"40401") != 0)) {

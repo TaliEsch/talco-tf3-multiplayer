@@ -1,5 +1,8 @@
 [CmdletBinding()]
-param([string]$GameDirectory = 'E:\Steam\steamapps\common\Transport Fever 3')
+param(
+  [string]$GameDirectory = 'E:\Steam\steamapps\common\Transport Fever 3',
+  [ValidateSet('NoHook', 'Passive')][string]$Mode = 'NoHook'
+)
 
 $ErrorActionPreference = 'Stop'
 $expectedExe = '6abdedd8fbbd3117fe909d8747bd2690a76b9098a251aabb1ae9ba6b4f9659ca'
@@ -35,7 +38,8 @@ try {
     }
     [ordered]@{name=$name;sha256=$hash}
   }
-  $manifestJson = [ordered]@{schemaVersion=1;mode='no-hook-diagnostic-40401';
+  $manifestMode = if ($Mode -eq 'Passive') { 'passive-diagnostic-40401' } else { 'no-hook-diagnostic-40401' }
+  $manifestJson = [ordered]@{schemaVersion=1;mode=$manifestMode;
     qualifiedExeSha256=$expectedExe;files=$records} | ConvertTo-Json -Depth 4
   $stream = [System.IO.File]::Open($manifestPath, [System.IO.FileMode]::CreateNew,
     [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
@@ -55,4 +59,4 @@ try {
   if ($manifestCreated) { Remove-Item -LiteralPath $manifestPath -Force -ErrorAction SilentlyContinue }
   throw
 }
-Write-Host "Staged two hash-recorded diagnostic DLLs for build 40401 in $game."
+Write-Host "Staged two hash-recorded $Mode diagnostic DLLs for build 40401 in $game."

@@ -29,6 +29,7 @@ struct Snapshot {
     bool active;
     bool cross_thread;
     bool saturated;
+    bool unaligned_stack;
 };
 // Call Start/Stop from an ordinary worker, never DllMain or an engine callback.
 // One lifecycle only: successful Stop permanently disallows rearming. The VEH
@@ -42,6 +43,7 @@ Status QualifyExactSite(void** site) noexcept;
 // One-shot diagnostic identity/site check. Does not authorize Start, expose a
 // site pointer, install handlers, patch bytes, or enable control providers.
 Status Diagnose40401WithoutHooks() noexcept;
+Status Start40401Passive() noexcept;
 
 #ifdef TF3_POST_OBSERVER_OWNED_TEST
 Status StartOwnedFixture(void* site) noexcept;

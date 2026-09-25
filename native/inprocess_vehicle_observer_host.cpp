@@ -59,6 +59,7 @@ struct Entry {
 };
 struct CallbackValue { std::array<std::byte, 0x38> prefix{}; void* implementation = nullptr; };
 struct CallbackImplementation { void* vtable = nullptr; };
+std::array<std::uintptr_t, 3> image_adapter_table{};
 }
 
 int wmain(int argc, wchar_t** argv) {
@@ -131,6 +132,15 @@ int wmain(int argc, wchar_t** argv) {
     const std::int32_t entity = 66005;
     std::memcpy(command.data(), &entity, sizeof(entity));
     command[4] = 1;
+    command[0x9b8] = 0x32;
+    std::thread unrelated_admission([&] {
+        command[0x9b8] = 0x31;
+        (void)OwnedVehicleAdmissionExecute(&entry, &callback_implementation, &callback_value, &progress_pair);
+    });
+    unrelated_admission.join();
+    Require(snapshot().owner_thread == 0 && !snapshot().cross_thread &&
+            snapshot().admission_hits == 0,
+            "unrelated command cannot set vehicle thread ownership");
     command[0x9b8] = 0x32;
     Require(arm_snapshot().state == tf3vehicleobserver::CancellationArmState::disabled,
             "default cancellation arm is disabled");
@@ -451,6 +461,20 @@ int wmain(int argc, wchar_t** argv) {
     Require(snapshot().post_send_body_correlated_hits == before_stale_cleanup.post_send_body_correlated_hits &&
             snapshot().dropped_candidates == before_stale_cleanup.dropped_candidates + 1,
             "unrelated admission invalidates a stale post-cleanup frame before tag filtering");
+
+    image_adapter_table[2] = reinterpret_cast<std::uintptr_t>(&OwnedVehicleCallbackExecute);
+    CONTEXT adapter_identity{};
+    adapter_identity.Rbx = reinterpret_cast<DWORD64>(&entry);
+    adapter_identity.Rax = reinterpret_cast<DWORD64>(image_adapter_table.data());
+    adapter_identity.R9 = reinterpret_cast<DWORD64>(&progress_pair);
+    syntheticTrap(&OwnedVehicleAdmissionSite, adapter_identity);
+    const auto image = reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr));
+    observed = snapshot();
+    Require(observed.latest_adapter_table_rva ==
+                reinterpret_cast<std::uintptr_t>(image_adapter_table.data()) - image &&
+            observed.latest_adapter_invoke_rva ==
+                reinterpret_cast<std::uintptr_t>(&OwnedVehicleCallbackExecute) - image,
+            "unknown image-resident adapter retains bounded table and invoke RVAs");
 
     // Leave 16 distinct invocations waiting for cleanup; the seventeenth must
     // latch overflow and never manufacture a valid completion receipt.

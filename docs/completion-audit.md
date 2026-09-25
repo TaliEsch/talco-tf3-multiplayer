@@ -1,5 +1,32 @@
 # Completion audit against the build prompt
 
+## Build 40401 passive Stop observation — 25 September 2026
+
+One disposable-save TF3 run (PID 35408, exact build hash below) loaded
+`tf3mp_disposable_43b49d368fbbd409ae2614ada7b0c757`. A single ordinary
+UI Stop on Road Vehicle 1 changed its visible state from 25 km/h through
+`Stopping` to `Stopped`. The passive native trace contains 301 one-second
+samples over five minutes: 568 qualified boundary hits with no unaligned or
+cross-thread boundary and at least 325,808 bytes of stack headroom. Exactly
+one Stop factory, admission, send, callback and marshaler return correlated to
+entity 66005, stopped=true, invocation 1, with no drops. The two passive sites
+restored (`passive-40401-stop 2 2`, `runtime-returned 12 0`); no production
+probe, gate or IPC server started. The source save hash remained
+`CCBF4BEB740E53323E06D20890FD029C8E174D3E85EFB06801A8B4275C762FB5`.
+The two staged DLL copies were removed by their hash-matched manifest.
+Private evidence: `reports/native-passive-40401-1bb7de79d39a4e32b56d7871ea2c78b8`.
+
+This is one ordinary single-game Stop, not Host-ordered replay or production
+cancellation. The passive record lost the actual adapter RVA
+(`adapterTableRva=0`), and its cross-thread vehicle flag was set by an unrelated
+command before Stop admission. These observer evidence defects must be fixed
+before the next native qualification experiment. Source now retains bounded
+image-relative adapter table/invoke RVAs and counts vehicle threads only after
+Stop validation; the owned native fixture checks both. Focused native tests
+passed 10/10 after rebuilding with `/W4 /WX`, but these changes have not run in
+TF3. Production hold/release and funded vehicle purchase remain unverified on
+build 40401.
+
 ## Ordered ROAD line source integration — 25 September 2026
 
 The opt-in `road.line.create` source path now joins Host admission, queue owner

@@ -16,6 +16,18 @@ vehicle traps or IPC server started. This does not qualify the vehicle ABI or
 permit production gameplay; the next experiment must establish those contracts
 before the funded purchase run.
 
+The subsequent passive run observed one ordinary UI Stop on the exact build:
+Road Vehicle 1 reached `Stopped`, and one native factory/admission/send/callback/
+marshaler chain correlated to entity 66005. The boundary ran 568 times on one
+thread without stack/alignment faults; both passive sites restored cleanly.
+The private five-minute trace is in
+`reports/native-passive-40401-1bb7de79d39a4e32b56d7871ea2c78b8`.
+Its adapter identity was not retained and an unrelated command polluted the
+vehicle cross-thread flag. Both measurements are corrected in source and the
+owned native fixture, awaiting live confirmation. Then perform a bounded
+40401 hold/release qualification before enabling production gameplay.
+The ordinary Stop is not Host ordering, cancellation or replay proof.
+
 ## Ordered vehicle purchase integration — 25 September 2026
 
 The road vehicle purchase path is now opt-in from Host admission through a

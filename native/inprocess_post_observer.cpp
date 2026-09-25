@@ -26,6 +26,7 @@ std::atomic<std::uintptr_t> target{0};
 std::atomic<bool> active{false};
 std::atomic<bool> cross_thread{false};
 std::atomic<bool> saturated{false};
+std::atomic<bool> unaligned_stack{false};
 std::atomic<std::uint32_t> owner_thread{0};
 std::atomic<std::uint64_t> hits{0};
 std::atomic<std::uint64_t> minimum_stack_headroom{(std::numeric_limits<std::uint64_t>::max)()};
@@ -83,6 +84,7 @@ LONG CALLBACK OnException(EXCEPTION_POINTERS* pointers) noexcept {
             const auto stack_limit = static_cast<std::uintptr_t>(
                 __readgsqword(FIELD_OFFSET(NT_TIB, StackLimit)));
             const auto interrupted_rsp = static_cast<std::uintptr_t>(pointers->ContextRecord->Rsp);
+            if ((interrupted_rsp & 15u) != 0) unaligned_stack.store(true);
             const std::uint64_t headroom = interrupted_rsp >= stack_limit
                 ? static_cast<std::uint64_t>(interrupted_rsp - stack_limit) : 0;
             auto minimum = minimum_stack_headroom.load(std::memory_order_relaxed);
@@ -322,6 +324,16 @@ Status Diagnose40401WithoutHooks() noexcept {
     } catch (...) { return Status::unsupported_image; }
 }
 
+Status Start40401Passive() noexcept {
+    AcquireSRWLockExclusive(&lifecycle_lock);
+    const auto qualified = Diagnose40401WithoutHooks();
+    const auto result = qualified == Status::started
+        ? StartSite(reinterpret_cast<unsigned char*>(GetModuleHandleW(nullptr)) + kSiteRva)
+        : qualified;
+    ReleaseSRWLockExclusive(&lifecycle_lock);
+    return result;
+}
+
 Status Stop() noexcept {
     AcquireSRWLockExclusive(&lifecycle_lock);
     Status result = Status::never_started;
@@ -358,7 +370,7 @@ Snapshot ReadSnapshot() noexcept {
     return {observed_hits, headroom == (std::numeric_limits<std::uint64_t>::max)() ? 0 : headroom,
             owner_thread.load(), cfg_flags.load(), cet_flags.load(), cfg_known.load(),
             cet_known.load(), active.load(),
-            cross_thread.load(), saturated.load()};
+            cross_thread.load(), saturated.load(), unaligned_stack.load()};
 }
 #ifdef TF3_POST_OBSERVER_OWNED_TEST
 Status StartOwnedFixture(void* site) noexcept {

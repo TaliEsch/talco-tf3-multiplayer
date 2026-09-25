@@ -1,6 +1,7 @@
 #include "inprocess_vehicle_observer.h"
 
 #include <intrin.h>
+#include <psapi.h>
 #include <array>
 #include <atomic>
 #include <cstring>
@@ -51,6 +52,10 @@ bool attempted = false;
 std::atomic<bool> active{false};
 std::atomic<bool> cross_thread{false};
 std::atomic<bool> saturated{false};
+std::atomic<bool> passive_only{false};
+std::atomic<std::uint64_t> latest_adapter_identity{0};
+std::atomic<std::uint32_t> image_size{0};
+std::atomic<std::uint32_t> latest_correlated_factory_thread{0};
 std::atomic<std::uintptr_t> image_base{0};
 std::atomic<std::uint32_t> observed_thread{0};
 std::atomic<std::uint64_t> factory_hits{0};
@@ -721,17 +726,39 @@ void RecordFactoryPost(const CONTEXT* context) noexcept {
     pending->state.store(0, std::memory_order_release);
 }
 
+std::uint64_t ReadAdapterIdentity(const CONTEXT* context) noexcept {
+    const auto base = image_base.load(std::memory_order_relaxed);
+    const auto size = image_size.load(std::memory_order_relaxed);
+    const auto table = static_cast<std::uintptr_t>(context->Rax);
+    if (base == 0 || size < 0x18 || table < base || table - base > size - 0x18)
+        return 0;
+    // The image is pinned and exact-build qualified. Read only a bounded
+    // image slot, under SEH, and publish offsets only. This is evidence, never
+    // an addition to SafeReadCheckedCallback's production adapter allowlist.
+    __try {
+        const auto invoke = *reinterpret_cast<const std::uintptr_t*>(table + 0x10);
+        const auto invoke_rva = invoke >= base && invoke - base < size
+            ? static_cast<std::uint32_t>(invoke - base) : 0u;
+        return static_cast<std::uint32_t>(table - base) |
+            (static_cast<std::uint64_t>(invoke_rva) << 32);
+    } __except (EXCEPTION_EXECUTE_HANDLER) { return 0; }
+}
+
 void RecordAdmission(CONTEXT* context) noexcept {
     const DWORD thread = GetCurrentThreadId();
     InvalidateSendFrame(context, thread);
-    ObserveThread(thread);
     std::int32_t entity = 0;
     std::uint8_t stopped = 0;
     std::uintptr_t storage = 0;
     std::uint8_t result = 0;
     if (!SafeReadAction(static_cast<std::uintptr_t>(context->Rbx), &entity, &stopped, &storage,
                         &result)) return;
+    // This send site serves every command. Only a validated Stop entry may
+    // contribute to the vehicle thread evidence; frame invalidation above
+    // remains unconditional so unrelated stack reuse cannot create receipts.
+    ObserveThread(thread);
     const bool callback_shape_matches = SafeReadCallbackShape(context);
+    latest_adapter_identity.store(ReadAdapterIdentity(context), std::memory_order_release);
     bool progress_empty = false;
     const bool progress_known = SafeReadProgressEmpty(static_cast<std::uintptr_t>(context->R9), &progress_empty);
     IncrementSaturating(admission_hits);
@@ -773,6 +800,7 @@ void RecordAdmission(CONTEXT* context) noexcept {
     const auto same_payload = matched->entity.load(std::memory_order_relaxed) == entity &&
         matched->stopped.load(std::memory_order_relaxed) == stopped;
     const auto candidate_arm_generation = matched->arm_generation.load(std::memory_order_relaxed);
+    const auto factory_thread = matched->factory_thread.load(std::memory_order_relaxed);
     if (matched->factory_thread.load(std::memory_order_relaxed) != thread)
         cross_thread.store(true, std::memory_order_relaxed);
     matched->state.store(0, std::memory_order_release);
@@ -800,6 +828,7 @@ void RecordAdmission(CONTEXT* context) noexcept {
         latest_admission.storage.store(storage, std::memory_order_relaxed);
         latest_admission.state.store(2, std::memory_order_release);
     }
+    latest_correlated_factory_thread.store(factory_thread, std::memory_order_release);
     latest_correlated_admission_thread.store(thread, std::memory_order_release);
     latest_correlated_admission_invocation.store(selected_sequence, std::memory_order_release);
     RecordSendInvocation(context, thread, storage, selected_sequence, entity, stopped);
@@ -1039,6 +1068,11 @@ Status StartSites(void* factory, void* factory_post, void* admission, void* call
             ValidSite(static_cast<unsigned char*>(post_send_body) - 5, kPostSendBodyWindow, allocation_base)) ||
         !(owned_callback_tail ? ValidOwnedCallbackTail(callback_tail, allocation_base) :
             ValidSite(callback_tail, kCallbackTailBytes, allocation_base))) return Status::invalid_site;
+    MODULEINFO module{};
+    if (!GetModuleInformation(GetCurrentProcess(), allocation_base, &module, sizeof(module)) ||
+        module.lpBaseOfDll != allocation_base || module.SizeOfImage < 0x18)
+        return Status::invalid_site;
+    image_size.store(module.SizeOfImage, std::memory_order_release);
     image_base.store(reinterpret_cast<std::uintptr_t>(allocation_base), std::memory_order_release);
     callback_continuation.store(continuation, std::memory_order_release);
     HMODULE pinned = nullptr;
@@ -1109,6 +1143,21 @@ Status Start() noexcept {
     return result;
 }
 
+Status Start40401Passive() noexcept {
+    AcquireSRWLockExclusive(&lifecycle_lock);
+    passive_only.store(true, std::memory_order_release);
+    Status result = Status::unsupported_image;
+    if (tf3postobserver::Diagnose40401WithoutHooks() == tf3postobserver::Status::started) {
+        auto* base = reinterpret_cast<unsigned char*>(GetModuleHandleW(nullptr));
+        result = StartSites(base + kFactoryRva, base + kFactoryPostRva,
+            base + kAdmissionRva, base + kCallbackTailRva, base + kSendReturnRva,
+            base + kMarshalerReturnRva, base + kPostSendBodyRva,
+            GetModuleHandleW(nullptr), reinterpret_cast<std::uintptr_t>(base) + kCallbackContinuationRva, false);
+    }
+    ReleaseSRWLockExclusive(&lifecycle_lock);
+    return result;
+}
+
 Status Stop() noexcept {
     AcquireSRWLockExclusive(&lifecycle_lock);
     active.store(false, std::memory_order_release);
@@ -1131,6 +1180,7 @@ Status ArmCancellation(const CancellationArmRequest& request) noexcept {
     const auto now = GetTickCount64();
     if (request.expected_stopped != 1 || request.deadline_tick <= now ||
         request.deadline_tick - now > kMaximumArmLifetimeMs ||
+        passive_only.load(std::memory_order_acquire) ||
         !active.load(std::memory_order_acquire) || saturated.load(std::memory_order_acquire))
         return Status::invalid_site;
     bool unused = false;
@@ -1179,6 +1229,7 @@ CancellationArmSnapshot ReadCancellationArm() noexcept {
 }
 
 Snapshot Read() noexcept {
+    const auto adapter = latest_adapter_identity.load(std::memory_order_acquire);
     const auto packed = latest_action.load(std::memory_order_acquire);
     const auto callback = latest_callback.load(std::memory_order_acquire);
     const auto marshaler = latest_marshaler.load(std::memory_order_acquire);
@@ -1228,7 +1279,9 @@ Snapshot Read() noexcept {
             latest_correlated_admission_invocation.load(std::memory_order_acquire),
             latest_send_return_invocation.load(std::memory_order_acquire), post_token,
             static_cast<std::int32_t>(post_payload & 0xffffffffULL),
-            static_cast<std::uint8_t>((post_payload >> 32) & 1), post_valid, post_thread};
+            static_cast<std::uint8_t>((post_payload >> 32) & 1), post_valid, post_thread,
+            static_cast<std::uint32_t>(adapter), static_cast<std::uint32_t>(adapter >> 32),
+            latest_correlated_factory_thread.load()};
 }
 
 #ifdef TF3_VEHICLE_OBSERVER_OWNED_TEST
