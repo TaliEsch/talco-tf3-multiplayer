@@ -30,6 +30,7 @@ struct Snapshot {
 
 // Production entry point: intentionally cannot patch a TF3 process yet.
 Status Start() noexcept;
+Status Start40401BoundaryExperiment() noexcept;
 Status Stop() noexcept;
 Snapshot Read() noexcept;
 inprocess_gate::Result RequestHold() noexcept;

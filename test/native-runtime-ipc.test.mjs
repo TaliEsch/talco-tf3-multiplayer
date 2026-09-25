@@ -137,6 +137,7 @@ test('owned qualified-provider fixture preserves canonical uint64 controls, dela
   const {child,client}=await startQualifiedGateFixture();
   assert.equal(client.handshake.productionQualified,false);
   assert.deepEqual(client.capabilities,['transport.health','session.bind','qualification.inprocess.gate','simulation.hold','engine.halt','simulation.gate-receipts.v1','engine.detach']);
+  await assert.rejects(client.armVehicleCancel({entity:66005,stopped:1,ttlMs:50}),/NATIVE_RUNTIME_CAPABILITY_UNAVAILABLE:vehicle.cancel-arm.v1/);
   await client.bindSession({sessionId:'owned.gate:1',role:'host'});
   const epoch='18446744073709551615',generation='72057594037927935';
   const held=await client.gateControl({control:'hold',epoch,generation});

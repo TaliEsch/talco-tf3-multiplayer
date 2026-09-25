@@ -2,6 +2,19 @@
 
 ## Current build gate — 25 September 2026
 
+The exact-40401 boundary-only experiment has now passed in a real disposable
+TF3 game. A Host-bound native gate held the world while eight authenticated
+pings succeeded and the observed tick/update clocks stayed fixed. One release
+returned a correlated `boundary_applied` event and advanced each clock exactly
+once; detach returned a correlated event and the observer became inactive.
+The runtime stop trace was `boundary-40401-stop 0 3`. TF3 closed without
+saving, the source save hash stayed unchanged, and the two diagnostic DLLs
+were removed. Private trace: `reports/boundary-40401-20260925`. This qualifies
+only the 40401 simulation boundary. The diagnostic handshake deliberately has
+`productionQualified=false` and no vehicle cancellation capability. Next
+qualify the Stop adapter's callback lifetime and one-use cancellation before
+attempting Host-ordered vehicle replay; do not repeat the boundary-only run.
+
 The revised passive 40401 run captured the missing adapter identity during one
 ordinary UI Stop: entity 66005 reached `Stopped`, with one correlated
 factory/admission/send/callback/marshaler chain and no drops. The adapter table

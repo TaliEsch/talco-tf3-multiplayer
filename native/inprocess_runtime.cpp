@@ -253,6 +253,10 @@ bool PollGate(tf3runtimeipc::GateNotification* notification) noexcept {
 // controls, not gameplay proof.
 const tf3runtimeipc::GateProvider production_gate_provider{
     true, true, &SubmitGate, &PollGate};
+// Same control implementation; one real 40401 boundary-only hold/release passed.
+// This provider still does not qualify any vehicle command or production session.
+const tf3runtimeipc::GateProvider boundary_40401_experiment_provider{
+    true, false, &SubmitGate, &PollGate};
 
 bool ArmVehicleCancellation(const tf3runtimeipc::VehicleCancelArmRequest& request,
                             tf3runtimeipc::VehicleCancelArmReceipt* receipt) noexcept {
@@ -309,6 +313,32 @@ tf3runtimeipc::RuntimeObservation ReadBoundaryObservation() noexcept {
             snapshot.observed_owner_thread, snapshot.cfg_flags, snapshot.cet_flags,
             snapshot.cfg_known, snapshot.cet_known, snapshot.active,
             snapshot.cross_thread, false};
+}
+
+DWORD Run40401BoundaryExperiment(const std::wstring& pipe, const std::string& token) {
+    // Explicit one-use experiment: qualify this build independently of the
+    // legacy probe and vehicle path. No command capture or cancellation provider.
+    const auto status = tf3boundary::Start40401BoundaryExperiment();
+    TraceNativeStart(L"-runtime-boundary40401.txt", "boundary-40401-start",
+                    static_cast<unsigned>(status), 0);
+    if (status != tf3boundary::Status::started) {
+        // Start owns patch-failure cleanup. Never release an uncertain owner.
+        if (tf3boundary::Read().active) (void)tf3boundary::RequestHalt();
+        const auto stopped = tf3boundary::Stop();
+        return stopped != tf3boundary::Status::stopped
+            ? TF3_INPROCESS_RUNTIME_OBSERVER_STOP_FAILED
+            : TF3_INPROCESS_RUNTIME_UNSUPPORTED_EXECUTABLE;
+    }
+    const int server_status = tf3runtimeipc::ServeInProcess(
+        pipe, token, &ReadBoundaryObservation, 0, &boundary_40401_experiment_provider,
+        TF3_RUNTIME_IPC_INPROCESS_GATE_LEASE_MS, nullptr, nullptr);
+    if (tf3boundary::Read().gate.state != inprocess_gate::State::detached)
+        (void)tf3boundary::RequestHalt();
+    const auto stopped = tf3boundary::Stop();
+    TraceNativeStart(L"-runtime-boundary40401-stop.txt", "boundary-40401-stop",
+                    static_cast<unsigned>(server_status), static_cast<unsigned>(stopped));
+    return server_status == 0 && stopped == tf3boundary::Status::stopped
+        ? TF3_INPROCESS_RUNTIME_STOPPED : TF3_INPROCESS_RUNTIME_SERVER_FAILED;
 }
 
 tf3runtimeipc::PassiveVehicleActionObservation ReadPassiveVehicleObservation() noexcept {
@@ -383,6 +413,11 @@ extern "C" __declspec(dllexport) DWORD WINAPI Tf3InProcessRuntimeV1(
                                                   diagnostic_pipe) == 0;
     const bool environment_diagnostic = diagnostic_length != 0 ||
         diagnostic_error != ERROR_ENVVAR_NOT_FOUND;
+    constexpr wchar_t boundary_pipe[] = L"tf3mp_boundary40401_";
+    if (pipe.compare(0, _countof(boundary_pipe) - 1, boundary_pipe) == 0) {
+        if (environment_diagnostic) return TF3_INPROCESS_RUNTIME_INVALID_DIAGNOSTIC;
+        return Run40401BoundaryExperiment(pipe, token);
+    }
     constexpr wchar_t passive_pipe[] = L"tf3mp_passive40401_";
     if (pipe.compare(0, _countof(passive_pipe) - 1, passive_pipe) == 0) {
         // Environment ambiguity is terminal; only the explicit one-use pipe

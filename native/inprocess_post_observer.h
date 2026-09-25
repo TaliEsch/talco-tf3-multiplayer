@@ -43,6 +43,8 @@ Status QualifyExactSite(void** site) noexcept;
 // One-shot diagnostic identity/site check. Does not authorize Start, expose a
 // site pointer, install handlers, patch bytes, or enable control providers.
 Status Diagnose40401WithoutHooks() noexcept;
+// Explicit boundary-only experiment; does not qualify vehicle cancellation.
+Status Qualify40401BoundarySite(void** site) noexcept;
 Status Start40401Passive() noexcept;
 
 #ifdef TF3_POST_OBSERVER_OWNED_TEST

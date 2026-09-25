@@ -34,3 +34,13 @@ for (const [selector, expected] of [['passive-pipe', 6], ['passive-conflict', 11
     assert.match(run.stdout, new RegExp(`status=${expected}\\b`));
   });
 }
+for (const [selector, expected] of [['boundary-pipe', 6], ['boundary-conflict', 11]]) {
+  test(`40401 boundary handoff ${selector} rejects an owned image without starting control`, {skip}, () => {
+    const run = spawnSync(host, [dll, '40401', selector],
+      {windowsHide: true, encoding: 'utf8', timeout: 15_000});
+    assert.ifError(run.error);
+    assert.equal(run.status, 0, run.stderr || run.stdout);
+    assert.match(run.stdout, /diagnostic-rejected-no-probe=1/);
+    assert.match(run.stdout, new RegExp(`status=${expected}\\b`));
+  });
+}

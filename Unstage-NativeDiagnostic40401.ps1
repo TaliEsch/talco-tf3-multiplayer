@@ -8,7 +8,7 @@ $manifestPath = Join-Path $game 'TalCo-TF3MP-native-diagnostic.json'
 if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { throw 'Diagnostic manifest is absent.' }
 $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
 $names = @('winhttp.dll', 'TF3InProcessRuntime.dll')
-if ($manifest.schemaVersion -ne 1 -or $manifest.mode -notin @('no-hook-diagnostic-40401', 'passive-diagnostic-40401') -or
+if ($manifest.schemaVersion -ne 1 -or $manifest.mode -notin @('no-hook-diagnostic-40401', 'passive-diagnostic-40401', 'boundary-diagnostic-40401') -or
     $manifest.qualifiedExeSha256 -ne '6abdedd8fbbd3117fe909d8747bd2690a76b9098a251aabb1ae9ba6b4f9659ca' -or
     $manifest.files.Count -ne 2 -or
     (Compare-Object ($names | Sort-Object) @($manifest.files | ForEach-Object { $_.name } | Sort-Object))) {

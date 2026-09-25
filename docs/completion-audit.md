@@ -1,5 +1,33 @@
 # Completion audit against the build prompt
 
+## Build 40401 real-game boundary hold/release — 25 September 2026
+
+An explicit boundary-only runtime loaded in TF3 PID 17360 against executable
+SHA-256 `6ABDEDD8FBBD3117FE909D8747BD2690A76B9098A251AABB1AE9BA6B4F9659CA`.
+The authenticated native session bound as Host. At speed 1, the game bridge
+observed progression before hold; then eight pings succeeded while both world
+clocks remained at tick 57352/update 3064. One release receipt and matching
+`boundary_applied` event for epoch `1790343497160`, generation 1, preceded
+observed tick 57353/update 3065: exactly one increment in each clock. Detach
+generation 2 returned its event, and a final native ping showed the observer
+inactive. The runtime traces report `boundary-40401-start 1 0` and
+`boundary-40401-stop 0 3`; the proxy returned `runtime-returned 0 0`.
+TF3 closed without saving. The disposable source save retained SHA-256
+`CCBF4BEB740E53323E06D20890FD029C8E174D3E85EFB06801A8B4275C762FB5`.
+Both hash-matched diagnostic DLLs, one-use handoff and manifest were removed
+after process exit. Private output: `reports/boundary-40401-20260925`.
+
+The handshake reported `productionQualified=false`; vehicle cancellation was
+absent. This proves the 40401 boundary-only hold/release/detach behavior in one
+real game, not Host-ordered Stop, replay, purchase, two-instance agreement or
+Stage 7 completion. The next native gate is callback ownership and safe
+one-use cancellation at the exact 40401 Stop adapter.
+The focused native gate/IPC/diagnostic tests passed 29/29. At this integration
+point the full JS suite was attempted and again failed only the two native
+runtime observer debugger teardown fixtures: target survival failed after
+detach, with Win32 121. These same fixtures failed at the preceding source
+integration milestone; neither failure exercises this boundary-only path.
+
 ## Revised 40401 passive Stop and assignment source — 25 September 2026
 
 A second no-control passive TF3 run (PID 3360) loaded the same disposable save

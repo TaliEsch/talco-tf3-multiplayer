@@ -334,6 +334,15 @@ Status Start40401Passive() noexcept {
     return result;
 }
 
+Status Qualify40401BoundarySite(void** site) noexcept {
+    if (!site) return Status::invalid_site;
+    *site = nullptr;
+    const auto result = Diagnose40401WithoutHooks();
+    if (result == Status::started)
+        *site = reinterpret_cast<unsigned char*>(GetModuleHandleW(nullptr)) + kSiteRva;
+    return result;
+}
+
 Status Stop() noexcept {
     AcquireSRWLockExclusive(&lifecycle_lock);
     Status result = Status::never_started;

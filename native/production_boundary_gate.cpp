@@ -193,13 +193,15 @@ LONG DispatchException(EXCEPTION_POINTERS* p) noexcept {
 }
 
 #ifdef TF3_BOUNDARY_PRODUCTION_RUNTIME
-Status Start() noexcept {
+static Status StartQualified(bool boundary_40401) noexcept {
     AcquireSRWLockExclusive(&lifecycle_lock);
     if (active.load()) { ReleaseSRWLockExclusive(&lifecycle_lock); return Status::already_started; }
     if (attempted) { ReleaseSRWLockExclusive(&lifecycle_lock); return Status::terminal; }
     attempted = true;
     void* exact_site = nullptr;
-    const auto qualified = tf3postobserver::QualifyExactSite(&exact_site);
+    const auto qualified = boundary_40401
+        ? tf3postobserver::Qualify40401BoundarySite(&exact_site)
+        : tf3postobserver::QualifyExactSite(&exact_site);
     if (qualified != tf3postobserver::Status::started || !exact_site) {
         ReleaseSRWLockExclusive(&lifecycle_lock);
         return qualified == tf3postobserver::Status::incompatible_mitigation
@@ -260,8 +262,11 @@ Status Start() noexcept {
     ReleaseSRWLockExclusive(&lifecycle_lock);
     return Status::started;
 }
+Status Start() noexcept { return StartQualified(false); }
+Status Start40401BoundaryExperiment() noexcept { return StartQualified(true); }
 #else
 Status Start() noexcept { return Status::disabled_pending_live_qualification; }
+Status Start40401BoundaryExperiment() noexcept { return Status::disabled_pending_live_qualification; }
 #endif
 
 Status Stop() noexcept {

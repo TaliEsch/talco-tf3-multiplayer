@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
   [string]$GameDirectory = 'E:\Steam\steamapps\common\Transport Fever 3',
-  [ValidateSet('NoHook', 'Passive')][string]$Mode = 'NoHook'
+  [ValidateSet('NoHook', 'Passive', 'Boundary')][string]$Mode = 'NoHook'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -38,7 +38,11 @@ try {
     }
     [ordered]@{name=$name;sha256=$hash}
   }
-  $manifestMode = if ($Mode -eq 'Passive') { 'passive-diagnostic-40401' } else { 'no-hook-diagnostic-40401' }
+  $manifestMode = switch ($Mode) {
+    'Passive' { 'passive-diagnostic-40401' }
+    'Boundary' { 'boundary-diagnostic-40401' }
+    default { 'no-hook-diagnostic-40401' }
+  }
   $manifestJson = [ordered]@{schemaVersion=1;mode=$manifestMode;
     qualifiedExeSha256=$expectedExe;files=$records} | ConvertTo-Json -Depth 4
   $stream = [System.IO.File]::Open($manifestPath, [System.IO.FileMode]::CreateNew,

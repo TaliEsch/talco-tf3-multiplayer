@@ -12,9 +12,13 @@ int wmain(int argc, wchar_t** argv) {
     const bool pipe_diagnostic = argc == 4 && wcscmp(argv[3], L"pipe") == 0;
     const bool passive_diagnostic = argc == 4 && wcscmp(argv[3], L"passive-pipe") == 0;
     const bool passive_conflict = argc == 4 && wcscmp(argv[3], L"passive-conflict") == 0;
-    if (argc == 4 && !pipe_diagnostic && !passive_diagnostic && !passive_conflict) return 2;
+    const bool boundary_diagnostic = argc == 4 && wcscmp(argv[3], L"boundary-pipe") == 0;
+    const bool boundary_conflict = argc == 4 && wcscmp(argv[3], L"boundary-conflict") == 0;
+    if (argc == 4 && !pipe_diagnostic && !passive_diagnostic && !passive_conflict &&
+        !boundary_diagnostic && !boundary_conflict) return 2;
     if (!SetEnvironmentVariableW(L"TF3MP_NATIVE_DIAGNOSTIC",
-                                diagnostic_test && !pipe_diagnostic && !passive_diagnostic ? argv[2] : nullptr)) return 8;
+                                diagnostic_test && !pipe_diagnostic && !passive_diagnostic &&
+                                !boundary_diagnostic ? argv[2] : nullptr)) return 8;
     HMODULE module = LoadLibraryExW(argv[1], nullptr, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR |
                                                        LOAD_LIBRARY_SEARCH_SYSTEM32);
     if (module == nullptr) return 3;
@@ -38,14 +42,15 @@ int wmain(int argc, wchar_t** argv) {
     const std::wstring token(64, L'a');
     Tf3InProcessRuntimeRequestV1 valid{sizeof(valid),
                                        TF3_INPROCESS_RUNTIME_ABI_VERSION,
+                                       boundary_diagnostic || boundary_conflict ? L"tf3mp_boundary40401_owned" :
                                        passive_diagnostic || passive_conflict ? L"tf3mp_passive40401_owned" :
                                        pipe_diagnostic ? L"tf3mp_diag40401_owned" : L"tf3mp_owned_runtime_test",
                                        token.c_str()};
     const DWORD result = function(&valid);
     const bool probe_loaded = GetModuleHandleW(L"TF3NativeProbe.dll") != nullptr;
     FreeLibrary(module);
-    const DWORD expected = passive_conflict || (diagnostic_test && !pipe_diagnostic &&
-        !passive_diagnostic && wcscmp(argv[2], L"40401") != 0)
+    const DWORD expected = passive_conflict || boundary_conflict || (diagnostic_test && !pipe_diagnostic &&
+        !passive_diagnostic && !boundary_diagnostic && wcscmp(argv[2], L"40401") != 0)
         ? TF3_INPROCESS_RUNTIME_INVALID_DIAGNOSTIC : TF3_INPROCESS_RUNTIME_UNSUPPORTED_EXECUTABLE;
     if (result != expected || (diagnostic_test && probe_loaded)) return 7;
     if (diagnostic_test) std::printf("diagnostic-rejected-no-probe=1 ");
