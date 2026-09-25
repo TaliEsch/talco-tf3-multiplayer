@@ -1,5 +1,17 @@
 # Completion audit against the build prompt
 
+## Offline road Stop callback readback — 25 September 2026
+
+The verifier now accepts an empty or partial callback entity vector only when
+read-only engine state shows exactly one newly owned Stop of the requested
+model, side and position on a replacement road with the source road's exact
+node IDs, endpoints and tangents. It still requires a held update, the native
+cost/debit and unchanged other-company balances. Contradictory callback IDs,
+preexisting matching Stops and ambiguous geometry fail closed. This adapts
+TF2's state-based street result lookup idea; no TF2 code was copied. Focused
+fixtures passed 20/20 and mod review passed. This revision has not run in
+TF3, and no host-ordered road Stop or two-instance result is claimed.
+
 ## Source/outcome road geometry correlation — 25 September 2026
 
 In TF3 build 40396, nonce-bound read-only probes inspected the untouched

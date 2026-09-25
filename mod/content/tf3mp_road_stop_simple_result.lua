@@ -20,6 +20,69 @@ local function component(api, id, name)
   if kind == nil then fail() end
   return api.engine.getComponent(id, kind)
 end
+local function finite(v) return type(v) == "number" and v == v
+  and v ~= math.huge and v ~= -math.huge end
+local function roadGeometry(edge)
+  if not native(edge) or not entity(edge.node0) or not entity(edge.node1)
+    or edge.node0 == edge.node1 then fail() end
+  local result = {edge.node0, edge.node1}
+  for _, key in ipairs({"position0", "position1", "tangent0", "tangent1"}) do
+    local vector = edge[key]
+    if not native(vector) or not finite(vector.x) or not finite(vector.y)
+      or not finite(vector.z) then fail() end
+    result[#result+1] = vector.x
+    result[#result+1] = vector.y
+    result[#result+1] = vector.z
+  end
+  return result
+end
+local function sameGeometry(a, b)
+  if not dense(a, 14) or not dense(b, 14) or #a ~= 14 or #b ~= 14 then return false end
+  for i = 1, 14 do if a[i] ~= b[i] then return false end end
+  return true
+end
+local function matchingStops(api, input, modelId, geometry)
+  local street = api.engine.system and api.engine.system.streetSystem
+  local map = street and street.getEdgeObject2EdgeMap()
+  if type(map) ~= "table" then fail() end
+  local matches, seen = {}, 0
+  for objectId, roadId in pairs(map) do
+    seen = seen + 1
+    if seen > 500000 or not entity(objectId) or not entity(roadId) then fail() end
+    local object = component(api, objectId, "EDGE_OBJECT")
+    if native(object) and type(object.param) == "number"
+      and math.abs(object.param-input.param) <= 0.000001 then
+      local owner = component(api, objectId, "PLAYER_OWNED")
+      if native(owner) and owner.player == input.companyEntity then
+        local models = component(api, objectId, "MODEL_INSTANCE_LIST")
+        if native(models) and dense(models.fatInstances, 64) then
+          for _, instance in ipairs(models.fatInstances) do
+            if native(instance) and instance.modelId == modelId then
+              if api.engine.entityExists(objectId) ~= true
+                or api.engine.entityExists(roadId) ~= true
+                or street.getEdgeForEdgeObject(objectId) ~= roadId then fail() end
+              local edge = component(api, roadId, "BASE_EDGE")
+              if not native(edge) or not dense(edge.objects, 64) then fail() end
+              local side = input.left and api.type.enum.EdgeObjectType.STOP_LEFT
+                or api.type.enum.EdgeObjectType.STOP_RIGHT
+              local attached = 0
+              for _, pair in ipairs(edge.objects) do
+                if not dense(pair, 2) or #pair ~= 2 then fail() end
+                if pair[1] == objectId and pair[2] == side then attached = attached + 1 end
+              end
+              if attached ~= 1 then fail() end
+              if geometry and not sameGeometry(geometry, roadGeometry(edge)) then fail() end
+              matches[#matches+1] = {stop=objectId, road=roadId}
+              if #matches > 1 then fail() end
+              break
+            end
+          end
+        end
+      end
+    end
+  end
+  return matches
+end
 local function roster(api, list, company, progress)
   progress.stage = "roster_shape"
   if not dense(list, 4) or #list < 1 then fail() end
@@ -59,16 +122,19 @@ local function snapshot(api, input, companies, progress)
   if api.engine.util.getPlayer() ~= input.companyEntity or api.engine.entityExists(input.edgeEntity) ~= true then fail() end
   local edge = component(api, input.edgeEntity, "BASE_EDGE")
   if not native(edge) or not dense(edge.objects, 0) then fail() end
+  local geometry = roadGeometry(edge)
   progress.stage = "model"
   local model = api.res.modelRep.find(input.model)
   if not integer(model) or model < 0 or model > 2147483647 then fail() end
+  progress.stage = "existing_stop"
+  if #matchingStops(api, input, model) ~= 0 then fail() end
   local players = roster(api, companies, input.companyEntity, progress)
   local balances = {}
   progress.stage = "balances"
   for company in pairs(players) do balances[company] = balance(api, company) end
   return {code="observed", updateCount=update, companyEntity=input.companyEntity,
     edgeEntity=input.edgeEntity, model=input.model, modelId=model, left=input.left,
-    param=input.param, players=players, balances=balances}
+    param=input.param, players=players, balances=balances, geometry=geometry}
 end
 function M.before(api, input, companies)
   local progress = {stage="input"}
@@ -105,28 +171,34 @@ local function verify(api, before, input, data, success, resultEntities, progres
     elseif current ~= prior then fail() end
   end
   progress.stage = "result_entities"
-  local stop, count, affected = nil, 0, {}
-  for _, pair in ipairs(resultEntities) do
-    if not dense(pair, 2) or #pair ~= 2 or not entity(pair[1])
-      or not integer(pair[2]) or pair[2] < 0 or affected[pair[1]] then fail() end
-    local id = pair[1]
+  local affected = {}
+  for _, item in ipairs(resultEntities) do
+    local id = item
+    if type(item) == "table" then
+      if not dense(item, 2) or #item ~= 2 or not integer(item[2]) then fail() end
+      id = item[1]
+    end
+    if not entity(id) or affected[id] then fail() end
     affected[id] = true
-    if native(component(api, id, "EDGE_OBJECT")) then stop, count = id, count + 1 end
   end
-  if count == 0 then
-    -- TF3 may omit the new object from the callback's changed-entity vector.
-    -- Its completed Proposal exposes the exact resulting edge-object entity.
-    -- Never infer an ID from a world scan or accept a contradictory callback.
-    local completed = native(data) and data.proposal
-    local street = native(completed) and completed.streetProposal
-    local objects = native(street) and street.edgeObjectsToAdd
-    if not dense(objects, 1) or #objects ~= 1 or not native(objects[1])
-      or not entity(objects[1].resultEntity) or affected[objects[1].resultEntity]
-      or api.engine.entityExists(objects[1].resultEntity) ~= true
-      or not native(component(api, objects[1].resultEntity, "EDGE_OBJECT")) then fail() end
-    stop, count = objects[1].resultEntity, 1
+  -- TF2's measured street callback can return no result entities. TF3's
+  -- completed save showed the replaced road keeps exact endpoint geometry.
+  -- Require one newly observed, owned Stop on that geometry instead of
+  -- deriving an ID from the callback's incomplete changed-entity vector.
+  local matches = matchingStops(api, input, before.modelId, before.geometry)
+  if #matches ~= 1 then fail() end
+  local stop, road = matches[1].stop, matches[1].road
+  local completed = native(data) and data.proposal
+  local completedStreet = native(completed) and completed.streetProposal
+  local addedObjects = native(completedStreet) and completedStreet.edgeObjectsToAdd
+  if addedObjects ~= nil then
+    if not dense(addedObjects, 1) or #addedObjects ~= 1 or not native(addedObjects[1]) then fail() end
+    local resultId = addedObjects[1].resultEntity
+    if resultId ~= nil and (not integer(resultId) or resultId > 0 and resultId ~= stop) then fail() end
   end
-  if count ~= 1 then fail() end
+  for id in pairs(affected) do
+    if native(component(api, id, "EDGE_OBJECT")) and id ~= stop then fail() end
+  end
   progress.stage = "result_stop"
   local owner = component(api, stop, "PLAYER_OWNED")
   local edgeObject = component(api, stop, "EDGE_OBJECT")
@@ -142,7 +214,7 @@ local function verify(api, before, input, data, success, resultEntities, progres
   if modelCount ~= 1 then fail() end
   progress.stage = "result_attachment"
   local street = api.engine.system and api.engine.system.streetSystem
-  local road = street and street.getEdgeForEdgeObject(stop)
+  if not street or street.getEdgeForEdgeObject(stop) ~= road then fail() end
   if not entity(road) or road == input.edgeEntity or api.engine.entityExists(road) ~= true then fail() end
   local edge = component(api, road, "BASE_EDGE")
   local enum = api.type.enum and api.type.enum.EdgeObjectType

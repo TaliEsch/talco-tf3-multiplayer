@@ -2,6 +2,14 @@
 
 ## Current direction — 25 September 2026
 
+The road Stop callback verifier now has an offline-tested fallback for TF3's
+incomplete result-entity vector: it requires one owned Stop attached to a
+replacement road with the source road's exact observed node geometry, plus
+the native debit and held clock. Focused fixtures and mod review pass. This
+change has not yet produced a verified TF3 callback receipt; host ordering of
+the road action is also still open. Plan the next disposable-save run to test
+both links with correlated receipts, without retrying the uncertain purchase.
+
 Read-only probes of the untouched source and preserved outcome saves in TF3
 build 40396 now correlate the selected road to the placed Stop. Source road
 53417 had no matching Stop. The outcome has one owned, attached Stop 73312 on

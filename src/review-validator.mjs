@@ -105,8 +105,8 @@ export async function validateReviewPackage(root) {
     ['tf3mp_road_replay_result.lua', '201bd6cc15b2cf137e63a557f8e23254bee19e449d4bf57c2b363f5f37b428fa'],
     ['tf3mp_road_stop_outcome.lua', '99d39c50ea9e0cb2219bfaaf26d3640f2b42619f8952a864394fa3e7a0e6c552'],
     ['tf3mp_road_stop_simple_prepare.lua', 'b9de96bbb92f212b3d8cc83d97564f2b7a814cfd6aa65ac4116ad9208add382c'],
-    ['tf3mp_road_stop_simple_dispatch.lua', 'edee4006813e5a0f2f0155dab416ce432ed457034b75e57083b8c0249c2bc44f'],
-    ['tf3mp_road_stop_simple_result.lua', '7fee234c5b4e6ad9f90398611c7f288f3ac48716a86577d8a2cf679a93c7d5c7'],
+    ['tf3mp_road_stop_simple_dispatch.lua', 'c3b689756b181097b62ecc2b0477d490075a9e4e1d477be7ddb587f1632d5a6b'],
+    ['tf3mp_road_stop_simple_result.lua', '17e2714a3e9abea8015ddcc717a40aac48c037f61819318b280d88850faa2ed3'],
   ]) {
     const source = await readFile(path.join(absoluteRoot, 'content', file), 'utf8');
     if (createHash('sha256').update(source.replace(/\r\n/g, '\n')).digest('hex') !== digest)

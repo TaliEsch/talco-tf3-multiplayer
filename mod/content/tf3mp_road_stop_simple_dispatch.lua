@@ -23,7 +23,7 @@ local RESULTS = {EXPLICIT_REPLAY_CONSENT_REQUIRED=true,STATE_UNAVAILABLE=true,
   ENGINE_OUTCOME_UNKNOWN=true,CONSUME_PERSISTENCE_UNKNOWN=true,
   ENGINE_CALLBACK_MISSING=true,ENGINE_SEND_FAILED=true,
   ROAD_STOP_OWNER_AND_DEBIT_OBSERVED=true}
-local BEFORE_STAGES = {input=true,held=true,road=true,model=true,
+local BEFORE_STAGES = {input=true,held=true,road=true,model=true,existing_stop=true,
   roster_binding=true,roster_shape=true,roster_players=true,balances=true}
 local AFTER_STAGES = {result_shape=true,result_hold=true,result_player=true,
   result_road=true,result_model=true,result_cost=true,
