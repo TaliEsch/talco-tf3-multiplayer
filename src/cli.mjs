@@ -267,8 +267,13 @@ if (command === "host" || command === "join") createInterface({ input: process.s
     const roadRun=args[0]==='coordinator-road-stop-confirmed'||remoteRoadRun;
     const selectInGame=!cancelledRun&&!roadRun&&args.length===1;
     let secondCompany=Number(args[1]),vehicleEntity=Number(args[2]);
+    const secondRoadEntity=remoteRoadRun&&args.length===4?Number(args[3]):null;
     let localCompany=bridge?.engineObservation.sample?.companyEntity;
-    if(!selectInGame&&(args.length!==3||![secondCompany,vehicleEntity,localCompany].every(n=>Number.isSafeInteger(n)&&n>=0&&n<=2147483647)||secondCompany===localCompany||roadRun&&vehicleEntity<1))
+    if(!selectInGame&&((args.length!==3&&!(remoteRoadRun&&args.length===4))
+      ||![secondCompany,vehicleEntity,localCompany].every(n=>Number.isSafeInteger(n)&&n>=0&&n<=2147483647)
+      ||secondCompany===localCompany||roadRun&&vehicleEntity<1
+      ||secondRoadEntity!==null&&(!Number.isSafeInteger(secondRoadEntity)
+        ||secondRoadEntity<1||secondRoadEntity>2147483647||secondRoadEntity===vehicleEntity)))
       rawLog({level:"warn",event:"coordinator_local_run",code:"VERIFIED_COMPANY_AND_VEHICLE_REQUIRED"});
     else if(command!=="host"||!bridge||!hostInstance||vehicleTestActive||integrationBatch||batchStarting
       ||hostInstance.coordinator.phase!=='lobby'
@@ -302,10 +307,13 @@ if (command === "host" || command === "join") createInterface({ input: process.s
         coordinatorRun=await createLocalCoordinatorRun({directory:opt["bridge-dir"],bridge,playerId:"local",
           companies:new Map([["local",localCompany],["receipt-mirror",secondCompany]]),vehicleEntity,
           logger:rawLog,saveReport,metadata:{gameHash:observedGameHash,modManifestHash:opt["mod-hash"]},
-          commandLimit:cancelledRun||roadRun?1:4,
+          commandLimit:secondRoadEntity!==null?2:cancelledRun||roadRun?1:4,
           roadStopOriginPlayerId:remoteRoadRun?'receipt-mirror':'local',
-          roadStopPayload:roadRun?{edgeEntity:vehicleEntity,companyEntity:remoteRoadRun?secondCompany:localCompany,
-            param:0.5,left:true,oneWay:false,model:ROAD_STOP_MODEL,name:'TalCo Road Stop'}:null,
+          roadStopPayload:roadRun?[
+            {edgeEntity:vehicleEntity,companyEntity:remoteRoadRun?secondCompany:localCompany,
+              param:0.5,left:true,oneWay:false,model:ROAD_STOP_MODEL,name:'TalCo Road Stop'},
+            ...(secondRoadEntity===null?[]:[{edgeEntity:secondRoadEntity,companyEntity:secondCompany,
+              param:0.5,left:true,oneWay:false,model:ROAD_STOP_MODEL,name:'TalCo Road Stop'}])]:null,
           beforeFirstCommand:cancelledRun?({entity,company,recordCancellationEvidence})=>cancelOneLocalStop({
             nativeGate,bridge,entity,company,logger:value=>{
               rawLog(value);recordCancellationEvidence(value);

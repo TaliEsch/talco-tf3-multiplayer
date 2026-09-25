@@ -8,25 +8,28 @@ import {parseFlatDataFile} from '../src/userdata-ipc.mjs';
 import {ROAD_STOP_MODEL} from '../src/road-stop-order-payload.mjs';
 const lua=p=>`function data() return {${Object.entries(p).map(([k,v])=>`${k}=${JSON.stringify(v)},`).join('')}} end`;
 
-for(const scenario of ['success','unknown_action','report_failure','cancelled_stop','cancel_rejected','road_stop','remote_road_stop','road_preflight_rejected','road_readback_unknown'])test(`local driver traverses actual adapter/files: ${scenario}`,async()=>{
+for(const scenario of ['success','unknown_action','report_failure','cancelled_stop','cancel_rejected','road_stop','remote_road_stop','two_remote_road_stops','two_remote_road_stops_second_unknown','road_preflight_rejected','road_readback_unknown'])test(`local driver traverses actual adapter/files: ${scenario}`,async()=>{
   const failAction=scenario==='unknown_action',failReport=scenario==='report_failure';
   const cancelRun=['cancelled_stop','cancel_rejected'].includes(scenario);
-  const roadRun=['road_stop','remote_road_stop','road_preflight_rejected','road_readback_unknown'].includes(scenario);
-  const targetCompany=scenario==='remote_road_stop'?9:7;
+  const twoRoads=['two_remote_road_stops','two_remote_road_stops_second_unknown'].includes(scenario);
+  const roadRun=['road_stop','remote_road_stop','road_preflight_rejected','road_readback_unknown'].includes(scenario)||twoRoads;
+  const targetCompany=scenario==='remote_road_stop'||twoRoads?9:7;
   const root=await mkdtemp(path.join(os.tmpdir(),'tf3mp-local-driver-')),directory=path.join(root,'tf3mp_status_1');await mkdir(directory);
   let run,locked=false,time=0,leasePhase='active',cancelCalls=0,preflightCalls=0,readbackCalls=0;const saved=[],seen=new Set(),actions=[],events=[];
   const sample={counter:1,updateCount:100,speedup:1};
   const bridge={nonce:'a'.repeat(32),get engineObservation(){return {available:true,sample};},
     get coordinationLeaseState(){return leasePhase;},get coordinationControlsLocked(){return locked;},
     async inspectRoadPreflight({entity,company}){
-      preflightCalls++;assert.equal(entity,42);assert.equal(company,targetCompany);
+      preflightCalls++;assert.equal(entity,preflightCalls===2?43:42);assert.equal(company,targetCompany);
       return {outcome:scenario==='road_preflight_rejected'?'missing':'found',entity,company,ownerCompany:0,revision:23,
         issuedUpdate:sample.updateCount,updateCount:sample.updateCount,paused:false};
     },
     async inspectOrderedRoadReadback(request){
       readbackCalls++;
-      assert.deepEqual(request,{hostSequence:1,company:targetCompany,localCompany:7,sourceRoad:42,road:81,
-        stop:80,update:sample.updateCount,balance:900,charge:100});
+      assert.deepEqual(request,{hostSequence:readbackCalls,company:targetCompany,localCompany:7,
+        sourceRoad:readbackCalls===2?43:42,road:readbackCalls===2?83:81,
+        stop:readbackCalls===2?82:80,update:sample.updateCount,
+        balance:readbackCalls===2?800:900,charge:100});
       return {code:scenario==='road_readback_unknown'?'unknown':'observed',
         ...(scenario==='road_readback_unknown'?{stage:'attachment'}:{})};
     },
@@ -35,10 +38,12 @@ for(const scenario of ['success','unknown_action','report_failure','cancelled_st
   try {
     run=await createLocalCoordinatorRun({directory,bridge,playerId:'a',companies:new Map([['a',7],['b',9]]),vehicleEntity:42,now:()=>time,
       logger:e=>events.push(e),saveReport:async r=>{if(failReport&&r.phase==='passed')throw new Error('disk full');saved.push(r);},
-      commandLimit:cancelRun||roadRun?1:4,
-      roadStopOriginPlayerId:scenario==='remote_road_stop'?'b':'a',
-      roadStopPayload:roadRun?{edgeEntity:42,companyEntity:targetCompany,param:0.5,
-        left:true,oneWay:false,model:ROAD_STOP_MODEL,name:'TalCo Road Stop'}:null,
+      commandLimit:twoRoads?2:cancelRun||roadRun?1:4,
+      roadStopOriginPlayerId:scenario==='remote_road_stop'||twoRoads?'b':'a',
+      roadStopPayload:roadRun?[{edgeEntity:42,companyEntity:targetCompany,param:0.5,
+        left:true,oneWay:false,model:ROAD_STOP_MODEL,name:'TalCo Road Stop'},
+        ...(twoRoads?[{edgeEntity:43,companyEntity:targetCompany,param:0.5,
+          left:true,oneWay:false,model:ROAD_STOP_MODEL,name:'TalCo Road Stop'}]:[])]:null,
       beforeFirstCommand:cancelRun?async ({entity,company,recordCancellationEvidence})=>{
         cancelCalls++;assert.equal(entity,42);assert.equal(company,7);
         recordCancellationEvidence({event:'local_cancel_stop_owner_prestate',issuedUpdate:100,
@@ -62,12 +67,14 @@ for(const scenario of ['success','unknown_action','report_failure','cancelled_st
       } else if(request.operation==='prepare')receipt.ownerCompanyEntity=targetCompany;
       else if(request.operation==='executeHeld'){
         actions.push(request.hostSequence);sample.updateCount=request.scheduledUpdate;sample.speedup=0;
-        Object.assign(receipt,['road_stop','remote_road_stop','road_readback_unknown'].includes(scenario)
+        Object.assign(receipt,['road_stop','remote_road_stop','road_readback_unknown'].includes(scenario)||twoRoads
           ?{updateCount:sample.updateCount,held:true,snapshotVersion:2,hostSequence:request.hostSequence,
-            entity:42,ownerCompanyEntity:targetCompany,stopEntity:80,roadEntity:81,chargedCost:100,balance:900,negative:0}
+            entity:request.entity,ownerCompanyEntity:targetCompany,
+            stopEntity:request.hostSequence===2?82:80,roadEntity:request.hostSequence===2?83:81,
+            chargedCost:100,balance:request.hostSequence===2?800:900,negative:0}
           :{updateCount:sample.updateCount,held:true,snapshotVersion:1,hostSequence:request.hostSequence,
             entity:42,ownerCompanyEntity:7,stopFlag:request.running?0:1,balance:1000,negative:0});
-        if(failAction)receipt.status='unknown';
+        if(failAction||scenario==='two_remote_road_stops_second_unknown'&&request.hostSequence===2)receipt.status='unknown';
       } else if(request.operation==='release'){assert.equal(locked,true);sample.speedup=request.speedup;receipt.held=false;receipt.speedup=sample.speedup;}
       else if(request.operation==='halt'){sample.speedup=0;receipt.held=true;}
       sample.counter++;
@@ -78,22 +85,34 @@ for(const scenario of ['success','unknown_action','report_failure','cancelled_st
       await writeFile(pending,lua(receipt));
       await rename(pending,path.join(directory,'coordination_receipt.lua'));
     }
-    assert.equal(run.phase,failAction||failReport||['cancel_rejected','road_preflight_rejected','road_readback_unknown'].includes(scenario)?'failed':'passed',JSON.stringify(run.report.events));
-    assert.deepEqual(actions,['cancel_rejected','road_preflight_rejected'].includes(scenario)?[]:failAction||cancelRun||['road_stop','remote_road_stop','road_readback_unknown'].includes(scenario)?[1]:[1,2,3,4],JSON.stringify(run.report));
+    assert.equal(run.phase,failAction||failReport||scenario==='two_remote_road_stops_second_unknown'
+      ||['cancel_rejected','road_preflight_rejected','road_readback_unknown'].includes(scenario)?'failed':'passed',JSON.stringify(run.report.events));
+    assert.deepEqual(actions,['cancel_rejected','road_preflight_rejected'].includes(scenario)?[]
+      :twoRoads?[1,2]
+      :failAction||cancelRun||['road_stop','remote_road_stop','road_readback_unknown'].includes(scenario)?[1]:[1,2,3,4],JSON.stringify(run.report));
     assert.equal(cancelCalls,cancelRun?1:0);
-    assert.equal(preflightCalls,roadRun?1:0);
-    assert.equal(readbackCalls,['road_stop','remote_road_stop','road_readback_unknown'].includes(scenario)?1:0);
+    assert.equal(preflightCalls,twoRoads?2:roadRun?1:0);
+    assert.equal(readbackCalls,scenario==='two_remote_road_stops'?2
+      :scenario==='two_remote_road_stops_second_unknown'?1
+      :['road_stop','remote_road_stop','road_readback_unknown'].includes(scenario)?1:0);
     assert.equal(run.report.realEngineCount,1);assert.equal(run.report.simulatedParticipantCount,1);
     assert.equal(run.report.multiGameVerified,false);assert.ok(saved.length>0);
-    if(scenario==='road_stop'||scenario==='remote_road_stop'){
+    if(['road_stop','remote_road_stop'].includes(scenario)||twoRoads){
       assert.equal(run.report.scope,'single_game_ordered_road_stop_with_receipt_mirror');
       assert.ok(run.report.events.some(e=>e.code==='ROAD_STOP_SCHEDULED'));
       assert.equal(run.report.roadPreflight.ownerCompany,0);
       assert.ok(run.report.events.some(e=>e.code==='LOCAL_ROAD_PREFLIGHT_VERIFIED'));
+      if(twoRoads){
+        assert.deepEqual(run.report.roadPreflights.map(p=>p.hostSequence),[1,2]);
+        assert.deepEqual(run.report.independentRoadReadbacks.map(p=>p.hostSequence),
+          scenario==='two_remote_road_stops'?[1,2]:[1]);
+      }
     }
     assert.equal(run.report.haltState,'confirmed');
-    assert.equal(events.some(e=>e.code==='LOCAL_RUN_PASSED_GAME_HELD'),!failAction&&!failReport&&!['cancel_rejected','road_preflight_rejected','road_readback_unknown'].includes(scenario));
-    if(failAction)assert.equal(run.report.outcome,'ENGINE_OUTCOME_UNKNOWN');
+    assert.equal(events.some(e=>e.code==='LOCAL_RUN_PASSED_GAME_HELD'),!failAction&&!failReport
+      &&scenario!=='two_remote_road_stops_second_unknown'
+      &&!['cancel_rejected','road_preflight_rejected','road_readback_unknown'].includes(scenario));
+    if(failAction||scenario==='two_remote_road_stops_second_unknown')assert.equal(run.report.outcome,'ENGINE_OUTCOME_UNKNOWN');
     if(failReport)assert.equal(run.report.outcome,'report_write_failed');
     if(scenario==='cancel_rejected')assert.equal(run.report.outcome,'NATIVE_CANCEL_REJECTED');
     if(scenario==='road_preflight_rejected')assert.equal(run.report.outcome,'ROAD_PREFLIGHT_NOT_CONFIRMED');
@@ -108,9 +127,10 @@ for(const scenario of ['success','unknown_action','report_failure','cancelled_st
     }
     if(run.phase==='failed')assert.ok(run.report.failureContext);
     for(const check of run.report.checks){
-      if(scenario==='road_stop'||scenario==='remote_road_stop')assert.deepEqual(check.roadPostcondition,{
-        sourceRoadEntity:42,roadEntity:81,stopEntity:80,ownerCompanyEntity:targetCompany,
-        chargedCost:100,companyBalance:900});
+      if(['road_stop','remote_road_stop'].includes(scenario)||twoRoads)assert.deepEqual(check.roadPostcondition,{
+        sourceRoadEntity:check.hostSequence===2?43:42,
+        roadEntity:check.hostSequence===2?83:81,stopEntity:check.hostSequence===2?82:80,ownerCompanyEntity:targetCompany,
+        chargedCost:100,companyBalance:check.hostSequence===2?800:900});
       assert.equal(check.updateError,0);
       assert.equal(check.scheduledUpdate,check.proposedUpdate+60);
       assert.equal(check.observedReleaseSpeed,check.requestedReleaseSpeed);

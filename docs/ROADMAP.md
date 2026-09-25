@@ -1,5 +1,24 @@
 # TalCo TF3 multiplayer — current delivery plan
 
+## Sequential separate-company Stop path — 25 September 2026
+
+The controlled one-engine coordinator can now accept two distinct road Stop
+intents for the mapped second company. It obtains fresh road preflight evidence
+before each Host sequence and preserves both independent held-world readbacks
+and postconditions in one report. The existing remote-road command accepts an
+optional second road entity; no action is retried after an unknown result.
+One exact build-40396 TF3 run then applied both intents to distinct public
+roads on an unchanged disposable source save. Sequence 1 used road 53417 at
+held update 3683, creating Stop 64470 on replacement road 49848 and charging
+company 55652 46,348. Sequence 2 used road 53419 at held update 3757,
+creating Stop 9237 on replacement road 73899 and charging 46,254 more.
+Independent held-world readbacks observed both Stop attachments at their
+scheduled updates; target balance was -92,602 after the second. The native
+terminal halt was confirmed. Private report:
+`reports/local-batch-a7cecb6d-ec2a-4383-8491-5928d350d635/report.json`.
+This remains one real engine with a simulated second player; production socket
+admission, two-instance agreement and transport income remain open.
+
 ## Held economy readback extension — 25 September 2026
 
 For separate companies, the ordered Stop readback carries the local company's
@@ -8,9 +27,11 @@ in the game-side finance API, alongside the acting company's native debit.
 When the local company acted, it uses the native post-Stop balance because the
 observation may precede the action within that update. Distinct target and
 local balances and a mismatched local balance pass/fail in focused fixtures.
-This extension is not yet TF3 verified. The next controlled game batch should
-exercise it while extending the separate-company road loop; two-instance
-testing remains deferred by the user.
+The second Stop's nonce-bound live readback included local company 3141 and
+its separately checked balance of 40,061,869 at held update 3757, alongside
+the target-company debit. The next road loop work is depot, line and vehicle
+service with native costs and income; two-instance testing remains deferred by
+the user.
 
 ## Separate-company ordered Stop checkpoint — 25 September 2026
 

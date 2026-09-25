@@ -16,13 +16,18 @@ export async function createLocalCoordinatorRun({directory,bridge,playerId,compa
     ||!Number.isSafeInteger(leadUpdates)||leadUpdates<40||leadUpdates>150
     ||(beforeFirstCommand!==null&&typeof beforeFirstCommand!=='function')
     ||!Number.isSafeInteger(commandLimit)||commandLimit<1||commandLimit>4
-    ||typeof saveReport!=='function'||roadStopPayload!==null&&(commandLimit!==1||beforeFirstCommand!==null)
+    ||typeof saveReport!=='function'||roadStopPayload!==null&&beforeFirstCommand!==null
     ||!companies.has(roadStopOriginPlayerId)
     ||roadStopPayload===null&&roadStopOriginPlayerId!==playerId)
     throw new TypeError('INVALID_LOCAL_RUN_OPTIONS');
   const roadCompany=companies.get(roadStopOriginPlayerId);
-  const roadStop=roadStopPayload===null?null:parseRoadStopOrderPayload(
-    roadStopPayload,vehicleEntity,roadCompany);
+  const roadIntents=roadStopPayload===null?null:(Array.isArray(roadStopPayload)?roadStopPayload:[roadStopPayload]);
+  if(roadIntents!==null&&(roadIntents.length!==commandLimit
+    ||roadIntents[0]?.edgeEntity!==vehicleEntity
+    ||new Set(roadIntents.map(intent=>intent?.edgeEntity)).size!==roadIntents.length))
+    throw new TypeError('INVALID_LOCAL_RUN_OPTIONS');
+  const roadStop=roadIntents===null?null:roadIntents.map(intent=>parseRoadStopOrderPayload(
+    intent,intent.edgeEntity,roadCompany));
   const messages=[],reports=[];
   const hash=value=>typeof value==='string'&&/^[a-f0-9]{64}$/.test(value)?value:null;
   const report={schemaVersion:1,batchId:randomUUID(),scope:roadStop
@@ -31,7 +36,7 @@ export async function createLocalCoordinatorRun({directory,bridge,playerId,compa
     metadata:{gameHash:hash(metadata.gameHash),modManifestHash:hash(metadata.modManifestHash)},
     gameplayVerified:false,multiGameVerified:false,realEngineCount:1,simulatedParticipantCount:1,
     outcome:'in_progress',haltState:'not_requested',haltSource:nativeRuntime?'native_terminal_parked':'game_mailbox',
-    checks:[],events:[],startedAt:now(),finishedAt:null};
+    checks:[],events:[],roadPreflights:[],independentRoadReadbacks:[],startedAt:now(),finishedAt:null};
   let phase='arming',adapter,sequence=0,controlsStarted=false,closed=false,polling=null,persisting=Promise.resolve();
   let firstCommandGate=beforeFirstCommand===null?'passed':'pending';
   let roadPreflight=roadStop?'pending':'not_required';
@@ -104,13 +109,14 @@ export async function createLocalCoordinatorRun({directory,bridge,playerId,compa
     } else if(kind==='command_applied') {
       const timing=timings.get(payload.hostSequence);
       const state=adapter.acceptedExecutionState;
-      if(roadStop&&(!state||state.scope!=='held_road_stop_company_balance_v1'
+      const intent=roadStop?.[payload.hostSequence-1];
+      if(roadStop&&(!intent||!state||state.scope!=='held_road_stop_company_balance_v1'
         ||state.hostSequence!==payload.hostSequence||state.updateCount!==payload.updateCount
-        ||state.roadStop?.sourceRoadEntity!==vehicleEntity
+        ||state.roadStop?.sourceRoadEntity!==intent.edgeEntity
         ||state.roadStop?.ownerCompanyEntity!==roadCompany
         ||!Number.isSafeInteger(state.roadStop?.stopEntity)||state.roadStop.stopEntity<1
         ||!Number.isSafeInteger(state.roadStop?.roadEntity)||state.roadStop.roadEntity<1
-        ||state.roadStop.roadEntity===vehicleEntity
+        ||state.roadStop.roadEntity===intent.edgeEntity
         ||!Number.isSafeInteger(state.roadStop?.chargedCost)||state.roadStop.chargedCost<1
         ||!Number.isSafeInteger(state.company?.balance)))
         throw new Error('ACCEPTED_ROAD_POSTCONDITION_MISSING');
@@ -124,6 +130,7 @@ export async function createLocalCoordinatorRun({directory,bridge,playerId,compa
         report.independentRoadReadback={code:readback.code,
           ...(readback.stage?{stage:readback.stage}:{}),hostSequence:payload.hostSequence,
           updateCount:payload.updateCount};
+        report.independentRoadReadbacks.push(report.independentRoadReadback);
         event('INDEPENDENT_ROAD_READBACK',report.independentRoadReadback);
         await persist();
         if(readback.code!=='observed')throw new Error('ORDERED_ROAD_READBACK_UNKNOWN');
@@ -142,6 +149,7 @@ export async function createLocalCoordinatorRun({directory,bridge,playerId,compa
       const check=report.checks.find(c=>c.hostSequence===payload.hostSequence);
       if(check){check.releasedAfterMs=now()-check.proposedAt;check.releaseUpdate=payload.updateCount;check.observedReleaseSpeed=payload.speedup;}
       event('ACTUAL_RELEASE_RECEIPT',{hostSequence:payload.hostSequence,updateCount:payload.updateCount,speedup:payload.speedup});
+      if(roadStop&&payload.hostSequence<roadStop.length)roadPreflight='pending';
     } else throw new Error('UNEXPECTED_LOCAL_REPORT');
     return true;
   }
@@ -203,19 +211,21 @@ export async function createLocalCoordinatorRun({directory,bridge,playerId,compa
         const speed=bridge.engineObservation.sample.speedup;
         if(speed!==lastRelease.speedup){if(now()-lastRelease.at>=5000)fail('RUNNING_SPEED_NOT_OBSERVED');return;}
         if(roadStop&&roadPreflight==='pending'){
+          const intent=roadStop[sequence];
           roadPreflight='checking';
-          Promise.resolve().then(()=>bridge.inspectRoadPreflight({entity:vehicleEntity,
+          Promise.resolve().then(()=>bridge.inspectRoadPreflight({entity:intent.edgeEntity,
             company:roadCompany})).then(receipt=>{
             if(closed||phase==='failed')return;
-            if(receipt?.outcome!=='found'||receipt.entity!==vehicleEntity
+            if(receipt?.outcome!=='found'||receipt.entity!==intent.edgeEntity
               ||receipt.company!==roadCompany
               ||receipt.ownerCompany!==0&&receipt.ownerCompany!==receipt.company)
               throw new Error('ROAD_PREFLIGHT_NOT_CONFIRMED');
             roadPreflight=receipt;
             report.roadPreflight={entity:receipt.entity,company:receipt.company,
-              ownerCompany:receipt.ownerCompany,revision:receipt.revision,
+              ownerCompany:receipt.ownerCompany,revision:receipt.revision,hostSequence:sequence+1,
               issuedUpdate:receipt.issuedUpdate,receiptUpdate:receipt.updateCount,
               paused:receipt.paused};
+            report.roadPreflights.push(report.roadPreflight);
             event('LOCAL_ROAD_PREFLIGHT_VERIFIED',report.roadPreflight);persist();
           }).catch(error=>fail(error?.message==='ROAD_PREFLIGHT_NOT_CONFIRMED'
             ?'ROAD_PREFLIGHT_NOT_CONFIRMED':'ROAD_PREFLIGHT_UNAVAILABLE'));
@@ -235,9 +245,10 @@ export async function createLocalCoordinatorRun({directory,bridge,playerId,compa
         timings.set(sequence,{proposedAt:now(),proposedUpdate:update,scheduledUpdate:update+lead,sourceSpeed:speed,measuredUpdatesPerSecond,requestedReleaseSpeed:resumeSpeed});
         coordinator.propose({protocolVersion:2,hostSequence:sequence,scheduledUpdate:update+lead,
           originPlayerId:roadStop?roadStopOriginPlayerId:playerId,
-          targetCompanyEntity:roadStop?roadCompany:companies.get(playerId),targetEntity:vehicleEntity,
+          targetCompanyEntity:roadStop?roadCompany:companies.get(playerId),
+          targetEntity:roadStop?roadStop[sequence-1].edgeEntity:vehicleEntity,
           commandType:roadStop?'road.stop.place':'vehicle.setRunning',
-          payload:roadStop??{running:sequence%2===0},clientSequence:sequence,
+          payload:roadStop?roadStop[sequence-1]:{running:sequence%2===0},clientSequence:sequence,
           requestMessageId:'local-run:'+sequence},update);
         phase='cycling';event(roadStop?'ROAD_STOP_SCHEDULED':'VEHICLE_ACTION_SCHEDULED',
           {hostSequence:sequence,scheduledUpdate:update+lead,resumeSpeed});

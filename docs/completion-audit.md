@@ -1,5 +1,36 @@
 # Completion audit against the build prompt
 
+## Sequential separate-company Stop driver — 25 September 2026
+
+The existing one-engine coordinator driver now accepts two distinct Stop
+intents and performs a new road preflight before each sequence. Its report
+retains per-sequence preflights, native road postconditions and independent
+readbacks. A file-backed adapter fixture exercises sequences 1 and 2 with
+separate road/Stop IDs and cumulative target-company debits; another fixture
+returns unknown on sequence 2 and confirms a terminal halt without retry.
+The fixture results are supplemented by one exact build-40396 TF3 run from the
+unchanged disposable source save (SHA-256
+`CCBF4BEB740E53323E06D20890FD029C8E174D3E85EFB06801A8B4275C762FB5`).
+Fresh live preflights found public roads 53417 and 53419 for company 55652.
+Host sequences 1 and 2 executed at scheduled held updates 3683 and 3757,
+respectively. Native postconditions showed Stop 64470 on replacement road
+49848 for a 46,348 charge, then Stop 9237 on replacement road 73899 for a
+46,254 charge. The acting company's balance went from zero to -46,348 and
+then -92,602. Both independent held-world readbacks returned `observed` at
+their matching sequence and update. The second nonce-bound readback also
+checked local company 3141 at balance 40,061,869. Native terminal halt was
+confirmed. Private report:
+`reports/local-batch-a7cecb6d-ec2a-4383-8491-5928d350d635/report.json`.
+This is one real engine with a simulated participant. Stage 7 depot, line,
+vehicle service and income, production socket admission, and two-instance
+agreement remain unverified; the user has deferred two-instance testing.
+The 20 focused driver/readback/outcome tests passed. `npm run check` did not
+complete cleanly in the restricted shell: native Windows controller, IPC and
+observer fixtures hit sandbox access failures, and the stalled run was stopped.
+It is not a full-suite pass. TF3 became unresponsive at the quit menu after
+the confirmed terminal halt, so its specific process was closed; the source
+save hash above remained unchanged.
+
 ## Independent local-company economy check — 25 September 2026
 
 For a separate acting company, the ordered Stop readback binds a paused engine
@@ -7,9 +38,10 @@ observation of the local company balance to the nonce-bound request and checks
 that balance with a fresh game-side finance read. For a local-company action,
 it uses the native post-Stop balance because the observation may precede the
 action within that update. Distinct-company balance and mismatch fixtures passed;
-18 focused tests passed and mod review accepted the revised source. No TF3
-process was launched for this change, so the previous one-engine Stop remains
-the latest live result. Stage 7 service and economy acceptance remains open.
+18 focused tests passed and mod review accepted the revised source. The
+sequential TF3 run above exercised this readback for a separate company; the
+second receipt contained the local company's checked held-world balance.
+Stage 7 service and income acceptance remains open.
 
 ## Successful one-engine separate-company ordered Stop — 25 September 2026
 
