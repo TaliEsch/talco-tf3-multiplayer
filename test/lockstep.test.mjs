@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { CommandQueue, HostAuthority, ProtocolError, canonicalStateHash } from "../src/lockstep.mjs";
 import { PROTOCOL_VERSION } from "../src/constants.mjs";
 import { ROAD_STOP_MODEL } from '../src/road-stop-order-payload.mjs';
+import {ROAD_DEPOT_RESOURCE} from '../src/depot-build-order-payload.mjs';
 
 const BUILD = "b".repeat(64);
 const MODS = "c".repeat(64);
@@ -102,6 +103,41 @@ test('bounded road Stop enters a company-bound sequence and rechecks its command
   assert.equal(queue.enqueue(accepted,map),true);
   assert.deepEqual(queue.due(accepted.scheduledUpdate).map(item=>item.hostSequence),[1]);
   assert.throws(()=>new CommandQueue().enqueue({...accepted,payload:{...payload,companyEntity:102}},map),e=>e.code==='AUTH_RECHECK_FAILED');
+});
+
+test('road depot intent is company bound, contains no client price and targets no existing entity',()=>{
+  const host=new HostAuthority({...compatibility,enableDepotBuild:true});
+  const a=host.admit({displayName:'A',buildHash:BUILD,modManifestHash:MODS});
+  const b=host.admit({displayName:'B',buildHash:BUILD,modManifestHash:MODS});
+  host.bindCompanyEntity(a.playerId,101);host.bindCompanyEntity(b.playerId,102);
+  const payload={companyEntity:102,resource:ROAD_DEPOT_RESOURCE,x:-812.891541,y:-3142.25684,
+    z:23.3068237,yaw:Math.PI,seed:1};
+  const request={messageId:'depot-1',originPlayerId:b.playerId,targetCompanyEntity:102,
+    targetEntity:0,commandType:'road.depot.build',payload,clientSequence:0};
+  for(const change of [{targetCompanyEntity:101},{targetEntity:53417},
+    {payload:{...payload,chargedCost:449160}},{payload:{...payload,companyEntity:101}},
+    {payload:{...payload,resource:'::/depots/rail/train_depot.con'}}])
+    assert.throws(()=>host.accept({...request,messageId:JSON.stringify(change),...change},100,b.playerId));
+  const accepted=host.accept(request,100,b.playerId);
+  assert.equal(accepted.commandType,'road.depot.build');
+  const map=new Map([[a.playerId,101],[b.playerId,102]]);
+  const queue=new CommandQueue({maxPending:1,enableDepotBuild:true});
+  assert.equal(queue.enqueue(accepted,map),true);
+  assert.deepEqual(queue.due(accepted.scheduledUpdate).map(item=>item.hostSequence),[1]);
+  assert.throws(()=>new CommandQueue({enableDepotBuild:true}).enqueue({...accepted,payload:{...payload,companyEntity:101}},map),
+    error=>error.code==='AUTH_RECHECK_FAILED');
+  for(const [index,malformed] of [
+    {...payload,x:Infinity},{...payload,y:-0},{...payload,z:10001},
+    {...payload,yaw:Math.PI+0.01},{...payload,seed:0},{...payload,seed:1.5},
+    {...payload,x:'-812.891541'},
+  ].entries())assert.throws(()=>host.accept({...request,messageId:`bad-${index}`,
+    clientSequence:1,payload:malformed},100,b.playerId),error=>error.code==='BAD_DEPOT_BUILD_PAYLOAD');
+  const disabledHost=new HostAuthority(compatibility);
+  const disabledPlayer=disabledHost.admit({displayName:'C',buildHash:BUILD,modManifestHash:MODS});
+  disabledHost.bindCompanyEntity(disabledPlayer.playerId,102);
+  assert.throws(()=>disabledHost.accept({...request,originPlayerId:disabledPlayer.playerId},100,disabledPlayer.playerId),
+    error=>error.code==='UNSUPPORTED_COMMAND');
+  assert.throws(()=>new CommandQueue().enqueue(accepted,map),error=>error.code==='AUTH_RECHECK_FAILED');
 });
 
 test("vehicle action requires a bounded boolean payload and increasing client sequence", () => {

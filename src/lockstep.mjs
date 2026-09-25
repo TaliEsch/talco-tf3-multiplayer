@@ -4,6 +4,7 @@ import {
 } from "./constants.mjs";
 import { sha256Canonical } from "./canonical.mjs";
 import { parseRoadStopOrderPayload } from './road-stop-order-payload.mjs';
+import {parseDepotBuildOrderPayload} from './depot-build-order-payload.mjs';
 
 export class ProtocolError extends Error {
   constructor(code, message) { super(message); this.code = code; }
@@ -15,13 +16,16 @@ export class HostAuthority {
   #seen = new Set();
   #lastClientSequence = new Map();
   #lastScheduledUpdate = 0;
-  constructor({ sessionId, buildHash, modManifestHash, leadUpdates = MIN_SCHEDULE_LEAD, resolveEntityOwner = () => null }) {
+  constructor({ sessionId, buildHash, modManifestHash, leadUpdates = MIN_SCHEDULE_LEAD,
+    resolveEntityOwner = () => null, enableDepotBuild=false }) {
     if (!Number.isSafeInteger(leadUpdates) || leadUpdates < MIN_SCHEDULE_LEAD || leadUpdates > MAX_SCHEDULE_LEAD) throw new RangeError("invalid leadUpdates");
+    if(typeof enableDepotBuild!=='boolean')throw new TypeError('invalid depot capability');
     this.sessionId = sessionId;
     this.buildHash = buildHash;
     this.modManifestHash = modManifestHash;
     this.leadUpdates = leadUpdates;
     this.resolveEntityOwner = resolveEntityOwner;
+    this.enableDepotBuild=enableDepotBuild;
   }
   admit({ displayName, buildHash, modManifestHash }) {
     if (typeof displayName !== "string" || displayName.length < 1 || displayName.length > 64) throw new ProtocolError("BAD_NAME", "display name must contain 1..64 characters");
@@ -78,7 +82,7 @@ export class HostAuthority {
       throw new ProtocolError("BAD_PAYLOAD", "payload must be an object");
     }
     if (request.commandType !== "vehicle.setRunning" && request.commandType !== "simulation.speed"
-      && request.commandType !== 'road.stop.place') {
+      && request.commandType !== 'road.stop.place' && request.commandType !== 'road.depot.build') {
       throw new ProtocolError("UNSUPPORTED_COMMAND", "command type is not enabled");
     }
     if (request.commandType === "simulation.speed" && !SUPPORTED_SPEEDS.includes(request.payload?.speedup)) {
@@ -103,6 +107,12 @@ export class HostAuthority {
         || request.targetEntity > 2147483647) throw new ProtocolError('BAD_ENTITY','invalid road entity');
       try { roadPayload=parseRoadStopOrderPayload(request.payload,request.targetEntity,player.companyEntity); }
       catch { throw new ProtocolError('BAD_ROAD_STOP_PAYLOAD','invalid bounded road Stop payload'); }
+    }
+    if(request.commandType==='road.depot.build'){
+      if(!this.enableDepotBuild)throw new ProtocolError('UNSUPPORTED_COMMAND','road depot execution is not qualified');
+      if(request.targetEntity!==0)throw new ProtocolError('BAD_ENTITY','depot build targets no existing entity');
+      try{roadPayload=parseDepotBuildOrderPayload(request.payload,player.companyEntity);}
+      catch{throw new ProtocolError('BAD_DEPOT_BUILD_PAYLOAD','invalid bounded road depot payload');}
     }
     if (request.requestedUpdate !== undefined && (!Number.isSafeInteger(request.requestedUpdate) || request.requestedUpdate < 0)) {
       throw new ProtocolError("BAD_SCHEDULE", "requested update must be a nonnegative safe integer");
@@ -134,9 +144,12 @@ export class CommandQueue {
   #lastUpdate = -1;
   #fault = null;
   #maxPending;
-  constructor({ maxPending = 4096 } = {}) {
+  #enableDepotBuild;
+  constructor({ maxPending = 4096,enableDepotBuild=false } = {}) {
     if (!Number.isSafeInteger(maxPending) || maxPending < 1 || maxPending > MAX_SESSION_MESSAGES) throw new RangeError("invalid queue capacity");
+    if(typeof enableDepotBuild!=='boolean')throw new TypeError('invalid depot capability');
     this.#maxPending = maxPending;
+    this.#enableDepotBuild=enableDepotBuild;
   }
   get fault() { return this.#fault?.code ?? null; }
   get pendingCount() { return this.#bySequence.size; }
@@ -179,6 +192,11 @@ export class CommandQueue {
     } else if (command.commandType === 'road.stop.place') {
       try { parseRoadStopOrderPayload(command.payload,command.targetEntity,mappedOwner); }
       catch { throw new ProtocolError('AUTH_RECHECK_FAILED','accepted road Stop payload changed'); }
+    } else if(command.commandType==='road.depot.build'){
+      if(!this.#enableDepotBuild)throw new ProtocolError('AUTH_RECHECK_FAILED','road depot execution is not qualified');
+      if(command.targetEntity!==0)throw new ProtocolError('AUTH_RECHECK_FAILED','depot build targets no existing entity');
+      try{parseDepotBuildOrderPayload(command.payload,mappedOwner);}
+      catch{throw new ProtocolError('AUTH_RECHECK_FAILED','accepted road depot payload changed');}
     } else {
       throw new ProtocolError("AUTH_RECHECK_FAILED", "accepted command type is not enabled locally");
     }
