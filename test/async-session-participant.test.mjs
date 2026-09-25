@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { AsyncSessionParticipant } from "../src/async-session-participant.mjs";
 import { SessionCoordinator } from "../src/session-coordinator.mjs";
 import { EngineOperationJournal } from "../src/engine-operation-journal.mjs";
+import { ROAD_STOP_MODEL } from '../src/road-stop-order-payload.mjs';
 const checkpointHash = "a".repeat(64), stateHash = "b".repeat(64), roundId = "round";
 const companies = new Map([["a",10],["b",11]]);
 const command = (hostSequence = 1, scheduledUpdate = 108) => ({protocolVersion:2,hostSequence,scheduledUpdate,
@@ -79,6 +80,21 @@ function fixture() {
   const commit = () => p.receive("command_commit",{roundId,command:command()});
   return {p,requests,sends,reply,start,prepare,commit,time:n => {time=n;},closed:() => closed};
 }
+
+test('road Stop prepare uses the ordered participant and requires an engine company receipt',()=>{
+  const road={...command(),commandType:'road.stop.place',payload:{edgeEntity:20,
+    companyEntity:10,param:0.5,left:true,oneWay:false,model:ROAD_STOP_MODEL,name:'TalCo Road Stop'}};
+  const accepted=fixture();accepted.start();
+  accepted.p.receive('command_prepare',{roundId,command:road});
+  assert.equal(accepted.requests.at(-1).operation,'prepare');
+  assert.equal(accepted.requests.at(-1).command.commandType,'road.stop.place');
+  accepted.reply({ownerCompanyEntity:10});
+  assert.equal(accepted.p.phase,'prepared');
+  const rejected=fixture();rejected.start();
+  rejected.p.receive('command_prepare',{roundId,command:road});
+  rejected.reply({ownerCompanyEntity:11});
+  assert.equal(rejected.p.fault,'INVALID_PREPARE_RECEIPT');
+});
 
 test('preparation receipt overtaken by telemetry never rewinds the live clock or its acknowledgement',()=>{
   const f=fixture();f.start();

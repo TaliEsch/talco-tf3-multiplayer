@@ -2,15 +2,35 @@
 
 ## Current direction — 25 September 2026
 
+The bounded road Stop now traverses production Host admission, the existing
+ordered participant and mailbox, a road-specific game-script prepare and held
+execution, and a raw execution decoder. The game script consumes the one-use
+barrier before native submission and requires the callback to show a new owned
+Stop, replacement road, native charge and company balance under the held
+update. The legacy relay still rejects road requests. Focused model and
+authenticated socket tests pass, as does mod review. This revision has not
+run in TF3; it is not a stage-7 result. The next controlled disposable-save
+run must correlate the Host sequence, game receipt and observed road/economy
+postcondition without repeating the earlier uncertain purchase. A fresh
+read-only road preflight before Host sequence assignment is still desirable;
+the game-side prepare and execution checks currently reject stale roads.
+Readiness remains about 6.3/10 pending real-game proof.
+
+The read-only ordered road prepare is now connected through the existing
+participant, mailbox, GUI exchange and game-script event. It binds one Host
+sequence to the roster company, an empty live road, model identity and road
+revision, and persists an unknown receipt before returning an `ok` preparation
+receipt. The live Host still rejects road admission and the mailbox still
+rejects road `executeHeld`; no construction can be submitted by this path.
+Focused fixtures and mod review pass. This preparation has not run in TF3.
+
 A bounded `road.stop.place` command shape now exists in the Host authority
 model and ordered queue. It binds the seven observed TF3 fields to one road
 and company and rejects balance/cost input. The engine mailbox now has a
 bounded scalar encoding for the fractional position and UTF-8 name. The live
 Host still rejects road requests before assigning a sequence, and the mailbox
-refuses road publication because the game-side prepare/execute receipt path is
-not implemented. A read-only game-side decoder reconstructs the payload in
-Lua fixtures; it is not connected to a game event. No TF3 run tested this
-contract.
+refuses road execution publication because the held execution receipt path is
+not implemented. No TF3 run tested this contract.
 
 The ordered vehicle path is explicitly vehicle-only at Host admission,
 participant validation, engine mailbox encoding and game-side preparation /

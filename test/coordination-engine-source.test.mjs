@@ -22,7 +22,8 @@ test('engine-owned scheduling can only pause; vehicle execution still needs a fr
   assert.doesNotMatch(dispatch,/scheduledUpdate - 1/);
   assert.match(dispatch,/barrier.operationId ~= request.operationId/);
   assert.match(dispatch,/request\[key\] ~= value/);
-  assert.match(panel,/"tf3mp_arm_execution_hold", payload/);
+  assert.match(panel,/eventName : string = "tf3mp_arm_execution_hold"/);
+  assert.match(panel,/eventName = "tf3mp_arm_road_stop_hold"/);
   for(const name of ['tf3mp_arm_execution_hold','tf3mp_get_execution_barrier'])assert.ok(engine.includes(`state:subscribeToEvent("${name}")`));
 });
 
@@ -106,7 +107,8 @@ test('execution consumes authorization and requires an existing hold before muta
   assert.match(dispatch,/barrier.phase ~= "held"/);
   assert.match(dispatch,/clock.updateCount ~= request.scheduledUpdate/);
   assert.match(dispatch,/request\[key\] ~= value/);
-  assert.match(dispatch,/count ~= 15/);
+  assert.match(dispatch,/expectedCount : integer = 15/);
+  assert.match(dispatch,/count ~= expectedCount/);
 });
 
 test('review rejects weakened committed execution guards',async()=>{
@@ -140,7 +142,8 @@ test('preparation is engine-owned inspection with matching fixed wire fields',as
     assert.ok(panel.includes(`"${name}"`));
   }
   const gui=panel.slice(panel.indexOf('local function exchangePreparation'),panel.indexOf('local function exchangeCoordinationHalt'));
-  assert.match(gui,/count ~= 15/);
+  assert.match(gui,/expectedCount : integer = 15/);
+  assert.match(gui,/count ~= expectedCount/);
   assert.ok(gui.indexOf('preparationSent = request.operationId')<gui.indexOf('api.cmd.sendCommand'));
   assert.match(gui,/ownerCompanyEntity = receipt.ownerCompanyEntity/);
   assert.doesNotMatch(engine.slice(engine.indexOf('  update = function'),engine.indexOf('  handleEvent = function')),/preparedCommand/);

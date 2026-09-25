@@ -53,6 +53,10 @@ return before.code,after.code,after.stopEntity or 0,after.chargedCost or 0,calls
 test('correlates one owned stop, replaced road and native debit under the same hold',()=>{
   assert.deepEqual(run(),{before:'observed',after:'verified',stop:81,cost:67500,calls:0});
 });
+test('bound remote company may place its own stop while the local player differs',()=>{
+  assert.deepEqual(run('', 'api.engine.util.getPlayer=function()return 11 end'),
+    {before:'observed',after:'verified',stop:81,cost:67500,calls:0});
+});
 test('accepts the completed proposal exact stop ID when the callback omits that object',()=>{
   assert.deepEqual(run('entities={{25,1}}'),{before:'observed',after:'verified',stop:81,cost:67500,calls:0});
 });

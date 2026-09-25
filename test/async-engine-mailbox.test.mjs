@@ -78,7 +78,7 @@ test('engine mailbox preserves complete player/company command identity in both 
   }
 });
 
-test('road Stop scalar codec preserves position and UTF-8 name but publication stays closed',async()=>{
+test('road Stop scalar codec publishes bounded prepare and held execution',async()=>{
   const name='TalCo ' + 'é'.repeat(90);
   const command={protocolVersion:2,hostSequence:1,scheduledUpdate:108,originPlayerId:'player-a',
     targetCompanyEntity:3141,targetEntity:53417,commandType:'road.stop.place',
@@ -95,8 +95,8 @@ test('road Stop scalar codec preserves position and UTF-8 name but publication s
     await mkdir(directory);
     const mailbox=await createAsyncEngineMailbox({directory,nonce});
     try{
-      await assert.rejects(mailbox.publish(request),/ROAD_STOP_ENGINE_UNAVAILABLE/);
-      await assert.rejects(readFile(path.join(directory,'coordination_request.lua')));
+      await mailbox.publish(request);
+      assert.equal(await readFile(path.join(directory,'coordination_request.lua'),'utf8'),source);
     }finally{await mailbox.close();await rm(root,{recursive:true,force:true});}
   }
 });

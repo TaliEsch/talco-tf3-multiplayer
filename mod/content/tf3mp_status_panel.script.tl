@@ -12,6 +12,7 @@ local record Tf3MpRoadStopOutcome
   probe : function(any, table) : table
 end
 local roadStopOutcome = ug_require "tf3mp_status_1::/tf3mp_road_stop_outcome.lua" as Tf3MpRoadStopOutcome
+local roadStopOrderWire = ug_require "tf3mp_status_1::/tf3mp_road_stop_order_wire.lua" as table
 
 local record Tf3MpPanelState
   tickCount : integer
@@ -844,8 +845,23 @@ local function exchangePreparation() : nil
   if liveRequest.operation ~= "prepare" or liveRequest.nonce ~= bridgeNonce then return nil end
   if missedAcks <= 10 and lastAck >= 0 and preparationSent ~= liveRequest.operationId and coordinationSent == "" then
     local request = app.loadUserdata("tf3mp_status_1", "coordination_request")
-    if request.schemaVersion ~= 1 or request.nonce ~= bridgeNonce or request.operation ~= "prepare" or request.protocolVersion ~= 2 or request.commandType ~= "vehicle.setRunning" or type(request.running) ~= "boolean" then return nil end
-    local payload : table = { schemaVersion = 1, nonce = bridgeNonce, operation = "prepare", protocolVersion = 2, commandType = "vehicle.setRunning", running = request.running }
+    if request.schemaVersion ~= 1 or request.nonce ~= bridgeNonce or request.operation ~= "prepare" or request.protocolVersion ~= 2 then return nil end
+    local payload : table = { schemaVersion = 1, nonce = bridgeNonce, operation = "prepare", protocolVersion = 2, commandType = request.commandType }
+    local eventName : string = "tf3mp_prepare_command"
+    local expectedCount : integer = 15
+    if request.commandType == "vehicle.setRunning" then
+      if type(request.running) ~= "boolean" then return nil end
+      payload.running = request.running
+    elseif request.commandType == "road.stop.place" then
+      if roadStopOrderWire.decode(request) == nil then return nil end
+      eventName = "tf3mp_prepare_road_stop"
+      expectedCount = 18 + request.nameChunkCount
+      for _, key in ipairs({"paramText","left","oneWay","nameChunkCount"}) do payload[key] = request[key] end
+      for index = 1, request.nameChunkCount as integer do
+        local key = "nameChunk" .. tostring(index)
+        payload[key] = request[key]
+      end
+    else return nil end
     for _, key in ipairs({ "roundId", "operationId", "originPlayerId", "requestMessageId" }) do
       if type(request[key]) ~= "string" or #request[key] < 1 or #request[key] > 128 or not string.match(request[key] as string, "^[A-Za-z0-9_.:-]+$") then return nil end
       payload[key] = request[key]
@@ -855,12 +871,12 @@ local function exchangePreparation() : nil
       if type(value) ~= "number" or value < 0 or value > 2147483647 or value % 1 ~= 0 then return nil end
       payload[key] = value
     end
-    if request.hostSequence < 1 or request.clientSequence < 1 then return nil end
+    if request.hostSequence < 1 then return nil end
     local count : integer = 0
     for key, _ in pairs(request) do if payload[key] == nil then return nil end; count = count + 1 end
-    if count ~= 15 then return nil end
+    if count ~= expectedCount then return nil end
     preparationSent = request.operationId as string
-    api.cmd.sendCommand(api.cmd.makeScriptingSendEventCmd("tf3mp_status_1::/tf3mp_status.gs", "tf3mp_engine_bridge", "tf3mp_prepare_command", payload))
+    api.cmd.sendCommand(api.cmd.makeScriptingSendEventCmd("tf3mp_status_1::/tf3mp_status.gs", "tf3mp_engine_bridge", eventName, payload))
   end
   if preparationSent == "" or coordinationSent ~= "" then return nil end
   local value = api.gui.fireGuiScriptEvent("tf3mp_engine_bridge", "tf3mp_get_preparation_receipt", {})
@@ -920,8 +936,14 @@ local function dispatchExecutionAtUpdate() : nil
   local live = app.loadUserdata("tf3mp_status_1", "coordination_request")
   local count : integer = 0
   for key, value in pairs(live) do if request[key] ~= value then return nil end; count = count + 1 end
-  if count ~= 15 then return nil end
-  api.cmd.sendCommand(api.cmd.makeScriptingSendEventCmd("tf3mp_status_1::/tf3mp_status.gs", "tf3mp_engine_bridge", "tf3mp_execute_command", request))
+  local expectedCount : integer = 15
+  local eventName : string = "tf3mp_execute_command"
+  if request.commandType == "road.stop.place" then
+    expectedCount = 18 + request.nameChunkCount
+    eventName = "tf3mp_execute_road_stop"
+  end
+  if count ~= expectedCount then return nil end
+  api.cmd.sendCommand(api.cmd.makeScriptingSendEventCmd("tf3mp_status_1::/tf3mp_status.gs", "tf3mp_engine_bridge", eventName, request))
   return nil
 end
 
@@ -931,8 +953,23 @@ local function exchangeExecution() : nil
   if liveRequest.operation ~= "executeHeld" or liveRequest.nonce ~= bridgeNonce then return nil end
   if missedAcks <= 10 and lastAck >= 0 and executionSent ~= liveRequest.operationId and coordinationSent == "" then
     local request = app.loadUserdata("tf3mp_status_1", "coordination_request")
-    if request.schemaVersion ~= 1 or request.nonce ~= bridgeNonce or request.operation ~= "executeHeld" or request.protocolVersion ~= 2 or request.commandType ~= "vehicle.setRunning" or type(request.running) ~= "boolean" then return nil end
-    local payload : table = { schemaVersion = 1, nonce = bridgeNonce, operation = "executeHeld", protocolVersion = 2, commandType = "vehicle.setRunning", running = request.running }
+    if request.schemaVersion ~= 1 or request.nonce ~= bridgeNonce or request.operation ~= "executeHeld" or request.protocolVersion ~= 2 then return nil end
+    local payload : table = { schemaVersion = 1, nonce = bridgeNonce, operation = "executeHeld", protocolVersion = 2, commandType = request.commandType }
+    local eventName : string = "tf3mp_arm_execution_hold"
+    local expectedCount : integer = 15
+    if request.commandType == "vehicle.setRunning" then
+      if type(request.running) ~= "boolean" then return nil end
+      payload.running = request.running
+    elseif request.commandType == "road.stop.place" then
+      if roadStopOrderWire.decode(request) == nil then return nil end
+      eventName = "tf3mp_arm_road_stop_hold"
+      expectedCount = 18 + request.nameChunkCount
+      for _, key in ipairs({"paramText","left","oneWay","nameChunkCount"}) do payload[key] = request[key] end
+      for index = 1, request.nameChunkCount as integer do
+        local key = "nameChunk" .. tostring(index)
+        payload[key] = request[key]
+      end
+    else return nil end
     for _, key in ipairs({ "roundId", "operationId", "originPlayerId", "requestMessageId" }) do
       if type(request[key]) ~= "string" or #request[key] < 1 or #request[key] > 128 or not string.match(request[key] as string, "^[A-Za-z0-9_.:-]+$") then return nil end
       payload[key] = request[key]
@@ -942,13 +979,13 @@ local function exchangeExecution() : nil
       if type(value) ~= "number" or value < 0 or value > 2147483647 or value % 1 ~= 0 then return nil end
       payload[key] = value
     end
-    if request.hostSequence < 1 or request.clientSequence < 1 then return nil end
+    if request.hostSequence < 1 then return nil end
     local count : integer = 0
     for key, _ in pairs(request) do if payload[key] == nil then return nil end; count = count + 1 end
-    if count ~= 15 then return nil end
+    if count ~= expectedCount then return nil end
     executionSent = request.operationId as string
     pendingExecution = payload -- Transient GUI delivery, never persisted executable work.
-    api.cmd.sendCommand(api.cmd.makeScriptingSendEventCmd("tf3mp_status_1::/tf3mp_status.gs", "tf3mp_engine_bridge", "tf3mp_arm_execution_hold", payload))
+    api.cmd.sendCommand(api.cmd.makeScriptingSendEventCmd("tf3mp_status_1::/tf3mp_status.gs", "tf3mp_engine_bridge", eventName, payload))
   end
   if executionSent == "" or coordinationSent ~= "" then return nil end
   local value = api.gui.fireGuiScriptEvent("tf3mp_engine_bridge", "tf3mp_get_execution_receipt", {})
@@ -971,7 +1008,13 @@ local function exchangeExecution() : nil
   if type(receipt.updateCount) ~= "number" or receipt.updateCount < 0 or receipt.updateCount > 2147483647 or receipt.updateCount % 1 ~= 0 then return nil end
   local payload : table = {schemaVersion = 1, nonce = bridgeNonce, operationId = executionSent, roundId = receipt.roundId,
     operation = "executeHeld", status = receipt.status, updateCount = receipt.updateCount, held = receipt.held}
-  if receipt.status == "ok" then
+  if receipt.status == "ok" and receipt.snapshotVersion == 2 then
+    for _, key in ipairs({ "snapshotVersion", "hostSequence", "entity", "ownerCompanyEntity", "stopEntity", "roadEntity", "chargedCost", "balance", "negative" }) do
+      local number = receipt[key]
+      if type(number) ~= "number" or number < 0 or number > 9007199254740991 or number % 1 ~= 0 then return nil end
+      payload[key] = number
+    end
+  elseif receipt.status == "ok" then
     for _, key in ipairs({ "snapshotVersion", "hostSequence", "entity", "ownerCompanyEntity", "stopFlag", "balance", "negative" }) do
       local number = receipt[key]
       if type(number) ~= "number" or number < 0 or number > 9007199254740991 or number % 1 ~= 0 then return nil end

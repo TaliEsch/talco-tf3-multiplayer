@@ -156,9 +156,10 @@ export function startHost({ secret, sessionId = randomUUID(), bind = DEFAULT_BIN
             send(socket, "test_echo", { value: body.payload.value }, peer.player.playerId);
           }
           else if (body.kind === "action_request" || body.kind === "speed_request") {
-            // The bounded model command exists, but the production engine
-            // adapter does not yet have a road prepare/execute receipt path.
-            if(body.payload?.commandType==='road.stop.place'){
+            // Legacy relay has no engine-held construction boundary. The
+            // production coordinator requires every participant to prepare,
+            // execute and report the road postcondition before release.
+            if(legacyModelRelay&&body.payload?.commandType==='road.stop.place'){
               send(socket,'command_rejected',{requestMessageId:body.messageId,code:'ROAD_STOP_ENGINE_UNAVAILABLE'},peer.player.playerId);
               continue;
             }

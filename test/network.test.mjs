@@ -363,6 +363,37 @@ test('road Stop remains rejected on the live Host until its engine adapter exist
   finally{await shutdown(instance.server,[handle.socket]);}
 });
 
+test('production Host admits a bounded road Stop to coordinator ordering',async()=>{
+  const instance=startHost({secret:SECRET,sessionId:'road-production-admission',
+    port:0,buildHash:BUILD,modManifestHash:MODS,getUpdateCount:()=>50});
+  await once(instance.server,'listening');
+  let handle;
+  const proposed=new Promise((resolve,reject)=>{
+    instance.coordinator.beforeCommand=()=>{};
+    instance.coordinator.propose=command=>resolve(command);
+    handle=connectClient({secret:SECRET,sessionId:instance.sessionId,
+      port:instance.server.address().port,displayName:'Alice',buildHash:BUILD,modManifestHash:MODS,
+      onMessage(message,context){
+        if(message.kind==='admitted'){
+          instance.authority.bindCompanyEntity(message.payload.player.playerId,3141);
+          context.send('action_request',{clientSequence:1,commandType:'road.stop.place',
+            originPlayerId:message.payload.player.playerId,targetCompanyEntity:3141,
+            targetEntity:53417,payload:{edgeEntity:53417,companyEntity:3141,
+              param:0.5,left:true,oneWay:false,
+              model:'::/stations/street/small_stops/small_mid.mdl',name:'TalCo Road Stop'}});
+        }
+        if(message.kind==='command_rejected'||message.kind==='error')reject(new Error(message.payload.code));
+      }});
+  });
+  try{
+    const command=await proposed;
+    assert.equal(command.commandType,'road.stop.place');
+    assert.equal(command.targetCompanyEntity,3141);
+    assert.equal(command.hostSequence,1);
+    assert.ok(command.scheduledUpdate>50);
+  }finally{await shutdown(instance.server,[handle.socket]);}
+});
+
 test("authenticated socket subscribers observe signed coordination frames with stable ordered fanout", async () => {
   const instance = startHost({ secret: SECRET, sessionId: "subscriber-session", port: 0, buildHash: BUILD, modManifestHash: MODS });
   await once(instance.server, "listening");

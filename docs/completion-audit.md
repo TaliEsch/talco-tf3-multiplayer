@@ -1,5 +1,35 @@
 # Completion audit against the build prompt
 
+## Ordered road Stop execution wiring — 25 September 2026
+
+Production Host now admits the bounded road action to its existing coordinator;
+the legacy relay remains closed. The participant publishes read-only prepare
+and then one held execution. The game-side road event rechecks roster company,
+road, revision and model before consuming the barrier, snapshots the companies,
+submits one native proposal and accepts only an observed Stop/replacement-road
+and native-debit callback. The raw receipt is decoded into a state hash, with
+unknown outcomes latched and no automatic retry. Focused model, mailbox,
+authenticated Host admission and package-review tests pass. This is source and
+mock evidence only: the modified code has not run in TF3, and no Host-ordered
+road Stop or separate-company economy completion is established.
+At this integration checkpoint the elevated full suite ran 1,014 tests:
+1,007 passed, five native debugger/controller fixture tests failed and two
+were skipped. Those five failures reproduce the previous suite's fixture
+failures; the road-specific and affected source tests pass. The sandboxed
+attempt also hit Windows process-launch `EPERM` across unrelated tests and
+is not used as a regression count.
+
+## Read-only ordered road Stop preparation — 25 September 2026
+
+The participant can now issue one bounded road Stop `prepare` through the
+existing mailbox. The GUI forwards its fixed fields to a separate game-script
+event. That event checks the bound Host sequence, company roster, active lease,
+live empty road, model lookup and road revision; it records an unknown receipt
+before declaring read-only preparation `ok`. The live Host still rejects road
+action admission, and the mailbox still rejects road `executeHeld`. Focused
+fixtures and mod review pass, but TF3 has not loaded or executed this revision.
+No road mutation, Host-ordered completion or multi-instance result is proven.
+
 ## Bounded road Stop order contract — 25 September 2026
 
 The Host authority model and ordered queue now validate `road.stop.place`
@@ -7,12 +37,10 @@ against the exact seven-field TF3 road Stop capture: road and company IDs,
 relative position, side, direction, fixed qualified model and bounded name.
 The live Host returns `ROAD_STOP_ENGINE_UNAVAILABLE` before action admission
 and sequence assignment. The engine mailbox has a bounded scalar encoding for
-the exact fractional position and UTF-8 name; it rejects publication of the
-road command until game-side prepare/execute receipts exist. Focused model,
-codec, Lua decoder and authenticated socket tests verify the schema and closed
-production gate. The Lua decoder is read-only and not connected to a game
-event. This is offline transport work only, not Host-ordered TF3 execution or
-a successful road Stop callback.
+the exact fractional position and UTF-8 name; road execution publication
+remains closed. Focused model, codec, Lua decoder and authenticated socket
+tests verify the schema and closed production gate. This is offline transport
+work only, not Host-ordered TF3 execution or a successful road Stop callback.
 
 ## Offline road Stop callback readback — 25 September 2026
 

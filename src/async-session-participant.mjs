@@ -148,7 +148,8 @@ export class AsyncSessionParticipant {
         if (this.#phase !== "running" || !exact(p,"roundId,command")) this.#fail("INVALID_COMMAND_PREPARE");
         const c = structuredClone(p.command);
         if (!exact(c,"protocolVersion,hostSequence,scheduledUpdate,originPlayerId,targetCompanyEntity,targetEntity,commandType,payload,clientSequence,requestMessageId")
-          || c.commandType !== "vehicle.setRunning" || c.hostSequence !== this.#sequence + 1
+          || !['vehicle.setRunning','road.stop.place'].includes(c.commandType)
+          || c.hostSequence !== this.#sequence + 1
           || !uint(c.scheduledUpdate) || c.scheduledUpdate <= this.#update
           || typeof c.requestMessageId !== "string" || c.requestMessageId.length > 128) this.#fail("INVALID_COMMAND_PREPARE");
         // Structural check only here. Actual owner comes from engine inspection,
@@ -207,7 +208,10 @@ export class AsyncSessionParticipant {
         this.#transition("preparing");
         this.send("participant_ready", {roundId:this.#round,...this.#checkpoint,companyEntity:this.#companies.get(this.playerId)});
       } else if (r.operation === "prepare") {
-        if (this.#update >= this.#command.scheduledUpdate || !this.#queue.enqueue(this.#command,this.#companies,() => p.ownerCompanyEntity)) this.#fail("INVALID_PREPARE_RECEIPT");
+        if (this.#update >= this.#command.scheduledUpdate
+          || this.#command.commandType==='road.stop.place'
+            && p.ownerCompanyEntity!==this.#command.targetCompanyEntity
+          || !this.#queue.enqueue(this.#command,this.#companies,() => p.ownerCompanyEntity)) this.#fail("INVALID_PREPARE_RECEIPT");
         this.#transition("prepared");
         this.send("command_prepared", {roundId:this.#round,hostSequence:this.#command.hostSequence,scheduledUpdate:this.#command.scheduledUpdate,updateCount:this.#update});
       } else if (r.operation === "executeHeld") {

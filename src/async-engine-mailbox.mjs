@@ -5,6 +5,7 @@ import { parseFlatDataFile, requirePlainDirectory } from "./userdata-ipc.mjs";
 import { CommandQueue } from "./lockstep.mjs";
 import { decodeCheckpointReceipt } from "./coordinator-checkpoint.mjs";
 import { decodeExecutionReceipt } from "./coordinator-execution.mjs";
+import { decodeRoadExecutionReceipt } from './coordinator-road-execution.mjs';
 import { replaceUnpublished } from './unpublished-replace.mjs';
 import { decodeRoadStopFlat, encodeRoadStopFlat } from './road-stop-order-payload.mjs';
 
@@ -13,8 +14,7 @@ const uint = n => Number.isSafeInteger(n) && n >= 0 && n <= 2147483647;
 const ident = s => typeof s === "string" && /^[A-Za-z0-9_.:-]{1,128}$/.test(s);
 const hash = s => typeof s === "string" && /^[0-9a-f]{64}$/.test(s);
 // Data-only fixed schema. No eval, paths, arbitrary script or finance payloads.
-// Road Stop has a bounded scalar codec, but publication stays disabled until
-// the game-side prepare/execute path and receipts are qualified.
+// Road Stop has a bounded scalar codec and its own held postcondition receipt.
 // Development mod consumes bindSession,
 // prepare, held checkpoint capture/release, executeHeld and terminal halt under
 // a live lease. Engine command cycles remain unverified in TF3.
@@ -119,15 +119,14 @@ export async function createAsyncEngineMailbox({directory,nonce=randomBytes(16).
       // Validate and snapshot before entering the serialized I/O queue.
       let source;
       try { source=encodeAsyncEngineRequest(request,nonce); } catch(e) { return Promise.reject(e); }
-      if(['prepare','executeHeld'].includes(request.operation)
-        &&request.command.commandType==='road.stop.place')
-        return Promise.reject(new Error('ROAD_STOP_ENGINE_UNAVAILABLE'));
       if (halting) return Promise.reject(new Error("mailbox halted; create a new verified session"));
       if(request.operation==='executeHeld')expectedExecution=Object.freeze({
         roundId:request.roundId,operationId:request.operationId,
         hostSequence:request.command.hostSequence,scheduledUpdate:request.command.scheduledUpdate,
         entity:request.command.targetEntity,company:request.command.targetCompanyEntity,
-        stopped:request.command.payload.running===false,
+        commandType:request.command.commandType,
+        ...(request.command.commandType==='vehicle.setRunning'
+          ?{stopped:request.command.payload.running===false}:{}),
       });
       const halt = request.operation === "halt";
       if (halt) halting=true; // Latch before any queued publication can run.
@@ -195,12 +194,17 @@ export async function createAsyncEngineMailbox({directory,nonce=randomBytes(16).
       }
       if(p.operation==='executeHeld'&&p.status==='ok') {
         try {
-          const decoded=decodeExecutionReceipt(p),expected=expectedExecution;
+          const expected=expectedExecution;
+          const decoded=expected?.commandType==='road.stop.place'
+            ?decodeRoadExecutionReceipt(p):decodeExecutionReceipt(p);
           if(!expected||p.roundId!==expected.roundId||p.operationId!==expected.operationId
             ||p.hostSequence!==expected.hostSequence||p.updateCount!==expected.scheduledUpdate
-            ||decoded.state.vehicle.entity!==expected.entity
-            ||decoded.state.vehicle.ownerCompanyEntity!==expected.company
-            ||decoded.state.vehicle.stopped!==expected.stopped)
+            ||(expected.commandType==='road.stop.place'
+              ?decoded.state.roadStop.sourceRoadEntity!==expected.entity
+                ||decoded.state.roadStop.ownerCompanyEntity!==expected.company
+              :decoded.state.vehicle.entity!==expected.entity
+                ||decoded.state.vehicle.ownerCompanyEntity!==expected.company
+                ||decoded.state.vehicle.stopped!==expected.stopped))
             throw new Error('EXECUTION_POSTCONDITION_MISMATCH');
           onExecutionEvidence(structuredClone(decoded));
           p=decoded.receipt;

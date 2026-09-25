@@ -120,7 +120,7 @@ local function snapshot(api, input, companies, progress)
   progress.stage = "held"
   local update = held(api)
   progress.stage = "road"
-  if api.engine.util.getPlayer() ~= input.companyEntity or api.engine.entityExists(input.edgeEntity) ~= true then fail() end
+  if api.engine.entityExists(input.edgeEntity) ~= true then fail() end
   local edge = component(api, input.edgeEntity, "BASE_EDGE")
   if not native(edge) or not dense(edge.objects, 0) then fail() end
   local geometry = roadGeometry(edge)
@@ -151,8 +151,9 @@ local function verify(api, before, input, data, success, resultEntities, progres
     or not dense(resultEntities, 64) then fail() end
   progress.stage = "result_hold"
   if held(api) ~= before.updateCount then fail() end
-  progress.stage = "result_player"
-  if api.engine.util.getPlayer() ~= input.companyEntity then fail() end
+  progress.stage = "result_company"
+  if api.engine.entityExists(input.companyEntity) ~= true
+    or not native(component(api, input.companyEntity, "PLAYER")) then fail() end
   progress.stage = "result_road"
   if api.engine.entityExists(input.edgeEntity) ~= false then fail() end
   progress.stage = "result_model"

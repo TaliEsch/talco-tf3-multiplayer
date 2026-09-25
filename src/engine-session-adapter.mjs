@@ -182,8 +182,13 @@ export async function createEngineSessionAdapter({directory,bridge,playerId,comp
             logEngine({level:'info',event:'engine_execution_evidence',role:nativeRuntime?.role??'local',
               roundId:receipt.roundId,operationId:receipt.operationId,
               hostSequence:observed.hostSequence,updateCount:observed.updateCount,
-              entity:observed.vehicle.entity,ownerCompanyEntity:observed.vehicle.ownerCompanyEntity,
-              stopped:observed.vehicle.stopped,stateHash:receipt.stateHash,
+              ...(observed.roadStop?{sourceRoadEntity:observed.roadStop.sourceRoadEntity,
+                roadEntity:observed.roadStop.roadEntity,stopEntity:observed.roadStop.stopEntity,
+                chargedCost:observed.roadStop.chargedCost,
+                ownerCompanyEntity:observed.roadStop.ownerCompanyEntity,
+                companyBalance:observed.company.balance}
+                :{entity:observed.vehicle.entity,ownerCompanyEntity:observed.vehicle.ownerCompanyEntity,
+                  stopped:observed.vehicle.stopped}),stateHash:receipt.stateHash,
               gameplayVerified:false});
             executionEvidence=null;
           }

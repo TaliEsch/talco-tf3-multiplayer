@@ -20,6 +20,8 @@ const EXPECTED_CONTENT = Object.freeze([
   "tf3mp_road_replay_prepare.lua",
   "tf3mp_road_replay_rebuild.lua",
   "tf3mp_road_replay_result.lua",
+  "tf3mp_road_stop_order_execute.lua",
+  "tf3mp_road_stop_order_prepare.lua",
   "tf3mp_road_stop_order_wire.lua",
   "tf3mp_road_stop_outcome.lua",
   "tf3mp_road_stop_simple_dispatch.lua",
@@ -104,11 +106,13 @@ export async function validateReviewPackage(root) {
     ['tf3mp_road_replay_prepare.lua', 'b6738a73e3306ca6aa734c63438c91ed5b54ade321eede31c920103eab67ab25'],
     ['tf3mp_road_replay_rebuild.lua', 'f6de6ff3edff7f05199bf34dfeb699bbb81147e26d4f9257e0f81110a24ae028'],
     ['tf3mp_road_replay_result.lua', '201bd6cc15b2cf137e63a557f8e23254bee19e449d4bf57c2b363f5f37b428fa'],
+    ['tf3mp_road_stop_order_execute.lua', '47444115a3e471ea42d99ab9c2039518e7607be710f6a4a1be25072f2f037491'],
+    ['tf3mp_road_stop_order_prepare.lua', '4b4dcc049178590feb60acd2902983090e069133ce9b954f9e15653236e76ee3'],
     ['tf3mp_road_stop_outcome.lua', '99d39c50ea9e0cb2219bfaaf26d3640f2b42619f8952a864394fa3e7a0e6c552'],
     ['tf3mp_road_stop_order_wire.lua', '259dff8e07ed89a3939a4cbe6b49af102ab3cb4b572a38685afb3feab2d296b5'],
     ['tf3mp_road_stop_simple_prepare.lua', 'b9de96bbb92f212b3d8cc83d97564f2b7a814cfd6aa65ac4116ad9208add382c'],
     ['tf3mp_road_stop_simple_dispatch.lua', 'c3b689756b181097b62ecc2b0477d490075a9e4e1d477be7ddb587f1632d5a6b'],
-    ['tf3mp_road_stop_simple_result.lua', 'a9d149ea43bebbcfbfd2f3ac203730e83233a46168518bc15a280b39fd577d4d'],
+    ['tf3mp_road_stop_simple_result.lua', '81e1c0828a83d985e291c4d893dca2935eeab73e30ef336340e446a01aca5de4'],
   ]) {
     const source = await readFile(path.join(absoluteRoot, 'content', file), 'utf8');
     if (createHash('sha256').update(source.replace(/\r\n/g, '\n')).digest('hex') !== digest)
@@ -174,7 +178,7 @@ export async function validateReviewPackage(root) {
   for (const event of ["tf3mp_engine_probe", "tf3mp_get_engine_receipt", "tf3mp_get_status", "tf3mp_vehicle_command", "tf3mp_get_vehicle_receipt", "tf3mp_company_probe", "tf3mp_get_company_receipt", "tf3mp_finance_probe", "tf3mp_get_finance_receipt"]) {
     if (!gameScript.includes(`state:subscribeToEvent("${event}")`)) throw new Error(`missing script event subscription: ${event}`);
   }
-  if (!gameScript.includes("current.eventSubscriptionsVersion ~= 20")) throw new Error("missing event subscription migration");
+  if (!gameScript.includes("current.eventSubscriptionsVersion ~= 22")) throw new Error("missing event subscription migration");
   for (const event of ['tf3mp_native_road_stop_replay', 'tf3mp_get_native_road_stop_replay']) {
     if (!gameScript.includes(`state:subscribeToEvent("${event}")`)) throw new Error('missing road replay subscription');
   }
@@ -315,6 +319,19 @@ export async function validateReviewPackage(root) {
     throw new Error("update must discard saved vehicle work, not execute it");
   }
   const panelScript = await readFile(path.join(absoluteRoot, "content", "tf3mp_status_panel.script.tl"), "utf8");
+  if (!gameScript.includes('state:subscribeToEvent("tf3mp_prepare_road_stop")')
+    || !gameScript.includes('roadStopOrderPrepare.handle(state, param as table, api)')
+    || !panelScript.includes('roadStopOrderWire.decode(request) == nil')
+    || !panelScript.includes('eventName = "tf3mp_prepare_road_stop"'))
+    throw new Error('ordered road Stop preparation route is missing');
+  for(const marker of ['state:subscribeToEvent("tf3mp_arm_road_stop_hold")',
+    'state:subscribeToEvent("tf3mp_execute_road_stop")',
+    'roadStopOrderExecute.arm(state, param as table, api)',
+    'roadStopOrderExecute.execute(state, param as table, api)'])
+    if(!gameScript.includes(marker))throw new Error('ordered road Stop execution route is missing');
+  for(const marker of ['eventName = "tf3mp_arm_road_stop_hold"',
+    'eventName = "tf3mp_execute_road_stop"'])
+    if(!panelScript.includes(marker))throw new Error('ordered road Stop GUI execution route is missing');
   const simpleProbe = panelScript.slice(panelScript.indexOf('local function exchangeRoadStopSimpleProbe() : nil'),
     panelScript.indexOf('local function exchangeHalt() : nil'));
   for (const marker of ['config.mode ~= "company_test"', 'roadSimpleSent = requestId',
