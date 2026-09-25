@@ -39,6 +39,9 @@ Snapshot ReadSnapshot() noexcept;
 // Shared read-only exact-build/site qualification for the exclusive production
 // boundary owner. This never installs a handler or changes executable bytes.
 Status QualifyExactSite(void** site) noexcept;
+// One-shot diagnostic identity/site check. Does not authorize Start, expose a
+// site pointer, install handlers, patch bytes, or enable control providers.
+Status Diagnose40401WithoutHooks() noexcept;
 
 #ifdef TF3_POST_OBSERVER_OWNED_TEST
 Status StartOwnedFixture(void* site) noexcept;

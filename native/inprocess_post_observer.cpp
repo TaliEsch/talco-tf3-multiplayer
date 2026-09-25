@@ -148,7 +148,7 @@ bool ValidSite(void* address) noexcept {
     return std::memcmp(address, kBytes.data(), kBytes.size()) == 0;
 }
 
-Status ExactImageStatus() {
+Status ExactImageStatus(const std::array<unsigned char, 32>& expected_hash = kHash) {
     std::array<wchar_t, 32768> path{};
     const DWORD length = GetModuleFileNameW(nullptr, path.data(), static_cast<DWORD>(path.size()));
     if (length == 0 || length >= path.size()) return Status::image_file_failed;
@@ -174,7 +174,7 @@ Status ExactImageStatus() {
                                   digest.data(), static_cast<ULONG>(digest.size()));
     BCryptCloseAlgorithmProvider(algorithm, 0);
     if (status < 0) return Status::image_file_failed;
-    if (digest != kHash) return Status::image_hash_mismatch;
+    if (digest != expected_hash) return Status::image_hash_mismatch;
 
     // The exact disk hash qualifies the headers. Compare the mapped header and
     // require the site to lie inside its audited executable, non-writable section.
@@ -305,6 +305,20 @@ Status QualifyExactSite(void** site) noexcept {
         if (!ValidSite(exact)) return Status::invalid_site;
         *site = exact;
         return Status::started;
+    } catch (...) { return Status::unsupported_image; }
+}
+
+Status Diagnose40401WithoutHooks() noexcept {
+    // Analysis identity only. Never add this digest to the production Start gate.
+    constexpr std::array<unsigned char, 32> diagnostic_hash{
+        0x6a,0xbd,0xed,0xd8,0xfb,0xbd,0x31,0x17,0xfe,0x90,0x9d,0x87,0x47,0xbd,0x26,0x90,
+        0xa7,0x6b,0x90,0x98,0xa2,0x51,0xaa,0xbb,0x1a,0xe9,0xba,0x6b,0x4f,0x96,0x59,0xca};
+    try {
+        const auto identity = ExactImageStatus(diagnostic_hash);
+        if (identity != Status::started) return identity;
+        if (!CompatibleMitigations()) return Status::incompatible_mitigation;
+        auto* exact = reinterpret_cast<unsigned char*>(GetModuleHandleW(nullptr)) + kSiteRva;
+        return ValidSite(exact) ? Status::started : Status::invalid_site;
     } catch (...) { return Status::unsupported_image; }
 }
 

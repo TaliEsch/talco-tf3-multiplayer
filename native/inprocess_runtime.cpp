@@ -286,6 +286,26 @@ extern "C" __declspec(dllexport) DWORD WINAPI Tf3InProcessRuntimeV1(
         return TF3_INPROCESS_RUNTIME_INVALID_CREDENTIALS;
     }
 
+    // A diagnostic request always terminates here, even if malformed or the
+    // image is unsupported. No probe DLL, hooks, server or providers are started.
+    wchar_t diagnostic[16]{};
+    SetLastError(ERROR_SUCCESS);
+    const DWORD diagnostic_length = GetEnvironmentVariableW(
+        L"TF3MP_NATIVE_DIAGNOSTIC", diagnostic, _countof(diagnostic));
+    const DWORD diagnostic_error = GetLastError();
+    if (diagnostic_length != 0 || diagnostic_error != ERROR_ENVVAR_NOT_FOUND) {
+        if (diagnostic_length != 5 || wcscmp(diagnostic, L"40401") != 0) {
+            TraceNativeStart(L"-runtime-diagnostic.txt", "diagnostic-invalid");
+            return TF3_INPROCESS_RUNTIME_INVALID_DIAGNOSTIC;
+        }
+        const auto status = tf3postobserver::Diagnose40401WithoutHooks();
+        TraceNativeStart(L"-runtime-diagnostic.txt", "diagnostic-40401-no-hooks",
+                         static_cast<unsigned>(status), 0);
+        return status == tf3postobserver::Status::started
+            ? TF3_INPROCESS_RUNTIME_DIAGNOSTIC_MATCH
+            : TF3_INPROCESS_RUNTIME_UNSUPPORTED_EXECUTABLE;
+    }
+
     std::wstring probe_path;
     if (!SiblingPath(L"TF3NativeProbe.dll", &probe_path)) {
         return TF3_INPROCESS_RUNTIME_PROBE_LOAD_FAILED;

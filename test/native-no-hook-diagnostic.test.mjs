@@ -1,0 +1,18 @@
+import assert from 'node:assert/strict';
+import {existsSync} from 'node:fs';
+import {spawnSync} from 'node:child_process';
+import {fileURLToPath} from 'node:url';
+import test from 'node:test';
+
+const host = fileURLToPath(new URL('../dist/native-loader/TF3InProcessRuntimeHost.exe', import.meta.url));
+const dll = fileURLToPath(new URL('../dist/native-loader/TF3InProcessRuntime.dll', import.meta.url));
+const skip = process.platform !== 'win32' || !existsSync(host) || !existsSync(dll);
+for (const mode of ['40401', '40396', '40401-extra', 'x'.repeat(64)]) {
+  test(`native no-hook diagnostic rejects owned image or invalid selector ${mode}`, {skip}, () => {
+    const run = spawnSync(host, [dll, mode], {windowsHide: true, encoding: 'utf8', timeout: 15_000});
+    assert.ifError(run.error);
+    assert.equal(run.status, 0, run.stderr || run.stdout);
+    assert.match(run.stdout, /diagnostic-rejected-no-probe=1/);
+    assert.match(run.stdout, new RegExp(`status=${mode === '40401' ? 6 : 11}\\b`));
+  });
+}
