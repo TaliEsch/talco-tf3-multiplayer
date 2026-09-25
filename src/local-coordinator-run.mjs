@@ -2,6 +2,7 @@ import { SessionCoordinator } from './session-coordinator.mjs';
 import { createEngineSessionAdapter } from './engine-session-adapter.mjs';
 import { randomUUID } from 'node:crypto';
 import {parseRoadStopOrderPayload} from './road-stop-order-payload.mjs';
+import {ownerProofClockCurrent} from './vehicle-owner-proof.mjs';
 
 // Controlled single-game exercise of the real adapter/coordinator. Other roster
 // members are explicitly receipt mirrors, NOT independent engines or peers.
@@ -29,6 +30,7 @@ export async function createLocalCoordinatorRun({directory,bridge,playerId,compa
     checks:[],events:[],startedAt:now(),finishedAt:null};
   let phase='arming',adapter,sequence=0,controlsStarted=false,closed=false,polling=null,persisting=Promise.resolve();
   let firstCommandGate=beforeFirstCommand===null?'passed':'pending';
+  let roadPreflight=roadStop?'pending':'not_required';
   let terminalDeadline=0,reportFailed=false,lastRelease=null;
   const timings=new Map();
   const coordinator=new SessionCoordinator({now,requireReleaseAck:true,timeoutMs:30000,
@@ -182,6 +184,31 @@ export async function createLocalCoordinatorRun({directory,bridge,playerId,compa
         const update=bridge.engineObservation.sample.updateCount;
         const speed=bridge.engineObservation.sample.speedup;
         if(speed!==lastRelease.speedup){if(now()-lastRelease.at>=5000)fail('RUNNING_SPEED_NOT_OBSERVED');return;}
+        if(roadStop&&roadPreflight==='pending'){
+          roadPreflight='checking';
+          Promise.resolve().then(()=>bridge.inspectRoadPreflight({entity:vehicleEntity,
+            company:companies.get(playerId)})).then(receipt=>{
+            if(closed||phase==='failed')return;
+            if(receipt?.outcome!=='found'||receipt.entity!==vehicleEntity
+              ||receipt.company!==companies.get(playerId)
+              ||receipt.ownerCompany!==0&&receipt.ownerCompany!==receipt.company)
+              throw new Error('ROAD_PREFLIGHT_NOT_CONFIRMED');
+            roadPreflight=receipt;
+            report.roadPreflight={entity:receipt.entity,company:receipt.company,
+              ownerCompany:receipt.ownerCompany,revision:receipt.revision,
+              issuedUpdate:receipt.issuedUpdate,receiptUpdate:receipt.updateCount,
+              paused:receipt.paused};
+            event('LOCAL_ROAD_PREFLIGHT_VERIFIED',report.roadPreflight);persist();
+          }).catch(error=>fail(error?.message==='ROAD_PREFLIGHT_NOT_CONFIRMED'
+            ?'ROAD_PREFLIGHT_NOT_CONFIRMED':'ROAD_PREFLIGHT_UNAVAILABLE'));
+          return;
+        }
+        if(roadStop){
+          if(roadPreflight==='checking')return;
+          if(!ownerProofClockCurrent({issuedUpdate:roadPreflight.issuedUpdate,
+            receiptUpdate:roadPreflight.updateCount,hostUpdate:update,
+            paused:roadPreflight.paused})){fail('ROAD_PREFLIGHT_STALE');return;}
+        }
         const measuredUpdatesPerSecond=(update-lastRelease.updateCount)*1000/(now()-lastRelease.at);
         const lead=Math.min(600,Math.max(leadUpdates,Math.ceil(measuredUpdatesPerSecond*10)));
         sequence++;

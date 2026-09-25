@@ -2,6 +2,18 @@
 
 ## Current direction — 25 September 2026
 
+The revised production Host telemetry panel returned two read-only TF3
+receipts on build 40396 without changing the source save: road 53417 was
+`found` for company 3141 with public owner 0 and revision 23 at update 2955;
+nonexistent road 2147483647 was `missing` with revision 0 at update 3083.
+Both matched the active bridge nonce and request IDs. The controlled one-game
+ordered road run now calls the same strict bridge preflight before proposing
+its command and records the receipt. Focused local-run fixtures pass, including
+refusal before any action when preflight fails. The next paid run should
+correlate that preflight with one accepted ordered Stop and a separate
+postcondition read at the held boundary. Host socket admission itself still
+needs real-game verification; readiness stays about 6.6/10.
+
 A read-only build-40396 TF3 probe on the unchanged source save returned a
 nonce-bound road preflight receipt for road 53417 and company 3141:
 `outcome=found`, `ownerCompany=0` (public), `revision=23`, update 3313.

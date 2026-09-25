@@ -8,21 +8,26 @@ import {parseFlatDataFile} from '../src/userdata-ipc.mjs';
 import {ROAD_STOP_MODEL} from '../src/road-stop-order-payload.mjs';
 const lua=p=>`function data() return {${Object.entries(p).map(([k,v])=>`${k}=${JSON.stringify(v)},`).join('')}} end`;
 
-for(const scenario of ['success','unknown_action','report_failure','cancelled_stop','cancel_rejected','road_stop'])test(`local driver traverses actual adapter/files: ${scenario}`,async()=>{
+for(const scenario of ['success','unknown_action','report_failure','cancelled_stop','cancel_rejected','road_stop','road_preflight_rejected'])test(`local driver traverses actual adapter/files: ${scenario}`,async()=>{
   const failAction=scenario==='unknown_action',failReport=scenario==='report_failure';
   const cancelRun=['cancelled_stop','cancel_rejected'].includes(scenario);
   const root=await mkdtemp(path.join(os.tmpdir(),'tf3mp-local-driver-')),directory=path.join(root,'tf3mp_status_1');await mkdir(directory);
-  let run,locked=false,time=0,leasePhase='active',cancelCalls=0;const saved=[],seen=new Set(),actions=[],events=[];
+  let run,locked=false,time=0,leasePhase='active',cancelCalls=0,preflightCalls=0;const saved=[],seen=new Set(),actions=[],events=[];
   const sample={counter:1,updateCount:100,speedup:1};
   const bridge={nonce:'a'.repeat(32),get engineObservation(){return {available:true,sample};},
     get coordinationLeaseState(){return leasePhase;},get coordinationControlsLocked(){return locked;},
+    async inspectRoadPreflight({entity,company}){
+      preflightCalls++;assert.equal(entity,42);assert.equal(company,7);
+      return {outcome:scenario==='road_preflight_rejected'?'missing':'found',entity,company,ownerCompany:0,revision:23,
+        issuedUpdate:sample.updateCount,updateCount:sample.updateCount,paused:false};
+    },
     async acquireCoordinationControls(){assert.equal(sample.speedup,0);locked=true;},
     async startCoordinationLease(){return {get phase(){return leasePhase;},get active(){return leasePhase==='active';},stop(){leasePhase='closed';}};}};
   try {
     run=await createLocalCoordinatorRun({directory,bridge,playerId:'a',companies:new Map([['a',7],['b',9]]),vehicleEntity:42,now:()=>time,
       logger:e=>events.push(e),saveReport:async r=>{if(failReport&&r.phase==='passed')throw new Error('disk full');saved.push(r);},
-      commandLimit:cancelRun||scenario==='road_stop'?1:4,
-      roadStopPayload:scenario==='road_stop'?{edgeEntity:42,companyEntity:7,param:0.5,
+      commandLimit:cancelRun||['road_stop','road_preflight_rejected'].includes(scenario)?1:4,
+      roadStopPayload:['road_stop','road_preflight_rejected'].includes(scenario)?{edgeEntity:42,companyEntity:7,param:0.5,
         left:true,oneWay:false,model:ROAD_STOP_MODEL,name:'TalCo Road Stop'}:null,
       beforeFirstCommand:cancelRun?async ({entity,company,recordCancellationEvidence})=>{
         cancelCalls++;assert.equal(entity,42);assert.equal(company,7);
@@ -63,20 +68,24 @@ for(const scenario of ['success','unknown_action','report_failure','cancelled_st
       await writeFile(pending,lua(receipt));
       await rename(pending,path.join(directory,'coordination_receipt.lua'));
     }
-    assert.equal(run.phase,failAction||failReport||scenario==='cancel_rejected'?'failed':'passed',JSON.stringify(run.report.events));
-    assert.deepEqual(actions,scenario==='cancel_rejected'?[]:failAction||cancelRun||scenario==='road_stop'?[1]:[1,2,3,4],JSON.stringify(run.report));
+    assert.equal(run.phase,failAction||failReport||['cancel_rejected','road_preflight_rejected'].includes(scenario)?'failed':'passed',JSON.stringify(run.report.events));
+    assert.deepEqual(actions,['cancel_rejected','road_preflight_rejected'].includes(scenario)?[]:failAction||cancelRun||scenario==='road_stop'?[1]:[1,2,3,4],JSON.stringify(run.report));
     assert.equal(cancelCalls,cancelRun?1:0);
+    assert.equal(preflightCalls,['road_stop','road_preflight_rejected'].includes(scenario)?1:0);
     assert.equal(run.report.realEngineCount,1);assert.equal(run.report.simulatedParticipantCount,1);
     assert.equal(run.report.multiGameVerified,false);assert.ok(saved.length>0);
     if(scenario==='road_stop'){
       assert.equal(run.report.scope,'single_game_ordered_road_stop_with_receipt_mirror');
       assert.ok(run.report.events.some(e=>e.code==='ROAD_STOP_SCHEDULED'));
+      assert.equal(run.report.roadPreflight.ownerCompany,0);
+      assert.ok(run.report.events.some(e=>e.code==='LOCAL_ROAD_PREFLIGHT_VERIFIED'));
     }
     assert.equal(run.report.haltState,'confirmed');
-    assert.equal(events.some(e=>e.code==='LOCAL_RUN_PASSED_GAME_HELD'),!failAction&&!failReport&&scenario!=='cancel_rejected');
+    assert.equal(events.some(e=>e.code==='LOCAL_RUN_PASSED_GAME_HELD'),!failAction&&!failReport&&!['cancel_rejected','road_preflight_rejected'].includes(scenario));
     if(failAction)assert.equal(run.report.outcome,'ENGINE_OUTCOME_UNKNOWN');
     if(failReport)assert.equal(run.report.outcome,'report_write_failed');
     if(scenario==='cancel_rejected')assert.equal(run.report.outcome,'NATIVE_CANCEL_REJECTED');
+    if(scenario==='road_preflight_rejected')assert.equal(run.report.outcome,'ROAD_PREFLIGHT_NOT_CONFIRMED');
     if(cancelRun){
       assert.ok(run.report.events.some(e=>e.code==='OWNER_PRESTATE_RECEIPT'&&e.stopFlag===0));
       assert.ok(run.report.events.some(e=>e.code==='NATIVE_STOP_ARMED'&&e.ttlMs===5000));

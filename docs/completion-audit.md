@@ -1,5 +1,19 @@
 # Completion audit against the build prompt
 
+## Production telemetry road probe and local-run gate — 25 September 2026
+
+With the production Host helper on exact TF3 build 40396, the revised GUI
+telemetry route returned a nonce-bound `found` receipt for public road 53417,
+company 3141, revision 23 at update 2955. A second read-only request for
+entity 2147483647 returned `missing`, revision 0 at update 3083. No action
+was submitted and the source save SHA-256 stayed
+`CCBF4BEB740E53323E06D20890FD029C8E174D3E85EFB06801A8B4275C762FB5`.
+The controlled one-game ordered road runner now obtains and records the strict
+bridge preflight before proposing its command; it fails without proposing on
+an unavailable, mismatched or stale receipt. Seven focused local-run fixtures
+pass. Host socket admission and accepted road execution were not exercised in
+this read-only run.
+
 ## Read-only Host road admission preflight — 25 September 2026
 
 Host road Stop admission now requests a nonce-bound, fresh TF3 road receipt
