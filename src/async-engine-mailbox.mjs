@@ -10,6 +10,8 @@ import {decodeDepotExecutionReceipt} from './coordinator-depot-execution.mjs';
 import { replaceUnpublished } from './unpublished-replace.mjs';
 import { decodeRoadStopFlat, encodeRoadStopFlat } from './road-stop-order-payload.mjs';
 import {decodeDepotBuildFlat,encodeDepotBuildFlat} from './depot-build-order-payload.mjs';
+import {parseVehicleBuyOrderPayload} from './vehicle-buy-order-payload.mjs';
+import {decodeVehicleBuyExecutionReceipt} from './coordinator-vehicle-buy-execution.mjs';
 
 const exact = (p, names) => p && Object.keys(p).sort().join(",") === names.split(",").sort().join(",");
 const uint = n => Number.isSafeInteger(n) && n >= 0 && n <= 2147483647;
@@ -20,8 +22,9 @@ const hash = s => typeof s === "string" && /^[0-9a-f]{64}$/.test(s);
 // Development mod consumes bindSession,
 // prepare, held checkpoint capture/release, executeHeld and terminal halt under
 // a live lease. Engine command cycles remain unverified in TF3.
-export function encodeAsyncEngineRequest(r, nonce, {enableDepotBuild=false}={}) {
+export function encodeAsyncEngineRequest(r, nonce, {enableDepotBuild=false,enableVehicleBuy=false}={}) {
   if(typeof enableDepotBuild!=='boolean')throw new TypeError('invalid depot capability');
+  if(typeof enableVehicleBuy!=='boolean')throw new TypeError('invalid vehicle purchase capability');
   if (!/^[0-9a-f]{32}$/.test(nonce) || !r || r.schemaVersion !== 1 || !ident(r.roundId) || !ident(r.operationId)) throw new TypeError("invalid engine request identity");
   const common = "schemaVersion,roundId,operationId,operation";
   let p = {schemaVersion:1,nonce,roundId:r.roundId,operationId:r.operationId,operation:r.operation};
@@ -46,15 +49,17 @@ export function encodeAsyncEngineRequest(r, nonce, {enableDepotBuild=false}={}) 
   } else if (["prepare","executeHeld"].includes(r.operation)) {
     const c=r.command;
     if (!exact(r,common+",command") || !exact(c,"protocolVersion,hostSequence,scheduledUpdate,originPlayerId,targetCompanyEntity,targetEntity,commandType,payload,clientSequence,requestMessageId")
-      || !['vehicle.setRunning','road.stop.place',...(enableDepotBuild?['road.depot.build']:[])].includes(c.commandType)
+      || !['vehicle.setRunning','road.stop.place',...(enableDepotBuild?['road.depot.build']:[]),...(enableVehicleBuy?['road.vehicle.buy']:[])].includes(c.commandType)
       || !ident(c.originPlayerId) || !ident(c.requestMessageId)
       || ![c.hostSequence,c.scheduledUpdate,c.targetCompanyEntity,c.targetEntity,c.clientSequence].every(uint)) throw new TypeError("invalid bounded command");
-    if (!new CommandQueue({enableDepotBuild}).enqueue(c,new Map([[c.originPlayerId,c.targetCompanyEntity]]),() => c.targetCompanyEntity)) throw new TypeError("invalid command sequence");
+    if (!new CommandQueue({enableDepotBuild,enableVehicleBuy}).enqueue(c,new Map([[c.originPlayerId,c.targetCompanyEntity]]),() => c.targetCompanyEntity)) throw new TypeError("invalid command sequence");
     Object.assign(p,{hostSequence:c.hostSequence,scheduledUpdate:c.scheduledUpdate,companyEntity:c.targetCompanyEntity,
       entity:c.targetEntity,...(c.commandType==='road.stop.place'
         ?encodeRoadStopFlat(c.payload,c.targetEntity,c.targetCompanyEntity)
         :c.commandType==='road.depot.build'
         ?encodeDepotBuildFlat(c.payload,c.targetCompanyEntity)
+        :c.commandType==='road.vehicle.buy'
+        ?{model:parseVehicleBuyOrderPayload(c.payload,c.targetCompanyEntity,c.targetEntity).model}
         :{running:c.payload.running}),clientSequence:c.clientSequence,
       originPlayerId:c.originPlayerId,requestMessageId:c.requestMessageId,protocolVersion:c.protocolVersion,commandType:c.commandType});
   } else if (r.operation !== "halt" || !exact(r,common)) throw new TypeError("unsupported engine operation");
@@ -65,8 +70,9 @@ export function encodeAsyncEngineRequest(r, nonce, {enableDepotBuild=false}={}) 
 // Lossless data-only inverse used to audit the engine-facing wire contract.
 // This validates shape/identity, not authorization: the engine must compare
 // originPlayerId with its independently established company bindings and live owner.
-export function decodeAsyncEngineRequest(source, nonce, {enableDepotBuild=false}={}) {
+export function decodeAsyncEngineRequest(source, nonce, {enableDepotBuild=false,enableVehicleBuy=false}={}) {
   if(typeof enableDepotBuild!=='boolean')throw new TypeError('invalid depot capability');
+  if(typeof enableVehicleBuy!=='boolean')throw new TypeError('invalid vehicle purchase capability');
   const p=parseFlatDataFile(source);
   if(p.nonce!==nonce) throw new TypeError("engine request nonce mismatch");
   const r={schemaVersion:p.schemaVersion,roundId:p.roundId,operationId:p.operationId,operation:p.operation};
@@ -80,10 +86,12 @@ export function decodeAsyncEngineRequest(source, nonce, {enableDepotBuild=false}
     originPlayerId:p.originPlayerId,targetCompanyEntity:p.companyEntity,targetEntity:p.entity,
     commandType:p.commandType,payload:p.commandType==='road.stop.place'
       ?decodeRoadStopFlat(p):p.commandType==='road.depot.build'&&enableDepotBuild
-      ?decodeDepotBuildFlat(p):{running:p.running},
+      ?decodeDepotBuildFlat(p):p.commandType==='road.vehicle.buy'&&enableVehicleBuy
+      ?parseVehicleBuyOrderPayload({companyEntity:p.companyEntity,depotEntity:p.entity,model:p.model},p.companyEntity,p.entity)
+      :{running:p.running},
     clientSequence:p.clientSequence,requestMessageId:p.requestMessageId,
   };
-  const validated=parseFlatDataFile(encodeAsyncEngineRequest(r,nonce,{enableDepotBuild}));
+  const validated=parseFlatDataFile(encodeAsyncEngineRequest(r,nonce,{enableDepotBuild,enableVehicleBuy}));
   if(Object.keys(p).sort().join(",")!==Object.keys(validated).sort().join(",")
     ||Object.keys(validated).some(key=>p[key]!==validated[key])) throw new TypeError("noncanonical engine request fields");
   return r;
@@ -107,10 +115,11 @@ export async function isUnpublishedEngineSource(temporary,source) {
 }
 
 export async function createAsyncEngineMailbox({directory,nonce=randomBytes(16).toString("hex"),requireCheckpointSnapshot=true,
-  requireCompleteCheckpointCoverage=false,onCheckpointEvidence=()=>{},onExecutionEvidence=()=>{},enableDepotBuild=false}) {
+  requireCompleteCheckpointCoverage=false,onCheckpointEvidence=()=>{},onExecutionEvidence=()=>{},enableDepotBuild=false,
+  enableVehicleBuy=false}) {
   if (!/^[0-9a-f]{32}$/.test(nonce)) throw new TypeError("invalid mailbox nonce");
   if(typeof requireCheckpointSnapshot!=='boolean'||typeof requireCompleteCheckpointCoverage!=='boolean'
-    ||typeof enableDepotBuild!=='boolean'
+    ||typeof enableDepotBuild!=='boolean'||typeof enableVehicleBuy!=='boolean'
     ||typeof onCheckpointEvidence!=='function'||typeof onExecutionEvidence!=='function') throw new TypeError('invalid checkpoint evidence option');
   directory=await requirePlainDirectory(directory);
   const lockPath=path.join(directory,"coordination.lock"), requestPath=path.join(directory,"coordination_request.lua");
@@ -126,7 +135,7 @@ export async function createAsyncEngineMailbox({directory,nonce=randomBytes(16).
       if (closed) return Promise.reject(new Error("mailbox closed"));
       // Validate and snapshot before entering the serialized I/O queue.
       let source;
-      try { source=encodeAsyncEngineRequest(request,nonce,{enableDepotBuild}); } catch(e) { return Promise.reject(e); }
+      try { source=encodeAsyncEngineRequest(request,nonce,{enableDepotBuild,enableVehicleBuy}); } catch(e) { return Promise.reject(e); }
       if (halting) return Promise.reject(new Error("mailbox halted; create a new verified session"));
       if(request.operation==='executeHeld')expectedExecution=Object.freeze({
         roundId:request.roundId,operationId:request.operationId,
@@ -204,8 +213,9 @@ export async function createAsyncEngineMailbox({directory,nonce=randomBytes(16).
         try {
           const expected=expectedExecution;
           const decoded=expected?.commandType==='road.stop.place'
-            ?decodeRoadExecutionReceipt(p):expected?.commandType==='road.depot.build'
-            ?decodeDepotExecutionReceipt(p):decodeExecutionReceipt(p);
+          ?decodeRoadExecutionReceipt(p):expected?.commandType==='road.depot.build'
+            ?decodeDepotExecutionReceipt(p):expected?.commandType==='road.vehicle.buy'
+            ?decodeVehicleBuyExecutionReceipt(p):decodeExecutionReceipt(p);
           if(!expected||p.roundId!==expected.roundId||p.operationId!==expected.operationId
             ||p.hostSequence!==expected.hostSequence||p.updateCount!==expected.scheduledUpdate
             ||(expected.commandType==='road.stop.place'
@@ -213,6 +223,10 @@ export async function createAsyncEngineMailbox({directory,nonce=randomBytes(16).
                 ||decoded.state.roadStop.ownerCompanyEntity!==expected.company
               :expected.commandType==='road.depot.build'
               ?expected.entity!==0||decoded.state.depot.ownerCompanyEntity!==expected.company
+              :expected.commandType==='road.vehicle.buy'
+              ?decoded.state.vehicle.depotEntity!==expected.entity
+                ||decoded.state.vehicle.ownerCompanyEntity!==expected.company
+                ||decoded.state.depot.ownerCompanyEntity!==expected.company
               :decoded.state.vehicle.entity!==expected.entity
                 ||decoded.state.vehicle.ownerCompanyEntity!==expected.company
                 ||decoded.state.vehicle.stopped!==expected.stopped))

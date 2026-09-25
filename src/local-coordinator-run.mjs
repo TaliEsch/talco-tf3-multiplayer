@@ -3,6 +3,8 @@ import { createEngineSessionAdapter } from './engine-session-adapter.mjs';
 import { randomUUID } from 'node:crypto';
 import {parseRoadStopOrderPayload} from './road-stop-order-payload.mjs';
 import {parseDepotBuildOrderPayload} from './depot-build-order-payload.mjs';
+import {parseVehicleBuyOrderPayload} from './vehicle-buy-order-payload.mjs';
+import {parseFundingReceipt} from './phase2-funding.mjs';
 import {ownerProofClockCurrent} from './vehicle-owner-proof.mjs';
 
 // Controlled single-game exercise of the real adapter/coordinator. Other roster
@@ -11,7 +13,9 @@ import {ownerProofClockCurrent} from './vehicle-owner-proof.mjs';
 export async function createLocalCoordinatorRun({directory,bridge,playerId,companies,vehicleEntity,
   logger=()=>{},saveReport,now=Date.now,leadUpdates=60,metadata={},
   beforeFirstCommand=null,commandLimit=4,nativeRuntime=null,roadStopPayload=null,
-  roadStopOriginPlayerId=playerId,depotBuildPayload=null,depotBuildOriginPlayerId=playerId}) {
+  roadStopOriginPlayerId=playerId,depotBuildPayload=null,depotBuildOriginPlayerId=playerId,
+  vehicleBuyModel=null,verifiedFundingEvidence=null}) {
+  const depotVehicleRun=vehicleBuyModel!==null;
   if(!(companies instanceof Map)||companies.size!==2||!companies.has(playerId)
     ||!Number.isSafeInteger(vehicleEntity)||vehicleEntity<0||vehicleEntity>2147483647
     ||!Number.isSafeInteger(leadUpdates)||leadUpdates<40||leadUpdates>150
@@ -19,7 +23,9 @@ export async function createLocalCoordinatorRun({directory,bridge,playerId,compa
     ||!Number.isSafeInteger(commandLimit)||commandLimit<1||commandLimit>4
     ||typeof saveReport!=='function'||roadStopPayload!==null&&beforeFirstCommand!==null
     ||depotBuildPayload!==null&&(roadStopPayload!==null||beforeFirstCommand!==null
-      ||commandLimit!==1||vehicleEntity!==0||!companies.has(depotBuildOriginPlayerId))
+      ||commandLimit!==(depotVehicleRun?2:1)||vehicleEntity!==0||!companies.has(depotBuildOriginPlayerId))
+    ||depotVehicleRun&&(depotBuildPayload===null||typeof vehicleBuyModel!=='string')
+    ||!depotVehicleRun&&verifiedFundingEvidence!==null
     ||!companies.has(roadStopOriginPlayerId)
     ||roadStopPayload===null&&roadStopOriginPlayerId!==playerId)
     throw new TypeError('INVALID_LOCAL_RUN_OPTIONS');
@@ -33,20 +39,53 @@ export async function createLocalCoordinatorRun({directory,bridge,playerId,compa
     intent,intent.edgeEntity,roadCompany));
   const depotCompany=companies.get(depotBuildOriginPlayerId);
   const depotBuild=depotBuildPayload===null?null:parseDepotBuildOrderPayload(depotBuildPayload,depotCompany);
+  // Reject a malformed second intent before the first construction mutates TF3.
+  if(depotVehicleRun)parseVehicleBuyOrderPayload({companyEntity:depotCompany,
+    depotEntity:1,model:vehicleBuyModel},depotCompany,1);
+  let fundingReceipt=null;
+  if(depotVehicleRun){
+    const evidence=verifiedFundingEvidence;
+    if(!evidence||typeof evidence!=='object'||Array.isArray(evidence)
+      ||Object.keys(evidence).sort().join(',')!=='receiptSource,request'
+      ||typeof evidence.receiptSource!=='string'
+      ||!evidence.request||typeof evidence.request!=='object'||Array.isArray(evidence.request)
+      ||Object.keys(evidence.request).sort().join(',')!==
+        'amount,companyEntity,confirmed,expiresTick,issuedTick,kind,nonce,requestId,schemaVersion,targetCompany'
+      ||evidence.request?.schemaVersion!==1||evidence.request?.kind!=='phase2_funding'
+      ||evidence.request?.confirmed!==1||evidence.request?.nonce!==bridge.nonce
+      ||!Number.isSafeInteger(evidence.request?.amount)||evidence.request.amount<1
+      ||evidence.request.amount>1000000
+      ||!Number.isSafeInteger(evidence.request.issuedTick)||evidence.request.issuedTick<0
+      ||evidence.request.expiresTick!==evidence.request.issuedTick+300
+      ||evidence.request?.targetCompany!==depotCompany)
+      throw new TypeError('VERIFIED_FUNDING_EVIDENCE_REQUIRED');
+    try{fundingReceipt=parseFundingReceipt(evidence.receiptSource,evidence.request);}
+    catch{throw new TypeError('VERIFIED_FUNDING_EVIDENCE_REQUIRED');}
+    if(fundingReceipt.outcome!=='funded'||fundingReceipt.balances.targetAfter<=0
+      ||!Number.isSafeInteger(bridge.engineObservation?.sample?.updateCount)
+      ||fundingReceipt.updateCount>bridge.engineObservation.sample.updateCount)
+      throw new TypeError('VERIFIED_FUNDING_EVIDENCE_REQUIRED');
+  }
   const messages=[],reports=[];
   const hash=value=>typeof value==='string'&&/^[a-f0-9]{64}$/.test(value)?value:null;
-  const report={schemaVersion:1,batchId:randomUUID(),scope:depotBuild
+  const report={schemaVersion:1,batchId:randomUUID(),scope:depotVehicleRun
+    ?'single_game_ordered_depot_then_vehicle_with_receipt_mirror':depotBuild
     ?'single_game_ordered_depot_with_receipt_mirror':roadStop
     ?'single_game_ordered_road_stop_with_receipt_mirror':beforeFirstCommand
       ?'single_game_cancelled_stop_with_receipt_mirror':'single_game_real_adapter_with_receipt_mirror',
     metadata:{gameHash:hash(metadata.gameHash),modManifestHash:hash(metadata.modManifestHash)},
     gameplayVerified:false,multiGameVerified:false,realEngineCount:1,simulatedParticipantCount:1,
     outcome:'in_progress',haltState:'not_requested',haltSource:nativeRuntime?'native_terminal_parked':'game_mailbox',
-    checks:[],events:[],roadPreflights:[],independentRoadReadbacks:[],startedAt:now(),finishedAt:null};
+    checks:[],events:[],roadPreflights:[],independentRoadReadbacks:[],
+    ...(depotVehicleRun?{fundingEvidence:{targetCompany:depotCompany,
+      amount:fundingReceipt.amount,receiptUpdate:fundingReceipt.updateCount,
+      targetAfter:fundingReceipt.balances.targetAfter},independentVehicleReadback:false}:{}),
+    startedAt:now(),finishedAt:null};
   let phase='arming',adapter,sequence=0,controlsStarted=false,closed=false,polling=null,persisting=Promise.resolve();
   let firstCommandGate=beforeFirstCommand===null?'passed':'pending';
   let roadPreflight=roadStop?'pending':'not_required';
   let terminalDeadline=0,reportFailed=false,lastRelease=null;
+  let verifiedDepotEntity=null,verifiedDepotBalance=null;
   const timings=new Map();
   const coordinator=new SessionCoordinator({now,requireReleaseAck:true,timeoutMs:30000,
     broadcast:(kind,payload)=>messages.push({kind,payload})});
@@ -93,12 +132,13 @@ export async function createLocalCoordinatorRun({directory,bridge,playerId,compa
     persist();
   }
   adapter=await createEngineSessionAdapter({directory,bridge,playerId,companies,now,
-    enableDepotBuild:depotBuild!==null,
+    enableDepotBuild:depotBuild!==null,enableVehicleBuy:depotVehicleRun,
     nativeRuntime,checkpointEvidenceScope:nativeRuntime===null?'local_diagnostic':'production',
     healthy:()=>!closed&&!reportFailed&&phase!=='failed',controlsReady:()=>bridge.coordinationControlsLocked,
     disconnect:()=>{if(phase!=='stopping')fail(adapter?.fault??'ADAPTER_DISCONNECTED');},
     send:(kind,payload)=>reports.push({kind,payload})});
-  event(depotBuild?'LOCAL_ONLY_ONE_DEPOT_BUILD':roadStop?'LOCAL_ONLY_ONE_ROAD_STOP':'LOCAL_ONLY_NO_BUILDING_OR_NATIVE_ACTIONS');await persist();
+  event(depotVehicleRun?'LOCAL_ONLY_DEPOT_THEN_VEHICLE':depotBuild?'LOCAL_ONLY_ONE_DEPOT_BUILD'
+    :roadStop?'LOCAL_ONLY_ONE_ROAD_STOP':'LOCAL_ONLY_NO_BUILDING_OR_NATIVE_ACTIONS');await persist();
   const roster=[...companies].map(([playerId,companyEntity])=>({playerId,companyEntity}));
   async function processReport({kind,payload}) {
     if(kind==='participant_ready') {
@@ -127,7 +167,7 @@ export async function createLocalCoordinatorRun({directory,bridge,playerId,compa
         ||!Number.isSafeInteger(state.roadStop?.chargedCost)||state.roadStop.chargedCost<1
         ||!Number.isSafeInteger(state.company?.balance)))
         throw new Error('ACCEPTED_ROAD_POSTCONDITION_MISSING');
-      if(depotBuild&&(!state||state.scope!=='held_stock_road_depot_company_balance_v1'
+      if(depotBuild&&payload.hostSequence===1&&(!state||state.scope!=='held_stock_road_depot_company_balance_v1'
         ||state.hostSequence!==payload.hostSequence||state.updateCount!==payload.updateCount
         ||state.depot?.ownerCompanyEntity!==depotCompany
         ||!Number.isSafeInteger(state.depot?.constructionEntity)||state.depot.constructionEntity<1
@@ -136,6 +176,21 @@ export async function createLocalCoordinatorRun({directory,bridge,playerId,compa
         ||!Number.isSafeInteger(state.depot?.chargedCost)||state.depot.chargedCost<1
         ||!Number.isSafeInteger(state.company?.balance)))
         throw new Error('ACCEPTED_DEPOT_POSTCONDITION_MISSING');
+      if(depotVehicleRun&&payload.hostSequence===2&&(!state
+        ||state.scope!=='held_road_vehicle_purchase_company_balance_v1'
+        ||state.hostSequence!==2||state.updateCount!==payload.updateCount
+        ||state.vehicle?.depotEntity!==verifiedDepotEntity
+        ||state.vehicle?.ownerCompanyEntity!==depotCompany
+        ||!Number.isSafeInteger(state.vehicle?.entity)||state.vehicle.entity<1
+        ||state.vehicle.entity===verifiedDepotEntity
+        ||state.depot?.entity!==verifiedDepotEntity
+        ||state.depot?.ownerCompanyEntity!==depotCompany
+        ||state.company?.companyEntity!==depotCompany
+        ||!Number.isSafeInteger(state.company?.balanceBefore)||state.company.balanceBefore<=0
+        ||!Number.isSafeInteger(state.company?.chargedCost)||state.company.chargedCost<1
+        ||state.company.balanceBefore-state.company.balance!==state.company.chargedCost
+        ||state.hostCompany?.balanceBefore!==state.hostCompany?.balanceAfter))
+        throw new Error('ACCEPTED_VEHICLE_POSTCONDITION_MISSING');
       if(roadStop){
         const readback=await bridge.inspectOrderedRoadReadback({hostSequence:payload.hostSequence,
           company:state.roadStop.ownerCompanyEntity,
@@ -151,7 +206,7 @@ export async function createLocalCoordinatorRun({directory,bridge,playerId,compa
         await persist();
         if(readback.code!=='observed')throw new Error('ORDERED_ROAD_READBACK_UNKNOWN');
       }
-      if(depotBuild){
+      if(depotBuild&&payload.hostSequence===1){
         const readback=await bridge.inspectOrderedDepotReadback({hostSequence:payload.hostSequence,
           company:state.depot.ownerCompanyEntity,localCompany:companies.get(playerId),
           construction:state.depot.constructionEntity,depot:state.depot.depotEntity,
@@ -162,12 +217,18 @@ export async function createLocalCoordinatorRun({directory,bridge,playerId,compa
         event('INDEPENDENT_DEPOT_READBACK',report.independentDepotReadback);
         await persist();
         if(readback.code!=='observed')throw new Error('ORDERED_DEPOT_READBACK_UNKNOWN');
+        verifiedDepotEntity=state.depot.depotEntity;
+        verifiedDepotBalance=state.company.balance;
       }
       for(const member of roster)coordinator.applied(member.playerId,payload);
       report.checks.push({hostSequence:payload.hostSequence,updateCount:payload.updateCount,stateHash:payload.stateHash,
-        ...(depotBuild?{depotPostcondition:{constructionEntity:state.depot.constructionEntity,
+        ...(depotBuild&&payload.hostSequence===1?{depotPostcondition:{constructionEntity:state.depot.constructionEntity,
           depotEntity:state.depot.depotEntity,ownerCompanyEntity:state.depot.ownerCompanyEntity,
           chargedCost:state.depot.chargedCost,companyBalance:state.company.balance}}:{}),
+        ...(depotVehicleRun&&payload.hostSequence===2?{vehiclePostcondition:{vehicleEntity:state.vehicle.entity,
+          depotEntity:state.vehicle.depotEntity,ownerCompanyEntity:state.vehicle.ownerCompanyEntity,
+          chargedCost:state.company.chargedCost,balanceBefore:state.company.balanceBefore,
+          companyBalance:state.company.balance,hostCompanyUnchanged:true}}:{}),
         ...(roadStop?{roadPostcondition:{sourceRoadEntity:state.roadStop.sourceRoadEntity,
           roadEntity:state.roadStop.roadEntity,stopEntity:state.roadStop.stopEntity,
           ownerCompanyEntity:state.roadStop.ownerCompanyEntity,
@@ -241,6 +302,10 @@ export async function createLocalCoordinatorRun({directory,bridge,playerId,compa
         const update=bridge.engineObservation.sample.updateCount;
         const speed=bridge.engineObservation.sample.speedup;
         if(speed!==lastRelease.speedup){if(now()-lastRelease.at>=5000)fail('RUNNING_SPEED_NOT_OBSERVED');return;}
+        if(depotVehicleRun&&sequence===1){
+          if(verifiedDepotEntity===null||verifiedDepotBalance===null){fail('VERIFIED_DEPOT_REQUIRED');return;}
+          if(verifiedDepotBalance<=0){fail('VEHICLE_FUNDING_PRECONDITION_FAILED');return;}
+        }
         if(roadStop&&roadPreflight==='pending'){
           const intent=roadStop[sequence];
           roadPreflight='checking';
@@ -272,16 +337,20 @@ export async function createLocalCoordinatorRun({directory,bridge,playerId,compa
         const lead=Math.min(600,Math.max(leadUpdates,Math.ceil(measuredUpdatesPerSecond*10)));
         sequence++;
         const resumeSpeed=roadStop||depotBuild?1:[2,4,1,1][sequence-1];
+        const buying=depotVehicleRun&&sequence===2;
+        const buyPayload=buying?parseVehicleBuyOrderPayload({companyEntity:depotCompany,
+          depotEntity:verifiedDepotEntity,model:vehicleBuyModel},depotCompany,verifiedDepotEntity):null;
         coordinator.setResumeSpeed(resumeSpeed);
         timings.set(sequence,{proposedAt:now(),proposedUpdate:update,scheduledUpdate:update+lead,sourceSpeed:speed,measuredUpdatesPerSecond,requestedReleaseSpeed:resumeSpeed});
         coordinator.propose({protocolVersion:2,hostSequence:sequence,scheduledUpdate:update+lead,
           originPlayerId:depotBuild?depotBuildOriginPlayerId:roadStop?roadStopOriginPlayerId:playerId,
           targetCompanyEntity:depotBuild?depotCompany:roadStop?roadCompany:companies.get(playerId),
-          targetEntity:depotBuild?0:roadStop?roadStop[sequence-1].edgeEntity:vehicleEntity,
-          commandType:depotBuild?'road.depot.build':roadStop?'road.stop.place':'vehicle.setRunning',
-          payload:depotBuild??(roadStop?roadStop[sequence-1]:{running:sequence%2===0}),clientSequence:sequence,
+          targetEntity:buying?verifiedDepotEntity:depotBuild?0:roadStop?roadStop[sequence-1].edgeEntity:vehicleEntity,
+          commandType:buying?'road.vehicle.buy':depotBuild?'road.depot.build':roadStop?'road.stop.place':'vehicle.setRunning',
+          payload:buyPayload??depotBuild??(roadStop?roadStop[sequence-1]:{running:sequence%2===0}),clientSequence:sequence,
           requestMessageId:'local-run:'+sequence},update);
-        phase='cycling';event(depotBuild?'DEPOT_BUILD_SCHEDULED':roadStop?'ROAD_STOP_SCHEDULED':'VEHICLE_ACTION_SCHEDULED',
+        phase='cycling';event(buying?'VEHICLE_BUY_SCHEDULED':depotBuild?'DEPOT_BUILD_SCHEDULED'
+          :roadStop?'ROAD_STOP_SCHEDULED':'VEHICLE_ACTION_SCHEDULED',
           {hostSequence:sequence,scheduledUpdate:update+lead,resumeSpeed});
       }
     }

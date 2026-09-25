@@ -124,6 +124,8 @@ local roadStopSimplePrepare = ug_require "tf3mp_status_1::/tf3mp_road_stop_simpl
 local roadStopOrderPrepare = ug_require "tf3mp_status_1::/tf3mp_road_stop_order_prepare.lua" as table
 local depotBuildOrderPrepare = ug_require "tf3mp_status_1::/tf3mp_depot_build_order_prepare.lua" as table
 local depotBuildOrderExecute = ug_require "tf3mp_status_1::/tf3mp_depot_build_order_execute.lua" as table
+local vehicleBuyOrderPrepare = ug_require "tf3mp_status_1::/tf3mp_vehicle_buy_order_prepare.lua" as table
+local vehicleBuyOrderExecute = ug_require "tf3mp_status_1::/tf3mp_vehicle_buy_order_execute.lua" as table
 local roadStopOrderExecute = ug_require "tf3mp_status_1::/tf3mp_road_stop_order_execute.lua" as table
 local function roadCaptureModelName(modelId : integer) : string
   return api.res.modelRep.getName(modelId)
@@ -1318,6 +1320,9 @@ local function phase2FundingEvent(state : GameScriptState<Tf3MpState>, current :
   if request.companyEntity == request.targetCompany or request.expiresTick ~= request.issuedTick + 300 then return nil end
   local old = current.phase2FundingReceipt or {}
   if old.nonce == request.nonce and old.requestId == request.requestId then return nil end
+  -- A dispatched request without a terminal receipt is still in flight.  A
+  -- later request must not replace its correlation before the callback arrives.
+  if current.phase2FundingAttempted == true and old.kind ~= "phase2_funding_receipt" then return nil end
   local clock = readClock()
   local receipt : table = { schemaVersion=1, kind="phase2_funding_receipt", nonce=request.nonce, requestId=request.requestId,
     companyEntity=request.companyEntity, targetCompany=request.targetCompany, amount=request.amount,
@@ -1347,6 +1352,10 @@ local function phase2FundingEvent(state : GameScriptState<Tf3MpState>, current :
   current.phase2FundingAttempted = true
   current.phase2CompanyFault = true -- Blocks other Phase 2 mutations until verified.
   receipt.outcome = "outcome_unknown"
+  -- This marker survives reload but is not a publishable receipt.  The GUI
+  -- waits for the callback; its helper deadline reports a missing callback as
+  -- unknown without allowing another command to be sent.
+  current.phase2FundingReceipt = { nonce=request.nonce, requestId=request.requestId }
   state:set(current) -- Consume before send; an exception never permits a retry.
   local callbackOpen = true
   local callbackSeen = false
@@ -1354,16 +1363,36 @@ local function phase2FundingEvent(state : GameScriptState<Tf3MpState>, current :
     api.cmd.sendCommand(api.cmd.makeJournalBookAssetCmd(target, entry), function(_data : JournalBookAssetCommandData, success : boolean, _entities : {{Engine.Entity, Engine.Revision}})
       if not callbackOpen or callbackSeen then return end
       callbackSeen = true
-      local originalAfter = api.engine.util.finance.getPlayersBalance(original)
-      local targetAfter = api.engine.util.finance.getPlayersBalance(target)
-      if originalAfter == nil or targetAfter == nil then return end
-      recordBalance(receipt, "originalAfter", originalAfter); recordBalance(receipt, "targetAfter", targetAfter)
-      if success and originalAfter == originalBefore and targetAfter == targetBefore + request.amount then receipt.outcome = "funded" end
+      callbackOpen = false
+      local checked = pcall(function()
+        local saved = state:get()
+        if saved == nil or saved.phase2FundingAttempted ~= true then return end
+        local pending = saved.phase2FundingReceipt or {}
+        if pending.nonce ~= request.nonce or pending.requestId ~= request.requestId or pending.kind ~= nil then return end
+        local originalAfter = api.engine.util.finance.getPlayersBalance(original)
+        local targetAfter = api.engine.util.finance.getPlayersBalance(target)
+        if originalAfter ~= nil and targetAfter ~= nil and math.abs(originalAfter) <= 9007199254740991
+          and math.abs(targetAfter) <= 9007199254740991 then
+          recordBalance(receipt, "originalAfter", originalAfter); recordBalance(receipt, "targetAfter", targetAfter)
+          if success and originalAfter == originalBefore and targetAfter == targetBefore + request.amount
+            and targetBefore <= 9007199254740991 - request.amount then receipt.outcome = "funded" end
+        end
+        saved.phase2FundingReceipt = receipt
+        saved.phase2CompanyFault = receipt.outcome ~= "funded"
+        state:set(saved)
+        -- onEvent persists current again after a synchronous callback.
+        current.phase2FundingReceipt = receipt
+        current.phase2CompanyFault = saved.phase2CompanyFault
+      end)
+      if not checked then current.phase2CompanyFault = true end
     end)
   end)
-  callbackOpen = false
-  if not ok or not callbackSeen then receipt.outcome = "outcome_unknown" end
-  current.phase2CompanyFault = receipt.outcome ~= "funded"
+  if not ok and not callbackSeen then
+    callbackOpen = false
+    current.phase2FundingReceipt = receipt
+    current.phase2CompanyFault = true
+    state:set(current)
+  end
   return nil
 end
 
@@ -1391,7 +1420,7 @@ local ret : GameScriptWithGui<Tf3MpState, Tf3MpGuiState> = {
     -- GUI events use the script's event subscriptions too. Existing saves may
     -- already have the engine-only subscription, so hasEventSubscriptions alone
     -- is not sufficient when adding the receipt/status events.
-    if not state:hasEventSubscriptions() or current.eventSubscriptionsVersion ~= 27 then
+    if not state:hasEventSubscriptions() or current.eventSubscriptionsVersion ~= 28 then
       state:subscribeToEvent("tf3mp_native_road_stop_replay")
       state:subscribeToEvent("tf3mp_get_native_road_stop_replay")
       state:subscribeToEvent("tf3mp_placement_observer_selftest")
@@ -1420,6 +1449,10 @@ local ret : GameScriptWithGui<Tf3MpState, Tf3MpGuiState> = {
       state:subscribeToEvent("tf3mp_arm_depot_build_hold")
       state:subscribeToEvent("tf3mp_execute_depot_build")
       state:subscribeToEvent("tf3mp_observe_depot_build")
+      state:subscribeToEvent("tf3mp_prepare_vehicle_buy")
+      state:subscribeToEvent("tf3mp_arm_vehicle_buy_hold")
+      state:subscribeToEvent("tf3mp_execute_vehicle_buy")
+      state:subscribeToEvent("tf3mp_observe_vehicle_buy")
       state:subscribeToEvent("tf3mp_arm_road_stop_hold")
       state:subscribeToEvent("tf3mp_execute_road_stop")
       state:subscribeToEvent("tf3mp_observe_road_stop")
@@ -1454,7 +1487,7 @@ local ret : GameScriptWithGui<Tf3MpState, Tf3MpGuiState> = {
       state:subscribeToEvent("tf3mp_get_pause_receipt")
       state:subscribeToEvent("tf3mp_station_template_probe")
       state:subscribeToEvent("tf3mp_get_station_template")
-      current.eventSubscriptionsVersion = 27
+      current.eventSubscriptionsVersion = 28
     end
     if subscriptionsMissing or current.readbackEventVersion ~= 3 then
       state:subscribeToEvent("tf3mp_stop_readback")
@@ -1717,6 +1750,34 @@ local ret : GameScriptWithGui<Tf3MpState, Tf3MpGuiState> = {
         and receipt.status == "unknown"
         and (receipt.stage == "await_callback" or receipt.stage == "await_world") then
         pcall(function() depotBuildOrderExecute.observe(state, api) end)
+      end
+      return nil
+    end
+    if src == "tf3mp_status_1::/tf3mp_status.gs" and id == "tf3mp_engine_bridge" and name == "tf3mp_prepare_vehicle_buy" and type(param) == "table" then
+      pcall(function() vehicleBuyOrderPrepare.handle(state, param as table, api) end)
+      return nil
+    end
+    if src == "tf3mp_status_1::/tf3mp_status.gs" and id == "tf3mp_engine_bridge" and name == "tf3mp_arm_vehicle_buy_hold" and type(param) == "table" then
+      pcall(function() vehicleBuyOrderExecute.arm(state, param as table, api) end)
+      return nil
+    end
+    if src == "tf3mp_status_1::/tf3mp_status.gs" and id == "tf3mp_engine_bridge" and name == "tf3mp_execute_vehicle_buy" and type(param) == "table" then
+      pcall(function() vehicleBuyOrderExecute.execute(state, param as table, api) end)
+      return nil
+    end
+    if src == "tf3mp_status_1::/tf3mp_status.gs" and id == "tf3mp_engine_bridge" and name == "tf3mp_observe_vehicle_buy" and type(param) == "table" then
+      local request = param as table
+      local count : integer = 0
+      for key, _ in pairs(request) do
+        if key ~= "nonce" and key ~= "operationId" then return nil end
+        count = count + 1
+      end
+      local current = state:get()
+      local receipt = current and current.executionReceipt or {}
+      if count == 2 and request.nonce == receipt.nonce and request.operationId == receipt.operationId
+        and receipt.status == "unknown"
+        and (receipt.stage == "await_callback" or receipt.stage == "await_world") then
+        pcall(function() vehicleBuyOrderExecute.observe(state, api) end)
       end
       return nil
     end

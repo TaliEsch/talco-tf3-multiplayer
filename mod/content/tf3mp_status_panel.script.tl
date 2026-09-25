@@ -15,6 +15,7 @@ end
 local roadStopOutcome = ug_require "tf3mp_status_1::/tf3mp_road_stop_outcome.lua" as Tf3MpRoadStopOutcome
 local roadStopOrderWire = ug_require "tf3mp_status_1::/tf3mp_road_stop_order_wire.lua" as table
 local depotBuildOrderWire = ug_require "tf3mp_status_1::/tf3mp_depot_build_order_wire.lua" as table
+local vehicleBuyOrderWire = ug_require "tf3mp_status_1::/tf3mp_vehicle_buy_order_wire.lua" as table
 local depotBuildOrderReadback = ug_require "tf3mp_status_1::/tf3mp_depot_build_order_readback.lua" as table
 
 local record Tf3MpPanelState
@@ -898,6 +899,10 @@ local function exchangePreparation() : nil
       eventName = "tf3mp_prepare_depot_build"
       expectedCount = 19
       for _, key in ipairs({"xText","yText","zText","yawText","seed"}) do payload[key] = request[key] end
+    elseif request.commandType == "road.vehicle.buy" then
+      if vehicleBuyOrderWire.decode(request) == nil then return nil end
+      eventName = "tf3mp_prepare_vehicle_buy"
+      payload.model = request.model
     else return nil end
     for _, key in ipairs({ "roundId", "operationId", "originPlayerId", "requestMessageId" }) do
       if type(request[key]) ~= "string" or #request[key] < 1 or #request[key] > 128 or not string.match(request[key] as string, "^[A-Za-z0-9_.:-]+$") then return nil end
@@ -981,6 +986,8 @@ local function dispatchExecutionAtUpdate() : nil
   elseif request.commandType == "road.depot.build" then
     expectedCount = 19
     eventName = "tf3mp_execute_depot_build"
+  elseif request.commandType == "road.vehicle.buy" then
+    eventName = "tf3mp_execute_vehicle_buy"
   end
   if count ~= expectedCount then return nil end
   api.cmd.sendCommand(api.cmd.makeScriptingSendEventCmd("tf3mp_status_1::/tf3mp_status.gs", "tf3mp_engine_bridge", eventName, request))
@@ -1014,6 +1021,10 @@ local function exchangeExecution() : nil
       eventName = "tf3mp_arm_depot_build_hold"
       expectedCount = 19
       for _, key in ipairs({"xText","yText","zText","yawText","seed"}) do payload[key] = request[key] end
+    elseif request.commandType == "road.vehicle.buy" then
+      if vehicleBuyOrderWire.decode(request) == nil then return nil end
+      eventName = "tf3mp_arm_vehicle_buy_hold"
+      payload.model = request.model
     else return nil end
     for _, key in ipairs({ "roundId", "operationId", "originPlayerId", "requestMessageId" }) do
       if type(request[key]) ~= "string" or #request[key] < 1 or #request[key] > 128 or not string.match(request[key] as string, "^[A-Za-z0-9_.:-]+$") then return nil end
@@ -1053,14 +1064,16 @@ local function exchangeExecution() : nil
   -- see TF3's committed road. The existing coordinator deadline bounds this wait.
   if receipt.status == "unknown" and (receipt.stage == "await_world"
     or receipt.stage == "await_callback") then
-    if (liveRequest.commandType == "road.stop.place" or liveRequest.commandType == "road.depot.build")
+    if (liveRequest.commandType == "road.stop.place" or liveRequest.commandType == "road.depot.build"
+      or liveRequest.commandType == "road.vehicle.buy")
       and coordinationSent == "" then
       -- This exchange already runs only every 30 GUI steps. Observe once per
       -- exchange so the held-world receipt can arrive before the deadline.
       if roadStopObservationAttempts < 24 then
         roadStopObservationAttempts = roadStopObservationAttempts + 1
-        local observationEvent = liveRequest.commandType == "road.depot.build"
-          and "tf3mp_observe_depot_build" or "tf3mp_observe_road_stop"
+        local observationEvent : string = "tf3mp_observe_road_stop"
+        if liveRequest.commandType == "road.depot.build" then observationEvent = "tf3mp_observe_depot_build" end
+        if liveRequest.commandType == "road.vehicle.buy" then observationEvent = "tf3mp_observe_vehicle_buy" end
         api.cmd.sendCommand(api.cmd.makeScriptingSendEventCmd("tf3mp_status_1::/tf3mp_status.gs", "tf3mp_engine_bridge", observationEvent, {
           nonce = bridgeNonce, operationId = executionSent }))
       end
@@ -1084,10 +1097,23 @@ local function exchangeExecution() : nil
       payload[key] = number
     end
   elseif receipt.status == "ok" and receipt.snapshotVersion == 3 then
-    for _, key in ipairs({ "snapshotVersion", "hostSequence", "entity", "ownerCompanyEntity", "constructionEntity", "depotEntity", "chargedCost", "balance", "negative" }) do
+    local keys : {string} = { "snapshotVersion", "hostSequence", "entity", "ownerCompanyEntity", "depotEntity", "chargedCost", "balance", "negative" }
+    if liveRequest.commandType == "road.depot.build" then
+      table.insert(keys, "constructionEntity")
+    elseif liveRequest.commandType == "road.vehicle.buy" then
+      table.insert(keys, "vehicleEntity")
+    else return nil end
+    for _, key in ipairs(keys) do
       local number = receipt[key]
       if type(number) ~= "number" or number < 0 or number > 9007199254740991 or number % 1 ~= 0 then return nil end
       payload[key] = number
+    end
+    if liveRequest.commandType == "road.vehicle.buy" then
+      for _, key in ipairs({ "targetBefore", "originalBefore", "originalAfter" }) do
+        local number = receipt[key]
+        if type(number) ~= "number" or number < -9007199254740991 or number > 9007199254740991 or number % 1 ~= 0 then return nil end
+        payload[key] = number
+      end
     end
   elseif receipt.status == "ok" then
     for _, key in ipairs({ "snapshotVersion", "hostSequence", "entity", "ownerCompanyEntity", "stopFlag", "balance", "negative" }) do

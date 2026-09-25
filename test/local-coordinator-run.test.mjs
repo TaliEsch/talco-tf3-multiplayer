@@ -9,15 +9,23 @@ import {ROAD_STOP_MODEL} from '../src/road-stop-order-payload.mjs';
 import {ROAD_DEPOT_RESOURCE} from '../src/depot-build-order-payload.mjs';
 const lua=p=>`function data() return {${Object.entries(p).map(([k,v])=>`${k}=${JSON.stringify(v)},`).join('')}} end`;
 
-for(const scenario of ['success','unknown_action','report_failure','cancelled_stop','cancel_rejected','road_stop','remote_road_stop','two_remote_road_stops','two_remote_road_stops_second_unknown','road_preflight_rejected','road_readback_unknown','remote_depot_build'])test(`local driver traverses actual adapter/files: ${scenario}`,async()=>{
+for(const scenario of ['success','unknown_action','report_failure','cancelled_stop','cancel_rejected','road_stop','remote_road_stop','two_remote_road_stops','two_remote_road_stops_second_unknown','road_preflight_rejected','road_readback_unknown','remote_depot_build','remote_depot_then_vehicle','vehicle_buy_unknown','vehicle_buy_unfunded'])test(`local driver traverses actual adapter/files: ${scenario}`,async()=>{
   const failAction=scenario==='unknown_action',failReport=scenario==='report_failure';
   const cancelRun=['cancelled_stop','cancel_rejected'].includes(scenario);
   const twoRoads=['two_remote_road_stops','two_remote_road_stops_second_unknown'].includes(scenario);
   const roadRun=['road_stop','remote_road_stop','road_preflight_rejected','road_readback_unknown'].includes(scenario)||twoRoads;
-  const depotRun=scenario==='remote_depot_build';
+  const vehicleRun=['remote_depot_then_vehicle','vehicle_buy_unknown','vehicle_buy_unfunded'].includes(scenario);
+  const depotRun=scenario==='remote_depot_build'||vehicleRun;
   const targetCompany=scenario==='remote_road_stop'||twoRoads||depotRun?9:7;
   const root=await mkdtemp(path.join(os.tmpdir(),'tf3mp-local-driver-')),directory=path.join(root,'tf3mp_status_1');await mkdir(directory);
   let run,locked=false,time=0,leasePhase='active',cancelCalls=0,preflightCalls=0,readbackCalls=0;const saved=[],seen=new Set(),actions=[],events=[];
+  const depotBalance=vehicleRun?(scenario==='vehicle_buy_unfunded'?0:550840):-449160;
+  const fundingRequest={schemaVersion:1,kind:'phase2_funding',nonce:'a'.repeat(32),requestId:1,
+    companyEntity:7,targetCompany:9,amount:1000000,confirmed:1,issuedTick:10,expiresTick:310};
+  const fundingReceipt=lua({schemaVersion:1,kind:'phase2_funding_receipt',nonce:'a'.repeat(32),requestId:1,
+    companyEntity:7,targetCompany:9,amount:1000000,tickCount:11,updateCount:95,outcome:'funded',
+    originalBefore:1000,originalBeforeNegative:0,originalAfter:1000,originalAfterNegative:0,
+    targetBefore:0,targetBeforeNegative:0,targetAfter:1000000,targetAfterNegative:0});
   const sample={counter:1,updateCount:100,speedup:1};
   const bridge={nonce:'a'.repeat(32),get engineObservation(){return {available:true,sample};},
     get coordinationLeaseState(){return leasePhase;},get coordinationControlsLocked(){return locked;},
@@ -37,7 +45,7 @@ for(const scenario of ['success','unknown_action','report_failure','cancelled_st
     },
     async inspectOrderedDepotReadback(request){
       assert.deepEqual(request,{hostSequence:1,company:9,localCompany:7,
-        construction:123,depot:124,update:sample.updateCount,balance:-449160,charge:449160});
+        construction:123,depot:124,update:sample.updateCount,balance:depotBalance,charge:449160});
       return {code:'observed'};
     },
     async acquireCoordinationControls(){assert.equal(sample.speedup,0);locked=true;},
@@ -45,10 +53,12 @@ for(const scenario of ['success','unknown_action','report_failure','cancelled_st
   try {
     run=await createLocalCoordinatorRun({directory,bridge,playerId:'a',companies:new Map([['a',7],['b',9]]),vehicleEntity:depotRun?0:42,now:()=>time,
       logger:e=>events.push(e),saveReport:async r=>{if(failReport&&r.phase==='passed')throw new Error('disk full');saved.push(r);},
-      commandLimit:twoRoads?2:cancelRun||roadRun||depotRun?1:4,
+      commandLimit:twoRoads||vehicleRun?2:cancelRun||roadRun||depotRun?1:4,
       depotBuildOriginPlayerId:depotRun?'b':'a',
       depotBuildPayload:depotRun?{companyEntity:9,resource:ROAD_DEPOT_RESOURCE,
         x:-812.891541,y:-3142.25684,z:23.3068237,yaw:-3.1415927410125732,seed:1}:null,
+      vehicleBuyModel:vehicleRun?'vehicle/road/talco_test.mdl':null,
+      verifiedFundingEvidence:vehicleRun?{request:fundingRequest,receiptSource:fundingReceipt}:null,
       roadStopOriginPlayerId:scenario==='remote_road_stop'||twoRoads?'b':'a',
       roadStopPayload:roadRun?[{edgeEntity:42,companyEntity:targetCompany,param:0.5,
         left:true,oneWay:false,model:ROAD_STOP_MODEL,name:'TalCo Road Stop'},
@@ -68,6 +78,12 @@ for(const scenario of ['success','unknown_action','report_failure','cancelled_st
       await new Promise(r=>setTimeout(r,3));
       let request;try{request=parseFlatDataFile(await readFile(path.join(directory,'coordination_request.lua'),'utf8'));}catch{continue;}
       if(seen.has(request.operationId))continue;seen.add(request.operationId);
+      if(vehicleRun&&['prepare','executeHeld'].includes(request.operation)){
+        assert.equal(request.commandType,request.hostSequence===1?'road.depot.build':'road.vehicle.buy');
+        assert.equal(request.entity,request.hostSequence===1?0:124);
+        assert.equal(request.companyEntity,9);
+        if(request.hostSequence===2)assert.equal(request.model,'vehicle/road/talco_test.mdl');
+      }
       const receipt={schemaVersion:1,nonce:bridge.nonce,roundId:request.roundId,operationId:request.operationId,
         operation:request.operation,status:'ok',updateCount:sample.updateCount,held:sample.speedup===0};
       if(request.operation==='holdCheckpoint'){
@@ -77,10 +93,15 @@ for(const scenario of ['success','unknown_action','report_failure','cancelled_st
       } else if(request.operation==='prepare')receipt.ownerCompanyEntity=targetCompany;
       else if(request.operation==='executeHeld'){
         actions.push(request.hostSequence);sample.updateCount=request.scheduledUpdate;sample.speedup=0;
-        Object.assign(receipt,depotRun
+        Object.assign(receipt,vehicleRun&&request.hostSequence===2
+          ?{updateCount:sample.updateCount,held:true,snapshotVersion:3,hostSequence:2,
+            entity:200,vehicleEntity:200,ownerCompanyEntity:9,depotEntity:124,
+            chargedCost:100000,balance:450840,negative:0,targetBefore:550840,
+            originalBefore:1000,originalAfter:1000}
+          :depotRun
           ?{updateCount:sample.updateCount,held:true,snapshotVersion:3,hostSequence:request.hostSequence,
             entity:0,ownerCompanyEntity:9,constructionEntity:123,depotEntity:124,
-            chargedCost:449160,balance:449160,negative:1}
+            chargedCost:449160,balance:Math.abs(depotBalance),negative:depotBalance<0?1:0}
           :['road_stop','remote_road_stop','road_readback_unknown'].includes(scenario)||twoRoads
           ?{updateCount:sample.updateCount,held:true,snapshotVersion:2,hostSequence:request.hostSequence,
             entity:request.entity,ownerCompanyEntity:targetCompany,
@@ -88,7 +109,8 @@ for(const scenario of ['success','unknown_action','report_failure','cancelled_st
             chargedCost:100,balance:request.hostSequence===2?800:900,negative:0}
           :{updateCount:sample.updateCount,held:true,snapshotVersion:1,hostSequence:request.hostSequence,
             entity:42,ownerCompanyEntity:7,stopFlag:request.running?0:1,balance:1000,negative:0});
-        if(failAction||scenario==='two_remote_road_stops_second_unknown'&&request.hostSequence===2)receipt.status='unknown';
+        if(failAction||['two_remote_road_stops_second_unknown','vehicle_buy_unknown'].includes(scenario)
+          &&request.hostSequence===2)receipt.status='unknown';
       } else if(request.operation==='release'){assert.equal(locked,true);sample.speedup=request.speedup;receipt.held=false;receipt.speedup=sample.speedup;}
       else if(request.operation==='halt'){sample.speedup=0;receipt.held=true;}
       sample.counter++;
@@ -99,10 +121,10 @@ for(const scenario of ['success','unknown_action','report_failure','cancelled_st
       await writeFile(pending,lua(receipt));
       await rename(pending,path.join(directory,'coordination_receipt.lua'));
     }
-    assert.equal(run.phase,failAction||failReport||scenario==='two_remote_road_stops_second_unknown'
+    assert.equal(run.phase,failAction||failReport||['two_remote_road_stops_second_unknown','vehicle_buy_unknown','vehicle_buy_unfunded'].includes(scenario)
       ||['cancel_rejected','road_preflight_rejected','road_readback_unknown'].includes(scenario)?'failed':'passed',JSON.stringify(run.report.events));
     assert.deepEqual(actions,['cancel_rejected','road_preflight_rejected'].includes(scenario)?[]
-      :twoRoads?[1,2]
+      :twoRoads||vehicleRun&&scenario!=='vehicle_buy_unfunded'?[1,2]
       :failAction||cancelRun||depotRun||['road_stop','remote_road_stop','road_readback_unknown'].includes(scenario)?[1]:[1,2,3,4],JSON.stringify(run.report));
     assert.equal(cancelCalls,cancelRun?1:0);
     assert.equal(preflightCalls,twoRoads?2:roadRun?1:0);
@@ -123,18 +145,30 @@ for(const scenario of ['success','unknown_action','report_failure','cancelled_st
       }
     }
     if(depotRun){
-      assert.equal(run.report.scope,'single_game_ordered_depot_with_receipt_mirror');
+      assert.equal(run.report.scope,vehicleRun?'single_game_ordered_depot_then_vehicle_with_receipt_mirror'
+        :'single_game_ordered_depot_with_receipt_mirror');
       assert.ok(run.report.events.some(e=>e.code==='DEPOT_BUILD_SCHEDULED'));
       assert.deepEqual(run.report.checks[0].depotPostcondition,{constructionEntity:123,
-        depotEntity:124,ownerCompanyEntity:9,chargedCost:449160,companyBalance:-449160});
+        depotEntity:124,ownerCompanyEntity:9,chargedCost:449160,companyBalance:depotBalance});
       assert.deepEqual(run.report.independentDepotReadback,{code:'observed',hostSequence:1,
-        updateCount:sample.updateCount});
+        updateCount:run.report.checks[0].updateCount});
+      if(vehicleRun){
+        assert.equal(run.report.independentVehicleReadback,false);
+        assert.equal(run.report.fundingEvidence.targetAfter,1000000);
+        if(scenario==='remote_depot_then_vehicle'){
+          assert.ok(run.report.events.some(e=>e.code==='VEHICLE_BUY_SCHEDULED'));
+          assert.deepEqual(run.report.checks[1].vehiclePostcondition,{vehicleEntity:200,depotEntity:124,
+            ownerCompanyEntity:9,chargedCost:100000,balanceBefore:550840,companyBalance:450840,
+            hostCompanyUnchanged:true});
+        }
+      }
     }
     assert.equal(run.report.haltState,'confirmed');
     assert.equal(events.some(e=>e.code==='LOCAL_RUN_PASSED_GAME_HELD'),!failAction&&!failReport
-      &&scenario!=='two_remote_road_stops_second_unknown'
+      &&!['two_remote_road_stops_second_unknown','vehicle_buy_unknown','vehicle_buy_unfunded'].includes(scenario)
       &&!['cancel_rejected','road_preflight_rejected','road_readback_unknown'].includes(scenario));
-    if(failAction||scenario==='two_remote_road_stops_second_unknown')assert.equal(run.report.outcome,'ENGINE_OUTCOME_UNKNOWN');
+    if(failAction||['two_remote_road_stops_second_unknown','vehicle_buy_unknown'].includes(scenario))assert.equal(run.report.outcome,'ENGINE_OUTCOME_UNKNOWN');
+    if(scenario==='vehicle_buy_unfunded')assert.equal(run.report.outcome,'VEHICLE_FUNDING_PRECONDITION_FAILED');
     if(failReport)assert.equal(run.report.outcome,'report_write_failed');
     if(scenario==='cancel_rejected')assert.equal(run.report.outcome,'NATIVE_CANCEL_REJECTED');
     if(scenario==='road_preflight_rejected')assert.equal(run.report.outcome,'ROAD_PREFLIGHT_NOT_CONFIRMED');
@@ -161,4 +195,25 @@ for(const scenario of ['success','unknown_action','report_failure','cancelled_st
       assert.ok(check.releasedAfterMs>=check.appliedAfterMs);
     }
   } finally {await run?.close();await rm(root,{recursive:true,force:true});}
+});
+
+test('two-action purchase requires current, matching, successful funding evidence',async()=>{
+  const bridge={nonce:'a'.repeat(32),engineObservation:{sample:{updateCount:100}}};
+  const request={schemaVersion:1,kind:'phase2_funding',nonce:bridge.nonce,requestId:1,
+    companyEntity:7,targetCompany:9,amount:1000000,confirmed:1,issuedTick:10,expiresTick:310};
+  const receipt={schemaVersion:1,kind:'phase2_funding_receipt',nonce:bridge.nonce,requestId:1,
+    companyEntity:7,targetCompany:9,amount:1000000,tickCount:11,updateCount:95,outcome:'funded',
+    originalBefore:1000,originalBeforeNegative:0,originalAfter:1000,originalAfterNegative:0,
+    targetBefore:0,targetBeforeNegative:0,targetAfter:1000000,targetAfterNegative:0};
+  const options={directory:'unused',bridge,playerId:'a',companies:new Map([['a',7],['b',9]]),
+    vehicleEntity:0,saveReport:async()=>{},commandLimit:2,depotBuildOriginPlayerId:'b',
+    depotBuildPayload:{companyEntity:9,resource:ROAD_DEPOT_RESOURCE,
+      x:-812.891541,y:-3142.25684,z:23.3068237,yaw:-3.1415927410125732,seed:1},
+    vehicleBuyModel:'vehicle/road/talco_test.mdl'};
+  for(const evidence of [null,
+    {request:{...request,targetCompany:7},receiptSource:lua(receipt)},
+    {request,receiptSource:lua({...receipt,outcome:'rejected'})},
+    {request,receiptSource:lua({...receipt,updateCount:101})}])
+    await assert.rejects(createLocalCoordinatorRun({...options,verifiedFundingEvidence:evidence}),
+      /VERIFIED_FUNDING_EVIDENCE_REQUIRED/);
 });

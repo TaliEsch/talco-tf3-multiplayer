@@ -1,5 +1,19 @@
 # Completion audit against the build prompt
 
+## Ordered vehicle purchase source checkpoint — 25 September 2026
+
+Implemented an opt-in Host-ordered `road.vehicle.buy` path with a bounded model
+intent, live depot ownership checks, one-use held native execution, deferred
+callback handling and observed vehicle/owner/depot/balance receipt. The local
+harness uses explicit receipt-verified funding, then orders depot build and
+purchase in one game session; funding now retains its attempt latch across a
+deferred callback. Focused tests pass and the 43-file mod review passes. A full
+suite attempt could not complete cleanly: native fixtures encountered process
+launch `EPERM` in this sandbox and the runner remained open after its last test
+output. No TF3 purchase or funded coordinator transition is claimed. The next
+controlled run must use a disposable save, record both sequences and stop on
+any unknown outcome without retry.
+
 ## Held, ordered second-company depot accepted — 25 September 2026
 
 The new callback lifecycle and six-field proposal adapter passed one controlled

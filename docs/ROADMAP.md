@@ -1,5 +1,17 @@
 # TalCo TF3 multiplayer — current delivery plan
 
+## Ordered vehicle purchase integration — 25 September 2026
+
+The road vehicle purchase path is now opt-in from Host admission through a
+one-use held TF3 command, with depot-owner rechecks, a deferred callback and a
+world receipt for the new vehicle and exact native debit. A local test harness
+orders depot build then purchase in one disposable session, using the depot ID
+from the first receipt and an explicit verified funding receipt. Focused tests
+and mod review pass; the purchase and funded coordinator transition have not
+run in TF3. Next qualify one current-build, single-game funded depot→purchase
+sequence, then continue the road service loop and economy. Two-instance tests
+remain deferred at the user's direction.
+
 ## Ordered depot single-game acceptance — 25 September 2026
 
 The held Host-ordered road depot path now waits for the native callback and

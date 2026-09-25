@@ -29,6 +29,7 @@ import {createHostRosterCapture} from './host-roster-capture.mjs';
 import {createHostCancelledStop} from './host-cancelled-stop.mjs';
 import {ROAD_STOP_MODEL} from './road-stop-order-payload.mjs';
 import {ROAD_DEPOT_RESOURCE,parseDepotBuildOrderPayload} from './depot-build-order-payload.mjs';
+import {parseVehicleBuyOrderPayload} from './vehicle-buy-order-payload.mjs';
 import {createJoinEngineBootstrap} from './join-engine-bootstrap.mjs';
 import {fileURLToPath} from 'node:url';
 
@@ -262,24 +263,35 @@ if (command === "host" || command === "join") createInterface({ input: process.s
     ||line.trim().startsWith('coordinator-cancel-stop-confirmed ')
     ||line.trim().startsWith('coordinator-road-stop-confirmed ')
     ||line.trim().startsWith('coordinator-remote-road-stop-confirmed ')
-    ||line.trim().startsWith('coordinator-depot-build-confirmed ')) {
+    ||line.trim().startsWith('coordinator-depot-build-confirmed ')
+    ||line.trim().startsWith('coordinator-funded-depot-vehicle-confirmed ')) {
     const args=line.trim().split(/\s+/);
     const cancelledRun=args[0]==='coordinator-cancel-stop-confirmed';
     const remoteRoadRun=args[0]==='coordinator-remote-road-stop-confirmed';
     const roadRun=args[0]==='coordinator-road-stop-confirmed'||remoteRoadRun;
-    const depotRun=args[0]==='coordinator-depot-build-confirmed';
+    const depotVehicleRun=args[0]==='coordinator-funded-depot-vehicle-confirmed';
+    const depotRun=args[0]==='coordinator-depot-build-confirmed'||depotVehicleRun;
     const selectInGame=!cancelledRun&&!roadRun&&!depotRun&&args.length===1;
     let secondCompany=Number(args[1]),vehicleEntity=depotRun?0:Number(args[2]);
     let depotPlacement=null;
-    if(depotRun&&args.length===7){
+    if(depotRun&&args.length===(depotVehicleRun?9:7)){
       try{depotPlacement=parseDepotBuildOrderPayload({companyEntity:secondCompany,
         resource:ROAD_DEPOT_RESOURCE,x:Number(args[2]),y:Number(args[3]),
         z:Number(args[4]),yaw:Number(args[5]),seed:Number(args[6])},secondCompany);}
       catch{/* Invalid placement cannot become a native command. */}
     }
+    const vehicleBuyModel=depotVehicleRun?args[7]:null;
+    const fundingAmount=depotVehicleRun?Number(args[8]):null;
+    let validVehicleBuy=!depotVehicleRun;
+    if(depotVehicleRun){
+      try{parseVehicleBuyOrderPayload({companyEntity:secondCompany,depotEntity:1,
+        model:vehicleBuyModel},secondCompany,1);
+        validVehicleBuy=Number.isSafeInteger(fundingAmount)&&fundingAmount>=1&&fundingAmount<=1000000;
+      }catch{/* Reject before any funding or native mutation. */}
+    }
     const secondRoadEntity=remoteRoadRun&&args.length===4?Number(args[3]):null;
     let localCompany=bridge?.engineObservation.sample?.companyEntity;
-    if(!selectInGame&&((depotRun?depotPlacement===null:args.length!==3&&!(remoteRoadRun&&args.length===4))
+    if(!selectInGame&&((depotRun?depotPlacement===null||!validVehicleBuy:args.length!==3&&!(remoteRoadRun&&args.length===4))
       ||![secondCompany,vehicleEntity,localCompany].every(n=>Number.isSafeInteger(n)&&n>=0&&n<=2147483647)
       ||secondCompany===localCompany||roadRun&&vehicleEntity<1
       ||secondRoadEntity!==null&&(!Number.isSafeInteger(secondRoadEntity)
@@ -294,9 +306,33 @@ if (command === "host" || command === "join") createInterface({ input: process.s
       rawLog({level:"warn",event:"coordinator_local_run",code:"FRESH_SOLO_HOST_REQUIRED"});
     else {
       vehicleTestActive=true;coordinatorStarting=true;
+      let setupSaveReport=null,setupStage='report_setup';
       (async()=>{
         const saveReport=await createBatchReportWriter(nodePath.resolve(import.meta.dirname,"..","reports"));
+        setupSaveReport=saveReport;
         if(stopping)return;
+        let verifiedFundingEvidence=null;
+        if(depotVehicleRun){
+          setupStage='funding_request';
+          await bridge.requestPhase2Funding({targetCompany:secondCompany,amount:fundingAmount,confirmed:true});
+          setupStage='funding_receipt';
+          const fundingDeadline=Date.now()+30000;
+          while(!bridge.fundedCoordinatorReady){
+            if(stopping)return;
+            if(Date.now()>=fundingDeadline)throw new Error('FUNDING_OUTCOME_UNKNOWN_NO_RETRY');
+            await new Promise(resolve=>setTimeout(resolve,250));
+          }
+          setupStage='funding_authorization';
+          verifiedFundingEvidence=await bridge.authorizeFundedCoordinator({targetCompany:secondCompany});
+          rawLog({level:'info',event:'coordinator_local_run',code:'RESUME_DISPOSABLE_GAME_AT_SPEED_1_FOR_FUNDED_COORDINATOR'});
+          setupStage='resume_observation';
+          const resumeDeadline=Date.now()+45000;
+          while(bridge.engineObservation?.sample?.speedup!==1){
+            if(stopping)return;
+            if(Date.now()>=resumeDeadline)throw new Error('FUNDED_COORDINATOR_RESUME_NOT_OBSERVED');
+            await new Promise(resolve=>setTimeout(resolve,250));
+          }
+        }
         if(selectInGame){
           await bridge.beginCoordinatorSelection();
           rawLog({level:"info",event:"coordinator_local_run",code:"SELECT_OWN_VEHICLE_USE_FOR_SYNC_TEST"});
@@ -314,12 +350,14 @@ if (command === "host" || command === "join") createInterface({ input: process.s
             await new Promise(resolve=>setTimeout(resolve,250));
           }
         }
+        setupStage='coordinator_setup';
         coordinatorRun=await createLocalCoordinatorRun({directory:opt["bridge-dir"],bridge,playerId:"local",
           companies:new Map([["local",localCompany],["receipt-mirror",secondCompany]]),vehicleEntity,
           logger:rawLog,saveReport,metadata:{gameHash:observedGameHash,modManifestHash:opt["mod-hash"]},
-          commandLimit:secondRoadEntity!==null?2:cancelledRun||roadRun||depotRun?1:4,
+          commandLimit:secondRoadEntity!==null||depotVehicleRun?2:cancelledRun||roadRun||depotRun?1:4,
           depotBuildOriginPlayerId:depotRun?'receipt-mirror':'local',
           depotBuildPayload:depotPlacement,
+          vehicleBuyModel,verifiedFundingEvidence,
           roadStopOriginPlayerId:remoteRoadRun?'receipt-mirror':'local',
           roadStopPayload:roadRun?[
             {edgeEntity:vehicleEntity,companyEntity:remoteRoadRun?secondCompany:localCompany,
@@ -338,7 +376,27 @@ if (command === "host" || command === "join") createInterface({ input: process.s
           }:null});
         if(stopping){await coordinatorRun.close();return;}
         coordinatorTimer=setInterval(()=>{void coordinatorRun.poll();},250);
-      })().catch(()=>rawLog({level:"warn",event:"coordinator_local_run",code:"SETUP_FAILED_STOP_HELPER_NO_RETRY"}))
+      })().catch(async error=>{
+        const allowed=new Set(['FUNDING_OUTCOME_UNKNOWN_NO_RETRY','FUNDED_COORDINATOR_RESUME_NOT_OBSERVED',
+          'VERIFIED_HELD_FUNDING_REQUIRED','VERIFIED_FUNDING_EVIDENCE_REQUIRED',
+          'EXPLICIT_BOUNDED_FUNDING_REQUIRED','FRESH_SOLO_HOST_REQUIRED',
+          'COORDINATION_BUSY_OR_USED','OBSERVATION_REQUIRED']);
+        const code=allowed.has(error?.message)?error.message:'SETUP_FAILED_STOP_HELPER_NO_RETRY';
+        const sample=bridge?.engineObservation?.sample;
+        const context={stage:setupStage,updateCount:sample?.updateCount??null,
+          tickCount:sample?.tickCount??null,speedup:sample?.speedup??null,
+          companyEntity:sample?.companyEntity??null};
+        rawLog({level:'warn',event:'coordinator_local_run',code,...context});
+        if(depotVehicleRun&&setupSaveReport){
+          try{await setupSaveReport({schemaVersion:1,batchId:randomUUID(),
+            scope:'single_game_funded_depot_vehicle_setup',outcome:code,
+            gameplayVerified:false,multiGameVerified:false,realEngineCount:1,
+            simulatedParticipantCount:1,targetCompany:secondCompany,
+            fundingAmount,metadata:{gameHash:observedGameHash,
+              modManifestHash:opt['mod-hash']},failureContext:context});}
+          catch{/* Logging failure never authorizes another funding or native attempt. */}
+        }
+      })
         .finally(()=>{coordinatorStarting=false;});
     }
   }

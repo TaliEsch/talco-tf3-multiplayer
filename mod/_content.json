@@ -38,6 +38,9 @@
     "tf3mp_status_panel.script.tl",
     "tf3mp_status_panel.css.lua",
     "tf3mp_startup_load.script.lua",
+    "tf3mp_vehicle_buy_order_execute.lua",
+    "tf3mp_vehicle_buy_order_prepare.lua",
+    "tf3mp_vehicle_buy_order_wire.lua",
     "tf3mp_vehicle_command.lua",
     "tf3mp_vehicle_test.res.lua",
     "tf3mp_vehicle_test.script.tl"

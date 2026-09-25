@@ -42,6 +42,9 @@ const EXPECTED_CONTENT = Object.freeze([
   "tf3mp_status_panel.res.lua",
   "tf3mp_status_panel.script.tl",
   "tf3mp_stop_readback.lua",
+  "tf3mp_vehicle_buy_order_execute.lua",
+  "tf3mp_vehicle_buy_order_prepare.lua",
+  "tf3mp_vehicle_buy_order_wire.lua",
   "tf3mp_vehicle_command.lua",
   "tf3mp_vehicle_test.res.lua",
   "tf3mp_vehicle_test.script.tl",
@@ -117,6 +120,9 @@ export async function validateReviewPackage(root) {
     ['tf3mp_depot_build_order_wire.lua', 'e828279c7df6ab7dbc6bf55694126e62d0e69ac9f32fce49ad29db5fb4550d17'],
     ['tf3mp_depot_build_order_prepare.lua', '5bec5dd5a2b9bb394bd756d734e9346a22b6f61ba01487df5c16d37ffad41bfd'],
     ['tf3mp_depot_build_order_execute.lua', '9e5f90479dddd37c37c3399e64eda33becac75ad9034473457c748f80b9fdff9'],
+    ['tf3mp_vehicle_buy_order_wire.lua', '9cb05b602af8c95bce5da0e6ead78c3c4c78d58357f8e6afe1ffda246a084401'],
+    ['tf3mp_vehicle_buy_order_prepare.lua', '89b3008fec181c0cca43431333a43030d40ad24f5de2c426b5fbf4e8b30f77cb'],
+    ['tf3mp_vehicle_buy_order_execute.lua', '5f181a11dec6c5ff123366e02bb41fa3ba3159e55a39848e8e5b207567625e86'],
     ['tf3mp_depot_build_order_readback.lua', 'ee8fafa52736e95d639cebf657aecc11454ca179c710a88b55e3d73068904a9f'],
     ['tf3mp_road_stop_simple_prepare.lua', 'b9de96bbb92f212b3d8cc83d97564f2b7a814cfd6aa65ac4116ad9208add382c'],
     ['tf3mp_road_stop_simple_dispatch.lua', 'c3b689756b181097b62ecc2b0477d490075a9e4e1d477be7ddb587f1632d5a6b'],
@@ -186,7 +192,7 @@ export async function validateReviewPackage(root) {
   for (const event of ["tf3mp_engine_probe", "tf3mp_get_engine_receipt", "tf3mp_get_status", "tf3mp_vehicle_command", "tf3mp_get_vehicle_receipt", "tf3mp_company_probe", "tf3mp_get_company_receipt", "tf3mp_finance_probe", "tf3mp_get_finance_receipt"]) {
     if (!gameScript.includes(`state:subscribeToEvent("${event}")`)) throw new Error(`missing script event subscription: ${event}`);
   }
-  if (!gameScript.includes("current.eventSubscriptionsVersion ~= 27")) throw new Error("missing event subscription migration");
+  if (!gameScript.includes("current.eventSubscriptionsVersion ~= 28")) throw new Error("missing event subscription migration");
   for(const event of ['tf3mp_inspect_road_preflight','tf3mp_get_road_preflight'])
     if(!gameScript.includes(`state:subscribeToEvent("${event}")`))throw new Error('missing road preflight subscription');
   for (const event of ['tf3mp_native_road_stop_replay', 'tf3mp_get_native_road_stop_replay']) {
@@ -354,6 +360,21 @@ export async function validateReviewPackage(root) {
     'roadStopOrderExecute.arm(state, param as table, api)',
     'roadStopOrderExecute.execute(state, param as table, api)'])
     if(!gameScript.includes(marker))throw new Error('ordered road Stop execution route is missing');
+  for(const marker of ['state:subscribeToEvent("tf3mp_prepare_vehicle_buy")',
+    'state:subscribeToEvent("tf3mp_arm_vehicle_buy_hold")',
+    'state:subscribeToEvent("tf3mp_execute_vehicle_buy")',
+    'state:subscribeToEvent("tf3mp_observe_vehicle_buy")',
+    'vehicleBuyOrderPrepare.handle(state, param as table, api)',
+    'vehicleBuyOrderExecute.arm(state, param as table, api)',
+    'vehicleBuyOrderExecute.execute(state, param as table, api)',
+    'vehicleBuyOrderExecute.observe(state, api)'])
+    if(!gameScript.includes(marker))throw new Error('ordered vehicle purchase route is missing');
+  for(const marker of ['vehicleBuyOrderWire.decode(request) == nil',
+    'eventName = "tf3mp_prepare_vehicle_buy"',
+    'eventName = "tf3mp_arm_vehicle_buy_hold"',
+    'eventName = "tf3mp_execute_vehicle_buy"',
+    'observationEvent = "tf3mp_observe_vehicle_buy"'])
+    if(!panelScript.includes(marker))throw new Error('ordered vehicle purchase GUI route is missing');
   for(const marker of ['eventName = "tf3mp_arm_road_stop_hold"',
     'eventName = "tf3mp_execute_road_stop"'])
     if(!panelScript.includes(marker))throw new Error('ordered road Stop GUI execution route is missing');
@@ -566,7 +587,9 @@ export async function validateReviewPackage(root) {
   const fundingRegion = gameScript.slice(gameScript.indexOf('local function phase2FundingEvent'),gameScript.indexOf('local ret : GameScriptWithGui'));
   for(const marker of ['request.confirmed ~= 1','request.amount > 1000000','current.phase2FundingAttempted == true',
     'current.phase2CompanyFault == true','current.phase2CompanyFault = true',
-    'current.phase2CompanyFault = receipt.outcome ~= "funded"',
+    'current.phase2FundingReceipt = { nonce=request.nonce, requestId=request.requestId }',
+    'saved.phase2CompanyFault = receipt.outcome ~= "funded"',
+    'saved.phase2FundingReceipt = receipt',
     'created.newCompanyEntity ~= request.targetCompany','speed.speedup ~= 0',
     'current.phase2FundingAttempted = true','state:set(current)',
     'originalAfter == originalBefore','targetAfter == targetBefore + request.amount','callbackOpen = false']) {

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {readFile,mkdtemp,writeFile,rm} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import fengari from 'fengari';
 import {startGameBridge} from '../src/game-bridge.mjs';
 import {fundingRequest,parseFundingReceipt} from '../src/phase2-funding.mjs';
 const options={nonce:'a'.repeat(32),requestId:1,sample:{companyEntity:10,tickCount:100,speedup:0},targetCompany:20,amount:100000,confirmed:true};
@@ -69,11 +70,78 @@ test('funding engine event persists before send and binds the recorded test comp
   assert.ok(fn.indexOf('state:set(current)')<fn.indexOf('api.cmd.sendCommand'));
   for(const marker of ['request.confirmed ~= 1','request.amount > 1000000',
     'current.phase2CompanyFault == true','current.phase2CompanyFault = true',
-    'current.phase2CompanyFault = receipt.outcome ~= "funded"',
+    'saved.phase2CompanyFault = receipt.outcome ~= "funded"',
     'created.newCompanyEntity ~= request.targetCompany','speed.speedup ~= 0',
     'originalAfter == originalBefore','targetAfter == targetBefore + request.amount',
-    'if not callbackOpen or callbackSeen','callbackOpen = false'])assert.ok(fn.includes(marker),marker);
+    'if not callbackOpen or callbackSeen','callbackOpen = false',
+    'current.phase2FundingReceipt = { nonce=request.nonce, requestId=request.requestId }',
+    'saved.phase2FundingReceipt = receipt'])assert.ok(fn.includes(marker),marker);
+  assert.ok(fn.indexOf('current.phase2FundingReceipt = { nonce=request.nonce')<fn.indexOf('api.cmd.sendCommand'));
   assert.doesNotMatch(fn,/phase2FundingAttempted\s*=\s*false/);
+});
+const {lua:flua,lauxlib:flauxlib,lualib:flualib,to_luastring:toLua}=fengari;
+function runFundingLua(script){
+  const L=flauxlib.luaL_newstate();flualib.luaL_openlibs(L);
+  const status=flauxlib.luaL_dostring(L,toLua(script));
+  if(status!==flua.LUA_OK)assert.fail(fengari.to_jsstring(flua.lua_tostring(L,-1)));
+}
+test('funding callback holds its receipt until observed, then persists once across synchronous and deferred delivery',async()=>{
+  const source=await readFile(new URL('../mod/content/tf3mp_status.script.tl',import.meta.url),'utf8');
+  const fn=source.slice(source.indexOf('local function phase2FundingEvent'),source.indexOf('local ret : GameScriptWithGui'))
+    .replaceAll(' : GameScriptState<Tf3MpState>','').replaceAll(' : Tf3MpState','')
+    .replaceAll(' : JournalBookAssetCommandData','').replaceAll(' : {{Engine.Entity, Engine.Revision}}','')
+    .replaceAll(' : table','').replaceAll(' : integer','').replaceAll(' : boolean','').replaceAll(' : nil','')
+    .replaceAll(' as string','').replaceAll(' as integer','').replaceAll(' as Engine.Component.GameSpeed','');
+  for(const mode of ['sync','deferred','missing','failed','duplicate','wrong_balance','throw'])runFundingLua(`
+    local function copy(t) if type(t) ~= 'table' then return t end local x={} for k,v in pairs(t) do x[k]=copy(v) end return x end
+    local stored={phase2FundingReceipt={},phase2FundingAttempted=false,phase2CompanyFault=false,
+      companyReceipt={outcome='created',companyEntity=10,newCompanyEntity=20}}
+    local state={get=function() return copy(stored) end,set=function(_,s) stored=copy(s) end}
+    local originalBalance,targetBalance=5000,0
+    local sendCount,callback=0,nil
+    local mode='${mode}'
+    api={type={JournalEntry={new=function() return {category={}} end,Type={SUBSIDY=1}},ComponentType={GAME_SPEED=1,PLAYER=2}},
+      engine={util={getWorld=function() return 1 end,getPlayer=function() return 10 end,
+        finance={getPlayersBalance=function(company) if company==10 then return originalBalance else return targetBalance end end}},
+        getComponent=function(entity,kind) if kind==1 then return {speedup=0} else return {} end end,
+        entityExists=function() return true end},
+      cmd={makeJournalBookAssetCmd=function(_,entry) return entry end,sendCommand=function(_,cb)
+        sendCount=sendCount+1;callback=cb
+        if mode=='sync' or mode=='duplicate' then targetBalance=targetBalance+100000;cb(nil,true,{}) end
+        if mode=='failed' then cb(nil,false,{}) end
+        if mode=='wrong_balance' then targetBalance=targetBalance+99999;cb(nil,true,{}) end
+        if mode=='throw' then error('send failed') end
+      end}}
+    local function validInteger(v) return type(v)=='number' and v>=0 and v<=2147483647 and v%1==0 end
+    local function readClock() return {tickCount=101,updateCount=80} end
+    local function recordBalance(receipt,name,value) receipt[name]=math.abs(value);receipt[name..'Negative']=value<0 and 1 or 0 end
+    ${fn}
+    local request={schemaVersion=1,kind='phase2_funding',confirmed=1,nonce=string.rep('a',32),requestId=1,
+      companyEntity=10,targetCompany=20,amount=100000,issuedTick=100,expiresTick=400}
+    local current=state:get();phase2FundingEvent(state,current,request);state:set(current)
+    assert(sendCount==1 and stored.phase2FundingAttempted)
+    if mode=='deferred' or mode=='missing' or mode=='failed' or mode=='wrong_balance' or mode=='throw' then assert(stored.phase2CompanyFault) end
+    if mode=='deferred' or mode=='missing' then
+      assert(stored.phase2FundingReceipt.kind==nil and stored.phase2FundingReceipt.nonce==request.nonce)
+      if mode=='deferred' then
+        local fresh=copy(request);fresh.nonce=string.rep('b',32);fresh.requestId=2
+        local reloaded=state:get();phase2FundingEvent(state,reloaded,fresh);state:set(reloaded)
+        assert(sendCount==1 and stored.phase2FundingReceipt.kind==nil)
+        targetBalance=targetBalance+100000;callback(nil,true,{})
+      end
+    end
+    if mode=='duplicate' then callback(nil,true,{}) end
+    if mode=='missing' then
+      assert(stored.phase2FundingReceipt.kind==nil and stored.phase2CompanyFault)
+    else
+      assert(stored.phase2FundingReceipt.kind=='phase2_funding_receipt')
+      local unknown=mode=='failed' or mode=='wrong_balance' or mode=='throw'
+      assert(stored.phase2FundingReceipt.outcome==(unknown and 'outcome_unknown' or 'funded'))
+      assert(stored.phase2CompanyFault==unknown)
+    end
+    local after=state:get();phase2FundingEvent(state,after,request);state:set(after)
+    assert(sendCount==1)
+  `);
 });
 test('funding IPC is consumed before dispatch and returns a correlated receipt',async()=>{
   const source=await readFile(new URL('../mod/content/tf3mp_status_panel.script.tl',import.meta.url),'utf8');

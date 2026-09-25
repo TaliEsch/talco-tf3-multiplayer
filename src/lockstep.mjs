@@ -5,6 +5,7 @@ import {
 import { sha256Canonical } from "./canonical.mjs";
 import { parseRoadStopOrderPayload } from './road-stop-order-payload.mjs';
 import {parseDepotBuildOrderPayload} from './depot-build-order-payload.mjs';
+import {parseVehicleBuyOrderPayload} from './vehicle-buy-order-payload.mjs';
 
 export class ProtocolError extends Error {
   constructor(code, message) { super(message); this.code = code; }
@@ -17,15 +18,17 @@ export class HostAuthority {
   #lastClientSequence = new Map();
   #lastScheduledUpdate = 0;
   constructor({ sessionId, buildHash, modManifestHash, leadUpdates = MIN_SCHEDULE_LEAD,
-    resolveEntityOwner = () => null, enableDepotBuild=false }) {
+    resolveEntityOwner = () => null, enableDepotBuild=false, enableVehicleBuy=false }) {
     if (!Number.isSafeInteger(leadUpdates) || leadUpdates < MIN_SCHEDULE_LEAD || leadUpdates > MAX_SCHEDULE_LEAD) throw new RangeError("invalid leadUpdates");
     if(typeof enableDepotBuild!=='boolean')throw new TypeError('invalid depot capability');
+    if(typeof enableVehicleBuy!=='boolean')throw new TypeError('invalid vehicle purchase capability');
     this.sessionId = sessionId;
     this.buildHash = buildHash;
     this.modManifestHash = modManifestHash;
     this.leadUpdates = leadUpdates;
     this.resolveEntityOwner = resolveEntityOwner;
     this.enableDepotBuild=enableDepotBuild;
+    this.enableVehicleBuy=enableVehicleBuy;
   }
   admit({ displayName, buildHash, modManifestHash }) {
     if (typeof displayName !== "string" || displayName.length < 1 || displayName.length > 64) throw new ProtocolError("BAD_NAME", "display name must contain 1..64 characters");
@@ -82,7 +85,8 @@ export class HostAuthority {
       throw new ProtocolError("BAD_PAYLOAD", "payload must be an object");
     }
     if (request.commandType !== "vehicle.setRunning" && request.commandType !== "simulation.speed"
-      && request.commandType !== 'road.stop.place' && request.commandType !== 'road.depot.build') {
+      && request.commandType !== 'road.stop.place' && request.commandType !== 'road.depot.build'
+      && request.commandType !== 'road.vehicle.buy') {
       throw new ProtocolError("UNSUPPORTED_COMMAND", "command type is not enabled");
     }
     if (request.commandType === "simulation.speed" && !SUPPORTED_SPEEDS.includes(request.payload?.speedup)) {
@@ -113,6 +117,16 @@ export class HostAuthority {
       if(request.targetEntity!==0)throw new ProtocolError('BAD_ENTITY','depot build targets no existing entity');
       try{roadPayload=parseDepotBuildOrderPayload(request.payload,player.companyEntity);}
       catch{throw new ProtocolError('BAD_DEPOT_BUILD_PAYLOAD','invalid bounded road depot payload');}
+    }
+    if(request.commandType==='road.vehicle.buy'){
+      if(!this.enableVehicleBuy)throw new ProtocolError('UNSUPPORTED_COMMAND','road vehicle purchase is not qualified');
+      if(!Number.isSafeInteger(request.targetEntity)||request.targetEntity<1
+        ||request.targetEntity>2147483647)throw new ProtocolError('BAD_ENTITY','invalid depot child entity');
+      const depotOwner=this.resolveEntityOwner(request.targetEntity);
+      if(depotOwner===null||depotOwner===undefined)throw new ProtocolError('OWNERSHIP_UNAVAILABLE','depot ownership is unavailable');
+      if(depotOwner!==player.companyEntity)throw new ProtocolError('NOT_OWNER','depot belongs to a different company');
+      try{roadPayload=parseVehicleBuyOrderPayload(request.payload,player.companyEntity,request.targetEntity);}
+      catch{throw new ProtocolError('BAD_VEHICLE_BUY_PAYLOAD','invalid bounded road vehicle purchase payload');}
     }
     if (request.requestedUpdate !== undefined && (!Number.isSafeInteger(request.requestedUpdate) || request.requestedUpdate < 0)) {
       throw new ProtocolError("BAD_SCHEDULE", "requested update must be a nonnegative safe integer");
@@ -145,11 +159,14 @@ export class CommandQueue {
   #fault = null;
   #maxPending;
   #enableDepotBuild;
-  constructor({ maxPending = 4096,enableDepotBuild=false } = {}) {
+  #enableVehicleBuy;
+  constructor({ maxPending = 4096,enableDepotBuild=false,enableVehicleBuy=false } = {}) {
     if (!Number.isSafeInteger(maxPending) || maxPending < 1 || maxPending > MAX_SESSION_MESSAGES) throw new RangeError("invalid queue capacity");
     if(typeof enableDepotBuild!=='boolean')throw new TypeError('invalid depot capability');
+    if(typeof enableVehicleBuy!=='boolean')throw new TypeError('invalid vehicle purchase capability');
     this.#maxPending = maxPending;
     this.#enableDepotBuild=enableDepotBuild;
+    this.#enableVehicleBuy=enableVehicleBuy;
   }
   get fault() { return this.#fault?.code ?? null; }
   get pendingCount() { return this.#bySequence.size; }
@@ -197,6 +214,14 @@ export class CommandQueue {
       if(command.targetEntity!==0)throw new ProtocolError('AUTH_RECHECK_FAILED','depot build targets no existing entity');
       try{parseDepotBuildOrderPayload(command.payload,mappedOwner);}
       catch{throw new ProtocolError('AUTH_RECHECK_FAILED','accepted road depot payload changed');}
+    } else if(command.commandType==='road.vehicle.buy'){
+      if(!this.#enableVehicleBuy)throw new ProtocolError('AUTH_RECHECK_FAILED','road vehicle purchase is not qualified');
+      if(!Number.isSafeInteger(command.targetEntity)||command.targetEntity<1
+        ||command.targetEntity>2147483647)throw new ProtocolError('AUTH_RECHECK_FAILED','invalid depot child entity');
+      if(resolveEntityOwner(command.targetEntity)!==mappedOwner)
+        throw new ProtocolError('AUTH_RECHECK_FAILED','depot ownership changed before queue admission');
+      try{parseVehicleBuyOrderPayload(command.payload,mappedOwner,command.targetEntity);}
+      catch{throw new ProtocolError('AUTH_RECHECK_FAILED','accepted road vehicle purchase payload changed');}
     } else {
       throw new ProtocolError("AUTH_RECHECK_FAILED", "accepted command type is not enabled locally");
     }
@@ -225,7 +250,8 @@ export class CommandQueue {
       if (!next || next.scheduledUpdate > updateCount) break;
       if (next.scheduledUpdate < updateCount) this.#stop("LATE_COMMAND", "scheduled simulation update was missed");
       if (entry.localPlayerMap.get(next.originPlayerId) !== entry.companyEntity
-          || (next.commandType === "vehicle.setRunning" && entry.resolveEntityOwner(next.targetEntity) !== entry.companyEntity)) {
+          || ((next.commandType === "vehicle.setRunning"||next.commandType==='road.vehicle.buy')
+            && entry.resolveEntityOwner(next.targetEntity) !== entry.companyEntity)) {
         this.#stop("AUTH_RECHECK_FAILED", "company mapping or ownership changed before execution");
       }
       result.push(next);

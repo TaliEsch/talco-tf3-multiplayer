@@ -65,10 +65,10 @@ function receipt(r, extra = {}) {
   if (r.operation === "halt") p.held = true;
   return {...p,...extra};
 }
-function fixture(enableDepotBuild=false) {
+function fixture(enableDepotBuild=false,enableVehicleBuy=false) {
   let time = 0, closed = 0;
   const requests = [], sends = [];
-  const p = new AsyncSessionParticipant({playerId:"a",companies,now:() => time,enableDepotBuild,
+  const p = new AsyncSessionParticipant({playerId:"a",companies,now:() => time,enableDepotBuild,enableVehicleBuy,
     publish:r => {requests.push(r); return Promise.resolve();},send:(kind,payload) => sends.push({kind,payload}),disconnect:() => closed++});
   const reply = extra => p.receiveEngine(receipt(requests.at(-1),extra));
   const start = () => {
@@ -111,6 +111,23 @@ test('depot preparation is opt-in and requires the bound engine company receipt'
   assert.equal(accepted.p.phase,'prepared');
   const rejected=fixture(true);rejected.start();
   rejected.p.receive('command_prepare',{roundId,command:depot});
+  rejected.reply({ownerCompanyEntity:11});
+  assert.equal(rejected.p.fault,'INVALID_PREPARE_RECEIPT');
+});
+
+test('vehicle purchase preparation is opt-in and rejects a cross-company depot receipt',()=>{
+  const buy={...command(),targetEntity:730,commandType:'road.vehicle.buy',
+    payload:{companyEntity:10,depotEntity:730,model:'vehicle/bus/example.mdl'}};
+  const disabled=fixture();disabled.start();
+  disabled.p.receive('command_prepare',{roundId,command:buy});
+  assert.equal(disabled.p.fault,'INVALID_COMMAND_PREPARE');
+  const accepted=fixture(false,true);accepted.start();
+  accepted.p.receive('command_prepare',{roundId,command:buy});
+  assert.equal(accepted.requests.at(-1).operation,'prepare');
+  accepted.reply({ownerCompanyEntity:10});
+  assert.equal(accepted.p.phase,'prepared');
+  const rejected=fixture(false,true);rejected.start();
+  rejected.p.receive('command_prepare',{roundId,command:buy});
   rejected.reply({ownerCompanyEntity:11});
   assert.equal(rejected.p.fault,'INVALID_PREPARE_RECEIPT');
 });

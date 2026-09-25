@@ -146,6 +146,20 @@ export async function startGameBridge({ directory, logger = () => {}, intervalMs
   // Only a verified funding receipt can advance this helper to construction.
   // This is not a reset of the generic diagnostic latch or a retry permission.
   let phase2FundedContext = null;
+  let fundedCoordinatorContext = null;
+  function heldFundingContextCurrent(context) {
+    const sample=observations.status.sample;
+    return context!==null&&connected&&phase2HeldContext(context)
+      &&sample.tickCount>=context.receiptTick&&sample.tickCount<=context.expiresTick;
+  }
+  function runningFundingContextCurrent(context) {
+    const sample=observations.status.sample;
+    return context!==null&&connected&&observations.status.available
+      &&sample?.companyEntity===context.originalCompany&&sample.speedup===1
+      &&sample.tickCount>=context.receiptTick&&sample.tickCount<=context.expiresTick
+      &&sample.updateCount>=context.updateCount
+      &&sample.updateCount<=context.updateCount+300;
+  }
   let companyInspection = null;
   let hostCompanyPairBusy = false;
   let rosterInspection=null,rosterInspectionBusy=false;
@@ -253,10 +267,22 @@ export async function startGameBridge({ directory, logger = () => {}, intervalMs
             logger({level:'info',event:'depot_preview',code:'OPEN_IN_GAME_COMPANY_TOOLS'});
           } else logger({level:'warn',event:'depot_preview',code:'EXISTING_TEST_COMPANY_REQUIRED'});
         }
-        if(selectionId)companyInspectionResult=receipt?.outcome==='inspected'?receipt:{outcome:code??receipt?.outcome??'INSPECTION_UNAVAILABLE'};
+        if(selectionId){
+          const fundingMatches=!fundedCoordinatorContext||receipt?.outcome==='inspected'
+            &&receipt.companyEntity===fundedCoordinatorContext.originalCompany
+            &&receipt.newCompanyEntity===fundedCoordinatorContext.targetCompany
+            &&receipt.updateCount===observations.status.sample?.updateCount
+            &&receipt.tickCount>=fundedCoordinatorContext.receiptTick
+            &&receipt.tickCount<=observations.status.sample?.tickCount
+            &&runningFundingContextCurrent(fundedCoordinatorContext);
+          companyInspectionResult=receipt?.outcome==='inspected'&&fundingMatches
+            ?receipt:{outcome:fundingMatches?code??receipt?.outcome??'INSPECTION_UNAVAILABLE':'FUNDED_COMPANY_CONTEXT_CHANGED'};
+        }
         companyInspection = null;
         await unlink(path.join(directory, "company_inspect_request.lua")).catch(() => {});
-        logger({ level: receipt?.outcome === "inspected" ? "info" : "warn", event: "company_inspection_result", code: code ?? receipt.outcome, gameplayVerified: false });
+        const inspectionOutcome=selectionId?companyInspectionResult?.outcome:receipt?.outcome;
+        logger({ level: inspectionOutcome === "inspected" ? "info" : "warn", event: "company_inspection_result",
+          code: code ?? inspectionOutcome ?? 'INSPECTION_UNAVAILABLE', gameplayVerified: false });
         if (receipt) for (const row of companyInspectionRows(receipt)) logger({ level: "info", event: "company_snapshot", ...row,
           tickCount: receipt.tickCount, updateCount: receipt.updateCount, gameplayVerified: false });
       }
@@ -404,17 +430,23 @@ export async function startGameBridge({ directory, logger = () => {}, intervalMs
     }
     if (phase2Funding) {
       let receipt=null;
+      let receiptSource=null;
       const expired=Date.now()>=phase2Funding.deadline||!connected||!observations.status.available;
       if(!expired){
-        try {receipt=parseFundingReceipt(await readBounded(directory,'phase2_funding_receipt.lua'),phase2Funding.request);}
+        try {
+          receiptSource=await readBounded(directory,'phase2_funding_receipt.lua');
+          receipt=parseFundingReceipt(receiptSource,phase2Funding.request);
+        }
         catch { /* Missing, malformed or unrelated evidence cannot authorize another credit. */ }
       }
       if(expired||receipt){
+        const request=phase2Funding.request;
         phase2Funding=null;
         await unlink(path.join(directory,'phase2_funding_request.lua')).catch(()=>{});
         if(receipt?.outcome==='funded') phase2FundedContext=Object.freeze({
           originalCompany:receipt.companyEntity,targetCompany:receipt.targetCompany,
-          updateCount:receipt.updateCount});
+          updateCount:receipt.updateCount,receiptTick:receipt.tickCount,
+          expiresTick:request.expiresTick,request,receiptSource});
         logger({level:receipt?.outcome==='funded'?'info':'warn',event:'phase2_funding_result',
           code:receipt?.outcome??'OUTCOME_UNKNOWN_DO_NOT_RETRY',
           ...(receipt?{companyEntity:receipt.companyEntity,requestId:receipt.requestId,updateCount:receipt.updateCount,
@@ -919,6 +951,28 @@ export async function startGameBridge({ directory, logger = () => {}, intervalMs
         secondCompanyEntity:companyInspectionResult?.newCompanyEntity??null,
         inspection:companyInspectionResult?.outcome??'pending'};
     },
+    get fundedCoordinatorReady() {return heldFundingContextCurrent(phase2FundedContext);},
+    authorizeFundedCoordinator({targetCompany}={}) {
+      const operation=pending.then(async()=>{
+        const context=phase2FundedContext;
+        if(stopped||!heldFundingContextCurrent(context)||!companyTestUsed
+          ||phase2Funding||phase2Depot||phase2Vehicle||phase2Station||phase2Service
+          ||selectionId||coordinationLease||haltTest||pauseTest||vehicleTest||probe
+          ||companyProbe||companyInspection||targetCompany!==context.targetCompany)
+          throw new Error('VERIFIED_HELD_FUNDING_REQUIRED');
+        // Reparse the same bounded receipt before consuming this continuation.
+        // Unknown or malformed evidence cannot authorize coordinator execution.
+        const receipt=parseFundingReceipt(context.receiptSource,context.request);
+        if(receipt.outcome!=='funded'||receipt.updateCount!==observations.status.sample.updateCount)
+          throw new Error('VERIFIED_HELD_FUNDING_REQUIRED');
+        phase2FundedContext=null;
+        fundedCoordinatorContext=Object.freeze({originalCompany:context.originalCompany,
+          targetCompany:context.targetCompany,updateCount:context.updateCount,
+          receiptTick:context.receiptTick,expiresTick:context.expiresTick});
+        return Object.freeze({request:context.request,receiptSource:context.receiptSource});
+      });
+      pending=operation.catch(()=>{});return operation;
+    },
     discoverHostCompanyPair() {
       if(hostCompanyPairBusy)return Promise.reject(new Error('HOST_COMPANY_PAIR_BUSY'));
       hostCompanyPairBusy=true;
@@ -970,7 +1024,9 @@ export async function startGameBridge({ directory, logger = () => {}, intervalMs
     beginCoordinatorSelection() {
       const operation=pending.then(async()=>{
         if(stopped||!connected||!observations.status.available)throw new Error('OBSERVATION_REQUIRED');
-        if(selectionId||haltTest||pauseTest||vehicleTest||probe||companyProbe||companyInspection||companyTestUsed)throw new Error('COORDINATOR_SETUP_BUSY');
+        if(selectionId||haltTest||pauseTest||vehicleTest||probe||companyProbe||companyInspection
+          ||companyTestUsed&&!runningFundingContextCurrent(fundedCoordinatorContext))
+          throw new Error('COORDINATOR_SETUP_BUSY');
         selectionId=randomBytes(16).toString('hex');
         const requestId=++requestSequence;
         await publish(directory,'bridge.lua',{schemaVersion:1,nonce,mode:'telemetry',selectionId});
@@ -998,7 +1054,11 @@ export async function startGameBridge({ directory, logger = () => {}, intervalMs
       const operation=pending.then(async()=>{
         if(typeof healthy!=="function"||typeof onFailure!=="function") throw new TypeError("SESSION_HEALTH_CALLBACKS_REQUIRED");
         if(stopped||!connected||!observations.status.available) throw new Error("OBSERVATION_REQUIRED");
-        if(haltTest||pauseTest||vehicleTest||probe||companyProbe||companyInspection||companyTestUsed) throw new Error("COORDINATION_BUSY_OR_USED");
+        if(haltTest||pauseTest||vehicleTest||probe||companyProbe||companyInspection
+          ||companyTestUsed&&!runningFundingContextCurrent(fundedCoordinatorContext)
+          ||fundedCoordinatorContext&&selectionId&&companyInspectionResult?.outcome!=='inspected')
+          throw new Error("COORDINATION_BUSY_OR_USED");
+        fundedCoordinatorContext=null; // One coordinator lease, never a funding retry.
         let writes=Promise.resolve();
         coordinationLease=createEngineLease({nonce,healthy,onFailure:code=>{
           logger({level:"warn",event:"coordination_lease_failed",code,gameplayVerified:false});

@@ -5,6 +5,7 @@ import path from "node:path";
 import os from "node:os";
 import { createAsyncEngineMailbox,encodeAsyncEngineRequest,decodeAsyncEngineRequest,isUnpublishedEngineSource } from "../src/async-engine-mailbox.mjs";
 import { ROAD_STOP_MODEL } from '../src/road-stop-order-payload.mjs';
+import {decodeVehicleBuyExecutionReceipt} from '../src/coordinator-vehicle-buy-execution.mjs';
 import {replaceUnpublished} from '../src/unpublished-replace.mjs';
 import { parseFlatDataFile } from "../src/userdata-ipc.mjs";
 import { AsyncSessionParticipant } from "../src/async-session-participant.mjs";
@@ -116,6 +117,80 @@ test('road depot scalar codec is lossless and disabled on the live mailbox path'
     assert.throws(()=>decodeAsyncEngineRequest(source.replace('xText="-812.891541"','xText="-0812.891541"'),nonce,{enableDepotBuild:true}));
     assert.throws(()=>decodeAsyncEngineRequest(source.replace('seed=1','seed=0'),nonce,{enableDepotBuild:true}));
   }
+});
+
+test('vehicle buy mailbox carries the exact bounded model and stays opt-in',()=>{
+  const command={protocolVersion:2,hostSequence:1,scheduledUpdate:108,originPlayerId:'player-b',
+    targetCompanyEntity:55652,targetEntity:73803,commandType:'road.vehicle.buy',
+    payload:{companyEntity:55652,depotEntity:73803,model:'vehicle/bus/example.mdl'},
+    clientSequence:11,requestMessageId:'vehicle-11'};
+  for(const operation of ['prepare','executeHeld']){
+    const request={schemaVersion:1,roundId:'round',operationId:operation,operation,command};
+    assert.throws(()=>encodeAsyncEngineRequest(request,nonce));
+    const source=encodeAsyncEngineRequest(request,nonce,{enableVehicleBuy:true});
+    assert.equal(parseFlatDataFile(source).model,command.payload.model);
+    assert.deepEqual(decodeAsyncEngineRequest(source,nonce,{enableVehicleBuy:true}),request);
+    assert.throws(()=>decodeAsyncEngineRequest(source,nonce));
+    assert.throws(()=>decodeAsyncEngineRequest(source.replace('model="vehicle/bus/example.mdl"',
+      'model="vehicle/bus/../example.mdl"'),nonce,{enableVehicleBuy:true}));
+    assert.throws(()=>decodeAsyncEngineRequest(source.replace('entity=73803','entity=0'),
+      nonce,{enableVehicleBuy:true}));
+  }
+});
+
+test('vehicle purchase receipt needs observed vehicle, depot and exact native debit',()=>{
+  const receipt={schemaVersion:1,nonce,roundId:'round',operationId:'executeHeld',
+    operation:'executeHeld',status:'ok',updateCount:108,held:true,
+    snapshotVersion:3,hostSequence:1,entity:74001,ownerCompanyEntity:55652,
+    vehicleEntity:74001,depotEntity:73803,chargedCost:100,balance:900,negative:0,
+    targetBefore:1000,originalBefore:5000,originalAfter:5000};
+  const decoded=decodeVehicleBuyExecutionReceipt(receipt);
+  assert.equal(decoded.state.vehicle.entity,74001);
+  assert.equal(decoded.state.depot.ownerCompanyEntity,55652);
+  assert.equal(decoded.state.company.balanceBefore-decoded.state.company.balance,100);
+  const negativeHost=decodeVehicleBuyExecutionReceipt({...receipt,
+    originalBefore:-5000,originalAfter:-5000});
+  assert.equal(negativeHost.state.hostCompany.balanceAfter,-5000);
+  for(const bad of [{entity:74002},{depotEntity:74001},{balance:901},{chargedCost:99},
+    {originalAfter:4999},{targetBefore:999},{negative:1},{vehicleEntity:0},{extra:1}]){
+    assert.throws(()=>decodeVehicleBuyExecutionReceipt({...receipt,...bad}));
+  }
+});
+
+test('vehicle purchase mailbox only acknowledges the correlated held world receipt',async()=>{
+  const root=await mkdtemp(path.join(os.tmpdir(),'tf3mp-vehicle-buy-receipt-'));
+  const directory=path.join(root,'tf3mp_status_1');await mkdir(directory);
+  const command={protocolVersion:2,hostSequence:1,scheduledUpdate:108,originPlayerId:'player-b',
+    targetCompanyEntity:55652,targetEntity:73803,commandType:'road.vehicle.buy',
+    payload:{companyEntity:55652,depotEntity:73803,model:'vehicle/bus/example.mdl'},
+    clientSequence:11,requestMessageId:'vehicle-11'};
+  const request={schemaVersion:1,roundId:'round',operationId:'executeHeld',operation:'executeHeld',command};
+  const evidence=[];const delivered=[];
+  const mailbox=await createAsyncEngineMailbox({directory,nonce,enableVehicleBuy:true,
+    onExecutionEvidence:value=>evidence.push(value)});
+  const base={schemaVersion:1,nonce,roundId:'round',operationId:'executeHeld',
+    operation:'executeHeld',status:'ok',updateCount:108,held:true,
+    snapshotVersion:3,hostSequence:1,entity:74001,ownerCompanyEntity:55652,
+    vehicleEntity:74001,depotEntity:73803,chargedCost:100,balance:900,negative:0,
+    targetBefore:1000,originalBefore:5000,originalAfter:5000};
+  const participant={receiveEngine:value=>{delivered.push(value);return true;}};
+  const write=async value=>writeFile(path.join(directory,'coordination_receipt.lua'),
+    `function data() return {${Object.entries(value).map(([k,v])=>`${k}=${JSON.stringify(v)},`).join('')}} end`);
+  try{
+    await mailbox.publish(request);
+    await write({...base,depotEntity:73804});await mailbox.poll(participant);
+    assert.equal(evidence.length,0);assert.equal(delivered.at(-1).status,'unknown');
+    await write({...base,balance:901});await mailbox.poll(participant);
+    assert.equal(evidence.length,0);assert.equal(delivered.at(-1).status,'unknown');
+    await write(base);await mailbox.poll(participant);
+    assert.equal(evidence.length,1);assert.equal(delivered.at(-1).status,'ok');
+    assert.equal(evidence[0].state.vehicle.depotEntity,73803);
+    await write({...base,originalBefore:-5000,originalAfter:-5000});
+    await mailbox.poll(participant);
+    assert.equal(evidence.length,2);
+    assert.equal(evidence.at(-1).state.hostCompany.balanceBefore,-5000);
+    assert.equal(delivered.at(-1).status,'ok');
+  }finally{await mailbox.close();await rm(root,{recursive:true,force:true});}
 });
 
 test('largest accepted road Stop name remains inside the coordination IPC bound',()=>{

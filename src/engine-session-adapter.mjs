@@ -6,7 +6,7 @@ import { AsyncSessionParticipant } from './async-session-participant.mjs';
 // No synthetic engine receipts, automatic game launch, or automatic retry.
 export async function createEngineSessionAdapter({directory,bridge,playerId,companies,
   send,disconnect,healthy,controlsReady,now=Date.now,nativeRuntime=null,checkpointEvidenceScope='production',
-  onCheckpointEvidence=()=>{},enableDepotBuild=false}) {
+  onCheckpointEvidence=()=>{},enableDepotBuild=false,enableVehicleBuy=false}) {
   if(!bridge||typeof bridge.startCoordinationLease!=='function'
     ||![send,disconnect,healthy,controlsReady,now,onCheckpointEvidence].every(f=>typeof f==='function')) throw new TypeError('INVALID_ADAPTER_OPTIONS');
   if(nativeRuntime!==null&&(!nativeRuntime||typeof nativeRuntime.sessionId!=='string'||!/^[A-Za-z0-9_.:-]{1,128}$/.test(nativeRuntime.sessionId)
@@ -17,10 +17,11 @@ export async function createEngineSessionAdapter({directory,bridge,playerId,comp
     ||typeof nativeRuntime.logger!=='function')) throw new TypeError('INVALID_NATIVE_RUNTIME_ADAPTER_OPTIONS');
   if(!['production','local_diagnostic'].includes(checkpointEvidenceScope))throw new TypeError('INVALID_CHECKPOINT_EVIDENCE_SCOPE');
   if(typeof enableDepotBuild!=='boolean')throw new TypeError('INVALID_DEPOT_CAPABILITY');
+  if(typeof enableVehicleBuy!=='boolean')throw new TypeError('INVALID_VEHICLE_BUY_CAPABILITY');
   let checkpointEvidence=null,executionEvidence=null,acceptedExecutionState=null,faultLogged=false;
   // Trace output must never change an accepted engine outcome.
   const logEngine=event=>{try{nativeRuntime?.logger?.(event);}catch{}};
-  const mailbox=await createAsyncEngineMailbox({directory,nonce:bridge.nonce,enableDepotBuild,
+  const mailbox=await createAsyncEngineMailbox({directory,nonce:bridge.nonce,enableDepotBuild,enableVehicleBuy,
     requireCompleteCheckpointCoverage:checkpointEvidenceScope==='production',onCheckpointEvidence:evidence=>{
       checkpointEvidence=structuredClone(evidence);onCheckpointEvidence(structuredClone(evidence));
     },onExecutionEvidence:evidence=>{executionEvidence=evidence;}});
@@ -77,7 +78,7 @@ export async function createEngineSessionAdapter({directory,bridge,playerId,comp
     // receipt exchanges. Match the local coordinator's 30s bounded deadline;
     // heartbeat, observation freshness and exact-update checks stay unchanged.
     participant=new AsyncSessionParticipant({playerId,companies,requireEngineBinding:true,
-      enableDepotBuild,now,timeoutMs:30000,
+      enableDepotBuild,enableVehicleBuy,now,timeoutMs:30000,
       publish:request=>{
         if(request.operation!=='halt'&&(!lease?.active||!healthy())) throw new Error('ENGINE_LEASE_NOT_ACTIVE');
         if(['release','prepare','executeHeld'].includes(request.operation)&&controlsReady()!==true) throw new Error('NATIVE_CONTROLS_NOT_LOCKED');
@@ -186,7 +187,12 @@ export async function createEngineSessionAdapter({directory,bridge,playerId,comp
             logEngine({level:'info',event:'engine_execution_evidence',role:nativeRuntime?.role??'local',
               roundId:receipt.roundId,operationId:receipt.operationId,
               hostSequence:observed.hostSequence,updateCount:observed.updateCount,
-              ...(observed.depot?{constructionEntity:observed.depot.constructionEntity,
+              ...(observed.vehicle&&observed.depot?{vehicleEntity:observed.vehicle.entity,
+                depotEntity:observed.vehicle.depotEntity,
+                ownerCompanyEntity:observed.vehicle.ownerCompanyEntity,
+                chargedCost:observed.company.chargedCost,
+                companyBalance:observed.company.balance}
+                :observed.depot?{constructionEntity:observed.depot.constructionEntity,
                 depotEntity:observed.depot.depotEntity,chargedCost:observed.depot.chargedCost,
                 ownerCompanyEntity:observed.depot.ownerCompanyEntity,
                 companyBalance:observed.company.balance}

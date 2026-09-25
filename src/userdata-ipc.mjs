@@ -4,6 +4,7 @@ import { lstat, link, open, readFile, realpath, unlink } from "node:fs/promises"
 import path from "node:path";
 
 const IDENTIFIER_VALUE = /^[A-Za-z0-9_.:-]{1,128}$/;
+const VEHICLE_MODEL_VALUE = /^[A-Za-z0-9_.:/%-]{1,252}\.mdl$/;
 const NONCE = /^[0-9a-f]{32}$/;
 
 function fail(message) {
@@ -36,10 +37,14 @@ export function parseFlatDataFile(source) {
       const end = body.indexOf('"', offset);
       if (end < 0) fail(`unterminated string for ${key}`);
       value = body.slice(offset, end);
-      if (!IDENTIFIER_VALUE.test(value)) fail(`string for ${key} is outside the allowlist`);
+      if (!(key === 'model' && VEHICLE_MODEL_VALUE.test(value) && !value.includes('..'))
+        && !IDENTIFIER_VALUE.test(value)) fail(`string for ${key} is outside the allowlist`);
       offset = end + 1;
     } else {
-      const valueMatch = body.slice(offset).match(/^(true|false|0|[1-9][0-9]*)/);
+      const signedBalance = key === 'originalBefore' || key === 'originalAfter';
+      const valueMatch = body.slice(offset).match(signedBalance
+        ? /^(true|false|0|-?[1-9][0-9]*)/
+        : /^(true|false|0|[1-9][0-9]*)/);
       if (!valueMatch) fail(`invalid scalar for ${key}`);
       value = valueMatch[1] === "true" ? true : valueMatch[1] === "false" ? false : Number(valueMatch[1]);
       if (typeof value === "number" && !Number.isSafeInteger(value)) fail(`${key} is not a safe integer`);
