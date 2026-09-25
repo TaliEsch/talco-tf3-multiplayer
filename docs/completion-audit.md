@@ -1,5 +1,14 @@
 # Completion audit against the build prompt
 
+## Accepted road postcondition reporting — 25 September 2026
+
+The single-game coordinator report now records the decoded, accepted TF3 road
+Stop state: source and replacement road IDs, Stop ID, company, native cost and
+company balance. The report refuses to advance an applied road command if
+that correlated state is missing. Focused adapter and local-run fixtures pass
+13/13. This logging change has not run in TF3; the earlier live report still
+contains only its accepted state hash and update timing.
+
 ## Successful single-game Host-ordered road Stop — 25 September 2026
 
 On exact TF3 build 40396, the production Host assigned sequence 1 to one road

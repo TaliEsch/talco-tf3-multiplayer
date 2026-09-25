@@ -16,7 +16,7 @@ export async function createEngineSessionAdapter({directory,bridge,playerId,comp
     ||typeof nativeRuntime.gateControl!=='function'||typeof nativeRuntime.awaitGateEvent!=='function'
     ||typeof nativeRuntime.logger!=='function')) throw new TypeError('INVALID_NATIVE_RUNTIME_ADAPTER_OPTIONS');
   if(!['production','local_diagnostic'].includes(checkpointEvidenceScope))throw new TypeError('INVALID_CHECKPOINT_EVIDENCE_SCOPE');
-  let checkpointEvidence=null,executionEvidence=null,faultLogged=false;
+  let checkpointEvidence=null,executionEvidence=null,acceptedExecutionState=null,faultLogged=false;
   // Trace output must never change an accepted engine outcome.
   const logEngine=event=>{try{nativeRuntime?.logger?.(event);}catch{}};
   const mailbox=await createAsyncEngineMailbox({directory,nonce:bridge.nonce,
@@ -137,6 +137,7 @@ export async function createEngineSessionAdapter({directory,bridge,playerId,comp
     get fault(){return participant.fault;},
     get faultEvidence(){return participant.faultEvidence;},
     get checkpointEvidence(){return checkpointEvidence===null?null:structuredClone(checkpointEvidence);},
+    get acceptedExecutionState(){return acceptedExecutionState===null?null:structuredClone(acceptedExecutionState);},
     receive(kind,payload){
       if(!check())return false;
       if(!lease.active){participant.halt('ENGINE_LEASE_NOT_ACTIVE');return false;}
@@ -179,6 +180,7 @@ export async function createEngineSessionAdapter({directory,bridge,playerId,comp
             &&executionEvidence?.receipt.operationId===receipt.operationId
             &&executionEvidence.receipt.roundId===receipt.roundId){
             const observed=executionEvidence.state;
+            acceptedExecutionState=structuredClone(observed);
             logEngine({level:'info',event:'engine_execution_evidence',role:nativeRuntime?.role??'local',
               roundId:receipt.roundId,operationId:receipt.operationId,
               hostSequence:observed.hostSequence,updateCount:observed.updateCount,

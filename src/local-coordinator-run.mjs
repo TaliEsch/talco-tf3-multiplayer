@@ -96,9 +96,24 @@ export async function createLocalCoordinatorRun({directory,bridge,playerId,compa
       timing.preparedAfterMs=now()-timing.proposedAt;
       timing.preparedUpdate=payload.updateCount;
     } else if(kind==='command_applied') {
-      for(const member of roster)coordinator.applied(member.playerId,payload);
       const timing=timings.get(payload.hostSequence);
+      const state=adapter.acceptedExecutionState;
+      if(roadStop&&(!state||state.scope!=='held_road_stop_company_balance_v1'
+        ||state.hostSequence!==payload.hostSequence||state.updateCount!==payload.updateCount
+        ||state.roadStop?.sourceRoadEntity!==vehicleEntity
+        ||state.roadStop?.ownerCompanyEntity!==companies.get(playerId)
+        ||!Number.isSafeInteger(state.roadStop?.stopEntity)||state.roadStop.stopEntity<1
+        ||!Number.isSafeInteger(state.roadStop?.roadEntity)||state.roadStop.roadEntity<1
+        ||state.roadStop.roadEntity===vehicleEntity
+        ||!Number.isSafeInteger(state.roadStop?.chargedCost)||state.roadStop.chargedCost<1
+        ||!Number.isSafeInteger(state.company?.balance)))
+        throw new Error('ACCEPTED_ROAD_POSTCONDITION_MISSING');
+      for(const member of roster)coordinator.applied(member.playerId,payload);
       report.checks.push({hostSequence:payload.hostSequence,updateCount:payload.updateCount,stateHash:payload.stateHash,
+        ...(roadStop?{roadPostcondition:{sourceRoadEntity:state.roadStop.sourceRoadEntity,
+          roadEntity:state.roadStop.roadEntity,stopEntity:state.roadStop.stopEntity,
+          ownerCompanyEntity:state.roadStop.ownerCompanyEntity,
+          chargedCost:state.roadStop.chargedCost,companyBalance:state.company.balance}}:{}),
         ...timing,appliedAfterMs:now()-timing.proposedAt,updateError:payload.updateCount-timing.scheduledUpdate});
       event('ACTUAL_HELD_ACTION_RECEIPT',{hostSequence:payload.hostSequence,updateCount:payload.updateCount});
     } else if(kind==='participant_released') {

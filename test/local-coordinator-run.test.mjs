@@ -84,6 +84,9 @@ for(const scenario of ['success','unknown_action','report_failure','cancelled_st
     }
     if(run.phase==='failed')assert.ok(run.report.failureContext);
     for(const check of run.report.checks){
+      if(scenario==='road_stop')assert.deepEqual(check.roadPostcondition,{
+        sourceRoadEntity:42,roadEntity:81,stopEntity:80,ownerCompanyEntity:7,
+        chargedCost:100,companyBalance:900});
       assert.equal(check.updateError,0);
       assert.equal(check.scheduledUpdate,check.proposedUpdate+60);
       assert.equal(check.observedReleaseSpeed,check.requestedReleaseSpeed);

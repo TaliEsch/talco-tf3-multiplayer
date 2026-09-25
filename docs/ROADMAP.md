@@ -2,6 +2,14 @@
 
 ## Current direction — 25 September 2026
 
+The local ordered-run report now retains the accepted game receipt's road ID,
+Stop ID, owner company, native charge and balance alongside Host sequence and
+update. This is source and fixture verification only for the new reporting;
+the prior TF3 run is unchanged. It lets the next expensive TF3 experiment
+preserve its game-world postcondition even when terminal parking prevents a
+later save. A fresh Host admission road preflight remains the next gameplay
+gate; the held game executor already rechecks the road and company.
+
 A fresh controlled build-40396 single-game run accepted one Host-ordered road
 Stop as sequence 1 and executed it at the scheduled update 3058. The game
 returned a successful held execution receipt with a qualified replacement
