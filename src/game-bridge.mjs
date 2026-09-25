@@ -30,9 +30,33 @@ import {parseVehicleDiscoveryReceipt} from './vehicle-discovery-receipt.mjs';
 import {parseRoadPreflightReceipt} from './road-preflight-receipt.mjs';
 import {parseOrderedRoadReadback} from './ordered-road-readback.mjs';
 import {parseOrderedDepotReadback} from './ordered-depot-readback.mjs';
+import {ROAD_DEPOT_RESOURCE} from './depot-build-order-payload.mjs';
 import {setTimeout as delay} from 'node:timers/promises';
 
 const LIMIT = 4096;
+const preflightUint=n=>Number.isSafeInteger(n)&&n>=0&&n<=2147483647;
+export function parseFundedModelPreflightReceipt(source,request){
+  const r=parseFlatDataFile(source);
+  const keys=['schemaVersion','kind','nonce','requestId','companyEntity','targetCompany',
+    'issuedUpdate','model','fundingAmount','depotExact','modelExact','road','yearKnown',
+    'available','priceKnown','price','depotCostKnown','depotCost','code'];
+  if(Object.keys(r).sort().join(',')!==keys.sort().join(',')||r.schemaVersion!==1
+    ||r.kind!=='funded_model_preflight_receipt'||r.nonce!==request.nonce
+    ||r.requestId!==request.requestId||r.companyEntity!==request.companyEntity
+    ||r.targetCompany!==request.targetCompany||r.issuedUpdate!==request.issuedUpdate
+    ||r.model!==request.model||r.fundingAmount!==request.fundingAmount
+    ||r.code!=='UNKNOWN'&&r.code!=='READY'
+    ||![r.depotExact,r.modelExact,r.road,r.yearKnown,r.available,r.priceKnown,
+      r.depotCostKnown].every(n=>n===0||n===1)
+    ||!preflightUint(r.price)||!preflightUint(r.depotCost)
+    ||(!r.priceKnown&&r.price!==0)||(!r.depotCostKnown&&r.depotCost!==0))
+    throw new TypeError('INVALID_FUNDED_MODEL_PREFLIGHT_RECEIPT');
+  const ready=r.depotExact===1&&r.modelExact===1&&r.road===1&&r.yearKnown===1
+    &&r.available===1&&r.priceKnown===1&&r.price>=1
+    &&r.price+(r.depotCostKnown?r.depotCost:0)<=request.fundingAmount;
+  if((r.code==='READY')!==ready)throw new TypeError('INVALID_FUNDED_MODEL_PREFLIGHT_RECEIPT');
+  return Object.freeze(r);
+}
 export function parseTelemetry(source, nonce) {
   const value = parseFlatDataFile(source);
   if (Object.keys(value).sort().join(",") !== "counter,kind,nonce,schemaVersion,tickCount,updateCount"
@@ -87,6 +111,12 @@ async function readBounded(directory, name) {
 async function publish(directory, name, fields) {
   const temporary = path.join(directory, `.bridge-${randomBytes(12).toString("hex")}.tmp`);
   const source = name === 'phase2_depot_request.lua' ? serializeDepotRequest(fields)
+    : name === 'funded_model_preflight_request.lua' ? `function data()\nreturn {\n${Object.entries(fields).map(([key,value])=>{
+      if(!/^[a-zA-Z]+$/.test(key)||!(preflightUint(value)||typeof value==='string'&&
+        (key==='model'?/^[A-Za-z0-9_.:/%-]{1,252}\.mdl$/.test(value)&&!value.includes('..')
+          :/^[a-z0-9_]{1,64}$/.test(value))))throw new TypeError('INVALID_FUNDED_MODEL_PREFLIGHT_REQUEST');
+      return `  ${key} = ${typeof value==='string'?`"${value}"`:value},`;
+    }).join('\n')}\n}\nend\n`
     : name === 'phase2_vehicle_request.lua' ? serializeVehicleRequest(fields)
     : name === 'phase2_station_request.lua' ? serializeStationRequest(fields)
     : name === 'phase2_service_request.lua' ? serializeServiceRequest(fields)
@@ -142,6 +172,7 @@ export async function startGameBridge({ directory, logger = () => {}, intervalMs
   let phase2Station = null, phase2Service = null, phase2ConstructionContext = null;
   let serviceBinding=null, serviceObservation=null, serviceObservationPhase='unavailable', serviceObservationStart=null;
   let stationProbe = null;
+  let fundedModelPreflightBusy=false,fundedModelPreflightUsed=false;
   let roadReplay = null, roadReplayResult = null;
   // Only a verified funding receipt can advance this helper to construction.
   // This is not a reset of the generic diagnostic latch or a retry permission.
@@ -952,6 +983,59 @@ export async function startGameBridge({ directory, logger = () => {}, intervalMs
         inspection:companyInspectionResult?.outcome??'pending'};
     },
     get fundedCoordinatorReady() {return heldFundingContextCurrent(phase2FundedContext);},
+    async preflightFundedDepotVehicle({targetCompany,model,fundingAmount,placement}={}){
+      if(fundedModelPreflightBusy||fundedModelPreflightUsed)throw new Error('FUNDED_MODEL_PREFLIGHT_UNKNOWN');
+      fundedModelPreflightBusy=true;
+      try{
+        const start=pending.then(async()=>{
+          const observation=observations.status;
+          if(stopped||!connected||!observation.available||observation.sample?.speedup!==0
+            ||companyTestUsed||phase2Funding||companyProbe||companyInspection||selectionId
+            ||haltTest||pauseTest||probe||vehicleTest||stationProbe
+            ||!preflightUint(targetCompany)||targetCompany===observation.sample.companyEntity
+            ||!Number.isSafeInteger(fundingAmount)||fundingAmount<1||fundingAmount>1000000
+            ||placement?.resource!==ROAD_DEPOT_RESOURCE
+            ||typeof model!=='string'||!/^[A-Za-z0-9_.:/%-]{1,252}\.mdl$/.test(model)
+            ||model.includes('..')||observation.sample.tickCount>2147483347)
+            throw new Error('FUNDED_MODEL_PREFLIGHT_UNKNOWN');
+          const sample=observation.sample;
+          const request={schemaVersion:1,kind:'funded_model_preflight',nonce,
+            requestId:++requestSequence,companyEntity:sample.companyEntity,targetCompany,
+            issuedUpdate:sample.updateCount,model,fundingAmount};
+          fundedModelPreflightUsed=true;
+          await publish(directory,'bridge.lua',{schemaVersion:1,nonce,mode:'company_test'});
+          await publish(directory,'funded_model_preflight_request.lua',request);
+          return request;
+        });
+        pending=start.catch(()=>{});
+        const request=await start;
+        const deadline=Date.now()+Math.min(companyTimeoutMs,15000);
+        while(!stopped&&Date.now()<deadline){
+          const observation=observations.status;
+          if(!connected||!observation.available||observation.sample?.speedup!==0
+            ||observation.sample.updateCount!==request.issuedUpdate
+            ||observation.sample.companyEntity!==request.companyEntity)
+            throw new Error('FUNDED_MODEL_PREFLIGHT_UNKNOWN');
+          try{
+            const receipt=parseFundedModelPreflightReceipt(await readBounded(directory,
+              'funded_model_preflight_receipt.lua'),request);
+            logger({level:receipt.code==='READY'?'info':'warn',event:'funded_model_preflight_result',
+              code:receipt.code,depotExact:receipt.depotExact,modelExact:receipt.modelExact,
+              road:receipt.road,yearKnown:receipt.yearKnown,available:receipt.available,
+              priceKnown:receipt.priceKnown,price:receipt.price,
+              depotCostKnown:receipt.depotCostKnown,depotCost:receipt.depotCost,
+              fundingAmount:receipt.fundingAmount,gameplayVerified:false});
+            if(receipt.code!=='READY')throw new Error('FUNDED_MODEL_PREFLIGHT_UNKNOWN');
+            return receipt;
+          }catch(error){if(error?.message==='FUNDED_MODEL_PREFLIGHT_UNKNOWN')throw error;}
+          await delay(50);
+        }
+        throw new Error('FUNDED_MODEL_PREFLIGHT_UNKNOWN');
+      }finally{
+        await unlink(path.join(directory,'funded_model_preflight_request.lua')).catch(()=>{});
+        fundedModelPreflightBusy=false;
+      }
+    },
     authorizeFundedCoordinator({targetCompany}={}) {
       const operation=pending.then(async()=>{
         const context=phase2FundedContext;

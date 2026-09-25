@@ -313,6 +313,9 @@ if (command === "host" || command === "join") createInterface({ input: process.s
         if(stopping)return;
         let verifiedFundingEvidence=null;
         if(depotVehicleRun){
+          setupStage='funded_model_preflight';
+          await bridge.preflightFundedDepotVehicle({targetCompany:secondCompany,
+            model:vehicleBuyModel,fundingAmount,placement:depotPlacement});
           setupStage='funding_request';
           await bridge.requestPhase2Funding({targetCompany:secondCompany,amount:fundingAmount,confirmed:true});
           setupStage='funding_receipt';
@@ -378,6 +381,7 @@ if (command === "host" || command === "join") createInterface({ input: process.s
         coordinatorTimer=setInterval(()=>{void coordinatorRun.poll();},250);
       })().catch(async error=>{
         const allowed=new Set(['FUNDING_OUTCOME_UNKNOWN_NO_RETRY','FUNDED_COORDINATOR_RESUME_NOT_OBSERVED',
+          'FUNDED_MODEL_PREFLIGHT_UNKNOWN',
           'VERIFIED_HELD_FUNDING_REQUIRED','VERIFIED_FUNDING_EVIDENCE_REQUIRED',
           'EXPLICIT_BOUNDED_FUNDING_REQUIRED','FRESH_SOLO_HOST_REQUIRED',
           'COORDINATION_BUSY_OR_USED','OBSERVATION_REQUIRED']);

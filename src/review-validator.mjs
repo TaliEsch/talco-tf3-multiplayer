@@ -13,6 +13,7 @@ const EXPECTED_CONTENT = Object.freeze([
   "tf3mp_depot_preview.script.lua",
   "tf3mp_depot_tools.res.lua",
   "tf3mp_depot_tools.script.lua",
+  "tf3mp_funded_model_preflight.lua",
   "tf3mp_load_probe.script.lua",
   "tf3mp_native_controls.res.lua",
   "tf3mp_native_controls.script.tl",
@@ -80,6 +81,13 @@ export async function validateReviewPackage(root) {
   const forbidden = files.filter((file) => FORBIDDEN_EXTENSIONS.has(path.extname(file).toLowerCase()));
   if (forbidden.length) throw new Error(`forbidden bundled file: ${forbidden[0]}`);
   const gameScript = await readFile(path.join(absoluteRoot, "content", "tf3mp_status.script.tl"), "utf8");
+  const fundedModelPreflight = await readFile(path.join(absoluteRoot, "content", "tf3mp_funded_model_preflight.lua"), "utf8");
+  if (!fundedModelPreflight.includes('function M.inspect(request, gameApi)')
+    || !fundedModelPreflight.includes('gameApi.res.modelRep.find(request.model)')
+    || !fundedModelPreflight.includes('gameApi.res.constructionRep.find(DEPOT)')
+    || !fundedModelPreflight.includes('gameApi.engine.util.getYear()')
+    || /\b(sendCommand|proposalApply|saveGame|setGameSpeedup)\s*\(/.test(fundedModelPreflight))
+    throw new Error('funded model preflight must stay read-only and exact-resource bound');
   const loadProbeSource=await readFile(path.join(absoluteRoot,'content','tf3mp_load_probe.script.lua'),'utf8');
   if(createHash('sha256').update(loadProbeSource.replace(/\r\n/g,'\n')).digest('hex')!=='889fd32533bbe239c3b8bc6f7c99c0ac24508eb893e905baa26353a607fe08f7'
     || /loadGame\s*\(|sendCommand\s*\(|setGameSpeedup\s*\(|saveGame\s*\(/.test(loadProbeSource))
@@ -338,6 +346,11 @@ export async function validateReviewPackage(root) {
     throw new Error("update must discard saved vehicle work, not execute it");
   }
   const panelScript = await readFile(path.join(absoluteRoot, "content", "tf3mp_status_panel.script.tl"), "utf8");
+  for (const marker of ['ug_require "tf3mp_status_1::/tf3mp_funded_model_preflight.lua"',
+    'app.loadUserdata("tf3mp_status_1", "funded_model_preflight_request")',
+    'fundedModelPreflight.inspect(request, api)',
+    'app.saveUserdata("tf3mp_status_1", "funded_model_preflight_receipt", receipt)'])
+    if (!panelScript.includes(marker)) throw new Error('funded model preflight GUI exchange is missing');
   for(const marker of ['name == "tf3mp_inspect_road_preflight"',
     'current.roadPreflightReceipt = receipt',
     'name == "tf3mp_get_road_preflight"'])

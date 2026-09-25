@@ -17,6 +17,7 @@ local roadStopOrderWire = ug_require "tf3mp_status_1::/tf3mp_road_stop_order_wir
 local depotBuildOrderWire = ug_require "tf3mp_status_1::/tf3mp_depot_build_order_wire.lua" as table
 local vehicleBuyOrderWire = ug_require "tf3mp_status_1::/tf3mp_vehicle_buy_order_wire.lua" as table
 local depotBuildOrderReadback = ug_require "tf3mp_status_1::/tf3mp_depot_build_order_readback.lua" as table
+local fundedModelPreflight = ug_require "tf3mp_status_1::/tf3mp_funded_model_preflight.lua" as table
 
 local record Tf3MpPanelState
   tickCount : integer
@@ -98,6 +99,7 @@ local phase2ServiceObservationSent : integer = 0
 local phase2ServiceObservationReported : integer = 0
 local stationProbeSent : integer = 0
 local stationProbeReported : integer = 0
+local fundedModelPreflightSent : integer = 0
 local companyProbeReported : integer = 0
 local companyInspectionSent : integer = 0
 local rosterInspectionSent : integer = 0
@@ -1578,6 +1580,27 @@ local function exchangeStationTemplate() : nil
   return nil
 end
 
+local function exchangeFundedModelPreflight() : nil
+  if not userdataExists("funded_model_preflight_request") then return nil end
+  local request = app.loadUserdata("tf3mp_status_1", "funded_model_preflight_request")
+  if request.schemaVersion ~= 1 or request.kind ~= "funded_model_preflight" or request.nonce ~= bridgeNonce then return nil end
+  for _, key in ipairs({"requestId","companyEntity","targetCompany","issuedUpdate","fundingAmount"}) do
+    local n = request[key]
+    if type(n) ~= "number" or n < 0 or n > 2147483647 or n % 1 ~= 0 then return nil end
+  end
+  if request.requestId < 1 or request.companyEntity < 1 or request.targetCompany < 1
+    or request.companyEntity == request.targetCompany or request.fundingAmount < 1
+    or request.fundingAmount > 1000000 or type(request.model) ~= "string"
+    or #request.model < 5 or #request.model > 256
+    or not string.match(request.model, "^[A-Za-z0-9_.:/%%-]+%.mdl$")
+    or string.find(request.model, "..", 1, true) then return nil end
+  if request.requestId <= fundedModelPreflightSent then return nil end
+  fundedModelPreflightSent = request.requestId as integer
+  local receipt = fundedModelPreflight.inspect(request, api)
+  app.saveUserdata("tf3mp_status_1", "funded_model_preflight_receipt", receipt)
+  return nil
+end
+
 local function exchangePhase2Depot() : nil
   if not userdataExists("phase2_depot_request") then return nil end
   local request = app.loadUserdata("tf3mp_status_1", "phase2_depot_request")
@@ -2218,6 +2241,7 @@ local function exchangeTelemetry(tickCount : integer, updateCount : integer) : s
     phase2ServiceObservationReported = 0
     stationProbeSent = 0
     stationProbeReported = 0
+    fundedModelPreflightSent = 0
     companyProbeReported = 0
     companyInspectionSent = 0
     rosterInspectionSent = 0
@@ -2328,6 +2352,8 @@ local function exchangeTelemetry(tickCount : integer, updateCount : integer) : s
     if not roadSimpleOk then return "road stop command outcome unknown / do not retry" end
     local stationOk = pcall(exchangeStationTemplate)
     if not stationOk then return "station inspection unavailable / do not retry" end
+    local modelOk = pcall(exchangeFundedModelPreflight)
+    if not modelOk then return "funded model inspection unavailable / do not retry" end
     local depotOk = pcall(exchangePhase2Depot)
     if not depotOk then return "depot outcome unknown / do not retry" end
     local vehicleOk = pcall(exchangePhase2Vehicle)

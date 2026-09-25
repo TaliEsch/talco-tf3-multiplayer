@@ -9,6 +9,7 @@
     "tf3mp_depot_preview.script.lua",
     "tf3mp_depot_tools.res.lua",
     "tf3mp_depot_tools.script.lua",
+    "tf3mp_funded_model_preflight.lua",
     "tf3mp_load_probe.script.lua",
     "tf3mp_native_controls.res.lua",
     "tf3mp_native_controls.script.tl",
