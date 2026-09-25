@@ -1,5 +1,14 @@
 # TalCo TF3 multiplayer — current delivery plan
 
+## Current build gate — 25 September 2026
+
+Steam updated TF3 to build 40401 (SHA-256
+`6ABDEDD8FBBD3117FE909D8747BD2690A76B9098A251AABB1AE9BA6B4F9659CA`)
+during the funded depot and vehicle purchase launch. The launcher stopped at
+its exact-build gate before any command. Requalify the native boundary,
+callback and adapter sites for 40401 before resuming the disposable-save
+integration run; keep other Stage 7 road/economy work moving offline.
+
 ## Ordered vehicle purchase integration — 25 September 2026
 
 The road vehicle purchase path is now opt-in from Host admission through a

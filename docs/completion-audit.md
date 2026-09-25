@@ -1,5 +1,27 @@
 # Completion audit against the build prompt
 
+## Build 40401 interrupted funded purchase attempt — 25 September 2026
+
+The first disposable-save launch passed the build-40396 native gate but used
+the staged mod directory as `--bridge-dir`; the game read the separate local
+user data directory, so no bridge acknowledgement or gameplay command occurred.
+The source save remained unchanged. On the corrected launch, Steam replaced
+the executable during startup. The launcher rejected the changed image before
+bridge connection or gameplay execution. The installed game now displays build
+40401 and hashes to `6ABDEDD8FBBD3117FE909D8747BD2690A76B9098A251AABB1AE9BA6B4F9659CA`.
+TF3 was closed, the 40396 loader was removed with its hash-checked unstage
+script, and the source save still hashes to
+`CCBF4BEB740E53323E06D20890FD029C8E174D3E85EFB06801A8B4275C762FB5`.
+The launcher now checks that the bridge directory is the local user data
+directory paired with the exact staged mod manifest before starting TF3.
+Hash-bound static disassembly found the previous candidate instructions at
+the post-update loop, Stop factory/admission/send/callback and marshaler sites;
+the bounded private trace is `reports/build40401-static-candidates-private.txt`.
+These small windows do not prove surrounding semantics or callback/adapter
+identity. Exact-build native and callback/adapter qualification is required
+before another controlled purchase attempt. No funding, purchase or Stage 7
+acceptance is claimed from these launches.
+
 ## Ordered vehicle purchase source checkpoint — 25 September 2026
 
 Implemented an opt-in Host-ordered `road.vehicle.buy` path with a bounded model

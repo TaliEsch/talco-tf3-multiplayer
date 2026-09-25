@@ -5,6 +5,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { sha256File } from '../src/compatibility.mjs';
+import { hashManifest } from '../src/manifest.mjs';
 
 // Starts one exact-build TF3 process and its production Host or Join helper.
 // The native handoff is one-use. Only a connection refusal before native bind
@@ -35,6 +36,9 @@ for(const key of ['exe','bridge-dir',role==='host'?'save':'save-dir'])
   if(!path.isAbsolute(opt[key]))throw new Error('ABSOLUTE_LAUNCH_PATH_REQUIRED');
 if(path.basename(opt['bridge-dir']).toLowerCase()!=='tf3mp_status_1'||!existsSync(opt['bridge-dir'])
   ||!existsSync(opt.exe)||!existsSync(handoff))throw new Error('QUALIFIED_LAUNCH_INPUT_MISSING');
+const stagedMod=path.join(path.dirname(opt['bridge-dir']),'staging_area','tf3mp_status_1');
+if(!existsSync(stagedMod)||await hashManifest(stagedMod)!==opt['mod-hash'])
+  throw new Error('STAGED_MOD_OR_BRIDGE_DIRECTORY_MISMATCH');
 const manifestPath=path.join(path.dirname(opt.exe),'TalCo-TF3MP-native-loader.json');
 if(!existsSync(manifestPath))throw new Error('NATIVE_LOADER_NOT_STAGED');
 const manifest=JSON.parse(readFileSync(manifestPath,'utf8'));
