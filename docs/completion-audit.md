@@ -1,5 +1,30 @@
 # Completion audit against the build prompt
 
+## Source/outcome road geometry correlation — 25 September 2026
+
+In TF3 build 40396, nonce-bound read-only probes inspected the untouched
+source save and the preserved road Stop outcome save. The source probe at
+paused update 2903 found road 53417, no matching Stop, company 3141 and
+balance $40,393,094. The outcome probe at paused update 2914 found exactly one
+matching owned and attached Stop 73312 on road 73313 and balance $40,346,746.
+Both roads have node IDs 53360 and 53273, endpoints
+(-2115.46, -3421.99, 17.25) and (-2174.86, -3414.68, 17.0916), and the
+same two tangents. TF3's `BASE_EDGE` exposes no `distance` field in these
+worlds. Entity 53417 remains present in the outcome but has no `BASE_EDGE`
+component. The prior `original_road_conflict` was an entity-ID reuse, not
+contradictory road geometry.
+
+This is real single-game evidence that the selected road acquired one Stop and
+the native $46,348 debit. The callback still recorded
+`ENGINE_OUTCOME_UNKNOWN` at `result_entities`, and this trial did not use host
+ordering. Neither production completion nor multiplayer replay is proven.
+Focused outcome tests passed 5/5 and mod review passed. Both save SHA-256
+values remained unchanged: source
+`ccbf4beb740e53323e06d20890fd029c8e174d3e85efb06801a8b4275c762fb5`,
+outcome `acdf349b352dc3ab4687dc152410aa9a11c00f84b7eb773880af4205dd55a1d0`.
+TF3 exited without saving. The one-use requests and receipts were archived
+privately, and the previous telemetry bridge was restored.
+
 ## Saved road Stop world readback — 25 September 2026
 
 The preserved outcome save entered the TF3 build-40396 world on a second

@@ -5,14 +5,19 @@ import fengari from 'fengari';
 
 const {lua,lauxlib,lualib,to_luastring}=fengari;
 const source=await readFile(new URL('../mod/content/tf3mp_road_stop_outcome.lua',import.meta.url),'utf8');
-function run(change=''){
+function run(change='', includeMissing=false){
   const script=`local module=(function() ${source} end)()
 local request={nonce=string.rep('a',32),companyEntity=10,originalEdgeEntity=24,
   model='models/stop.mdl',param=.5,left=true,priorBalance=100000,
   expectedBalance=53652,expectedUpdateCount=50}
 local map={[81]=25};local exists={[10]=true,[24]=false,[25]=true,[81]=true}
+local geo={node0=31,node1=32,distance=10,
+  position0={x=0,y=1,z=2},position1={x=10,y=1,z=2},
+  tangent0={x=1,y=0,z=0},tangent1={x=1,y=0,z=0}}
 local components={EDGE_OBJECT={[81]={param=.5}},PLAYER_OWNED={[81]={player=10}},
-  MODEL_INSTANCE_LIST={[81]={fatInstances={{modelId=7}}}},BASE_EDGE={[25]={objects={{81,1}}}}}
+  MODEL_INSTANCE_LIST={[81]={fatInstances={{modelId=7}}}},BASE_EDGE={[25]={objects={{81,1}},
+    node0=geo.node0,node1=geo.node1,distance=geo.distance,position0=geo.position0,
+    position1=geo.position1,tangent0=geo.tangent0,tangent1=geo.tangent1}}}
 local api={type={ComponentType={EDGE_OBJECT='EDGE_OBJECT',PLAYER_OWNED='PLAYER_OWNED',
   MODEL_INSTANCE_LIST='MODEL_INSTANCE_LIST',BASE_EDGE='BASE_EDGE',GAME_SPEED='GAME_SPEED',
   GAME_TIME='GAME_TIME'},enum={EdgeObjectType={STOP_LEFT=1,STOP_RIGHT=2}}},
@@ -27,13 +32,17 @@ local api={type={ComponentType={EDGE_OBJECT='EDGE_OBJECT',PLAYER_OWNED='PLAYER_O
       finance={getPlayersBalance=function()return 53652 end}}}}
 ${change}
 local result=module.probe(api,request)
-return result.code,result.stage or '',result.stopEntity or 0,result.chargedCost or 0`;
+local road=result.originalRoad or result.stopRoad
+return result.code,result.stage or '',result.stopEntity or 0,result.chargedCost or 0,
+  road and table.concat(road.missingFields, ',') or ''`;
   const L=lauxlib.luaL_newstate();lualib.luaL_openlibs(L);
   try{
     lua.lua_sethook(L,()=>lauxlib.luaL_error(L,to_luastring('TEST_INSTRUCTION_LIMIT')),lua.LUA_MASKCOUNT,1_000_000);
     assert.equal(lauxlib.luaL_loadstring(L,to_luastring(script)),lua.LUA_OK,lua.lua_tojsstring(L,-1));
-    assert.equal(lua.lua_pcall(L,0,4,0),lua.LUA_OK,lua.lua_tojsstring(L,-1));
-    return {code:lua.lua_tojsstring(L,-4),stage:lua.lua_tojsstring(L,-3),stop:lua.lua_tonumber(L,-2),cost:lua.lua_tonumber(L,-1)};
+    assert.equal(lua.lua_pcall(L,0,5,0),lua.LUA_OK,lua.lua_tojsstring(L,-1));
+    const result={code:lua.lua_tojsstring(L,-5),stage:lua.lua_tojsstring(L,-4),stop:lua.lua_tonumber(L,-3),cost:lua.lua_tonumber(L,-2)};
+    if(includeMissing) result.missing=lua.lua_tojsstring(L,-1);
+    return result;
   }finally{lua.lua_close(L);}
 }
 test('qualifies one saved, owned and attached stop with native balance delta',()=>{
@@ -61,4 +70,13 @@ test('world refusal identifies the exact check without returning untrusted value
 test('accepts a replacement road assigned the original ID only when it carries the stop',()=>{
   assert.equal(run('exists[24]=true;map[81]=24;components.BASE_EDGE[24]={objects={{81,1}}}').code,'observed');
   assert.deepEqual(run('exists[24]=true'),{code:'unknown',stage:'original_road_conflict',stop:0,cost:0});
+});
+test('read-only source and outcome diagnostics report geometry without accepting the result',()=>{
+  const source='request.phase="source";map={};exists[24]=true;components.BASE_EDGE[24]={objects={},node0=geo.node0,node1=geo.node1,distance=geo.distance,position0=geo.position0,position1=geo.position1,tangent0=geo.tangent0,tangent1=geo.tangent1};api.engine.util.finance.getPlayersBalance=function()return 100000 end';
+  assert.equal(run(source).code,'source_diagnostic');
+  assert.deepEqual(run(source+';api.engine.getComponent=function(id,kind)if kind=="GAME_SPEED"then return{speedup=1}end if kind=="GAME_TIME"then return{updateCount=50}end return components[kind] and components[kind][id] end'),{code:'unknown',stage:'world_clock',stop:0,cost:0});
+  assert.equal(run(source+';api.engine.util.finance.getPlayersBalance=function()return 99000 end;api.engine.getComponent=function(id,kind)if kind=="GAME_SPEED"then return{speedup=0}end if kind=="GAME_TIME"then return{updateCount=3213}end return components[kind] and components[kind][id] end').code,'source_diagnostic');
+  assert.deepEqual(run(source+';components.BASE_EDGE[24].position0=nil',true).missing,'position0');
+  assert.equal(run('request.phase="outcome_diagnostic";exists[24]=true').code,'outcome_diagnostic');
+  assert.deepEqual(run('request.phase="outcome_diagnostic";components.BASE_EDGE[25].distance=nil',true).missing,'distance');
 });

@@ -2,14 +2,18 @@
 
 ## Current direction — 25 September 2026
 
-The preserved road Stop outcome save loads into the TF3 build-40396 world.
-Read-only probes narrowed the refusal from `world` to `world_original_road`
-and then `original_road_conflict`. The final probe found one Stop matching the
-expected owner, model, parameters and road attachment, with the paused clock
-and native balance debit, but road entity 53417 still exists and is different
-from the Stop's attached road. The result remains `unknown`: compare stable
-road geometry and Stop presence in the untouched source and outcome saves
-before claiming the purchase succeeded. Never retry that uncertain purchase.
+Read-only probes of the untouched source and preserved outcome saves in TF3
+build 40396 now correlate the selected road to the placed Stop. Source road
+53417 had no matching Stop. The outcome has one owned, attached Stop 73312 on
+road 73313; that road has identical node IDs, endpoints and tangents to the
+source road. The native balance fell $46,348. TF3 reused entity 53417 for a
+non-road entity, explaining the earlier ID conflict. The original callback
+receipt remains `ENGINE_OUTCOME_UNKNOWN`; this is observed single-game
+postcondition evidence, not a successful production completion receipt or
+host-ordered replay. Do not repeat the purchase. Next adapt the callback's
+result readback to TF3's actual entity-list semantics, then move the proven
+road Stop action through host ordering and exactly-once execution. Two-instance
+testing remains deferred by the user.
 The full suite has five reproducible native debugger fixture failures; see
 the completion audit. Readiness remains about 6.3/10.
 

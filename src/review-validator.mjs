@@ -103,7 +103,7 @@ export async function validateReviewPackage(root) {
     ['tf3mp_road_replay_prepare.lua', 'b6738a73e3306ca6aa734c63438c91ed5b54ade321eede31c920103eab67ab25'],
     ['tf3mp_road_replay_rebuild.lua', 'f6de6ff3edff7f05199bf34dfeb699bbb81147e26d4f9257e0f81110a24ae028'],
     ['tf3mp_road_replay_result.lua', '201bd6cc15b2cf137e63a557f8e23254bee19e449d4bf57c2b363f5f37b428fa'],
-    ['tf3mp_road_stop_outcome.lua', 'e98dc13e4b43ebcc4f1f1743341604f98f46517f57e9aae4af2a8845390db355'],
+    ['tf3mp_road_stop_outcome.lua', '99d39c50ea9e0cb2219bfaaf26d3640f2b42619f8952a864394fa3e7a0e6c552'],
     ['tf3mp_road_stop_simple_prepare.lua', 'b9de96bbb92f212b3d8cc83d97564f2b7a814cfd6aa65ac4116ad9208add382c'],
     ['tf3mp_road_stop_simple_dispatch.lua', 'edee4006813e5a0f2f0155dab416ce432ed457034b75e57083b8c0249c2bc44f'],
     ['tf3mp_road_stop_simple_result.lua', '7fee234c5b4e6ad9f90398611c7f288f3ac48716a86577d8a2cf679a93c7d5c7'],
