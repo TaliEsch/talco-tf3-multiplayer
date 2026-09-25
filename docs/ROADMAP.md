@@ -2,6 +2,14 @@
 
 ## Current direction — 25 September 2026
 
+The next separate-company safety gate is implemented in the ordered road
+preparer and held executor: both now reject a road owned by another company,
+while allowing public or target-company ownership. The executor checks again
+immediately before native submission. Focused fixtures cover an action whose
+target company differs from the local host company and an ownership change
+after arming. This is source/model verification only; a real TF3
+separate-company road and economy result remains the next game milestone.
+
 The held-boundary readback now passed in one real build-40396 TF3 process.
 Production Host ordered one public-road Stop as sequence 1, prepared it,
 executed it at scheduled update 3044, and obtained an independent read-only

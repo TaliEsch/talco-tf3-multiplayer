@@ -29,9 +29,9 @@ local current={coordinationBinding={nonce='${nonce}',roundId='round',phase='runn
   companyEntity=3141,phase='active',lastTick=10,expiresTick=20},
   preparationReceipt={},coordinationReceipt={}}
 local state={get=function()return current end,set=function(_,value)saved=saved+1;current=value end}
-local road={objects={},node0=31,node1=32}
+local road={objects={},node0=31,node1=32};local roadOwner=nil
 local api={type={ComponentType={GAME_TIME='GAME_TIME',GAME_SPEED='GAME_SPEED',
-  PLAYER='PLAYER',BASE_EDGE='BASE_EDGE'}},res={modelRep={find=function()return 7 end}},
+  PLAYER='PLAYER',PLAYER_OWNED='PLAYER_OWNED',BASE_EDGE='BASE_EDGE'}},res={modelRep={find=function()return 7 end}},
   engine={util={getWorld=function()return 0 end,getPlayer=function()return 3141 end},
     entityExists=function(id)return id==3141 or id==53417 end,
     getRevision=function()return{num={2}}end,
@@ -40,6 +40,7 @@ local api={type={ComponentType={GAME_TIME='GAME_TIME',GAME_SPEED='GAME_SPEED',
       if kind=='GAME_SPEED'then return{speedup=1}end
       if kind=='PLAYER'and id==3141 then return{}end
       if kind=='BASE_EDGE'and id==53417 then return road end
+      if kind=='PLAYER_OWNED'and id==53417 then return roadOwner end
     end}}
 ${change}
 local accepted=preparer.handle(state,request,api)
@@ -67,6 +68,8 @@ test('road prepare rejects cross-company, occupied, stale and malformed requests
     "request.companyEntity=3142",
     "current.coordinationBinding.players['player-a']=3142",
     "road.objects={{81,1}}",
+    "roadOwner={player=3142}",
+    "roadOwner={player='invalid'}",
     "current.watchdogLease.expiresTick=15",
     "request.scheduledUpdate=100",
     "request.nameChunkCount=2",
@@ -78,4 +81,13 @@ test('road prepare rejects cross-company, occupied, stale and malformed requests
     assert.equal(observed.accepted,false,change);
     assert.equal(observed.calls,0,change);
   }
+});
+test('road prepare accepts public and same-company ownership',()=>{
+  assert.equal(run('roadOwner={player=0}').accepted,true);
+  assert.equal(run('roadOwner={player=3141}').accepted,true);
+});
+test('road prepare permits another roster company while local lease stays with the host',()=>{
+  const result=run("request.companyEntity=3142;current.coordinationBinding.players['player-a']=3142;roadOwner={player=3142};api.engine.entityExists=function(id)return id==3141 or id==3142 or id==53417 end;local prior=api.engine.getComponent;api.engine.getComponent=function(id,kind)if id==3142 and kind=='PLAYER'then return{}end return prior(id,kind)end");
+  assert.equal(result.accepted,true);
+  assert.equal(result.status,'ok');
 });

@@ -85,6 +85,9 @@ local function liveRoad(api,request,prepared)
   local edge=api.engine.getComponent(request.entity,api.type.ComponentType.BASE_EDGE)
   if not native(edge) or type(edge.objects) ~= "table" or #edge.objects ~= 0
     or not entity(edge.node0) or not entity(edge.node1) or edge.node0 == edge.node1 then return false end
+  local owner=api.engine.getComponent(request.entity,api.type.ComponentType.PLAYER_OWNED)
+  if owner ~= nil and (not native(owner) or not integer(owner.player)
+    or owner.player ~= 0 and owner.player ~= request.companyEntity) then return false end
   local revision=api.engine.getRevision(request.entity)
   return native(revision) and native(revision.num)
     and revision.num[1] == prepared.revision

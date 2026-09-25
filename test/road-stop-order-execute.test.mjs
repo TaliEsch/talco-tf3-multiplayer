@@ -26,7 +26,7 @@ test('held Stop readback event is subscribed and routed from GUI to game state',
   assert.match(panel,/"tf3mp_observe_road_stop", \{[\s\S]*?nonce = bridgeNonce, operationId = executionSent/);
 });
 
-function run(change='',observeCount=1){
+function run(change='',observeCount=1,early=''){
   const script=`local wire=(function() ${wire} end)()
 local sends=0;local saves=0;local callback=nil
 local result={before=function()return{code='observed',updateCount=108}end,
@@ -43,6 +43,7 @@ end
 local executor=(function() ${source} end)()
 ${encoded}
 local request=data()
+${early}
 local capture=wire.decode(request)
 local current={coordinationBinding={nonce='${nonce}',roundId='round',phase='prepared',
  players={['player-a']=3141,['player-b']=3142},nextSequence=1},
@@ -52,9 +53,9 @@ local current={coordinationBinding={nonce='${nonce}',roundId='round',phase='prep
  hostSequence=1,scheduledUpdate=108,originPlayerId='player-a',companyEntity=3141,
  entity=53417,clientSequence=1,requestMessageId='road-11',modelId=7,revision=2,capture=capture}}
 local state={get=function()return current end,set=function(_,value)saves=saves+1;current=value end}
-local update=100;local road={node0=31,node1=32,objects={}}
+local update=100;local road={node0=31,node1=32,objects={}};local roadOwner=nil
 local api={type={ComponentType={GAME_TIME='GAME_TIME',GAME_SPEED='GAME_SPEED',
- PLAYER='PLAYER',BASE_EDGE='BASE_EDGE'}},res={modelRep={find=function()return 7 end}},
+ PLAYER='PLAYER',PLAYER_OWNED='PLAYER_OWNED',BASE_EDGE='BASE_EDGE'}},res={modelRep={find=function()return 7 end}},
  cmd={sendCommand=function(_,fn)sends=sends+1;callback=fn end},
  engine={util={getWorld=function()return 0 end,getPlayer=function()return 3141 end,
  finance={getPlayersBalance=function()return 53652 end}},
@@ -65,6 +66,7 @@ local api={type={ComponentType={GAME_TIME='GAME_TIME',GAME_SPEED='GAME_SPEED',
   if kind=='GAME_SPEED'then return{speedup=0}end
   if kind=='PLAYER'and id==3141 then return{}end
   if kind=='BASE_EDGE'and id==53417 then return road end
+  if kind=='PLAYER_OWNED'and id==53417 then return roadOwner end
  end}}
 ${change}
 local armed=executor.arm(state,request,api)
@@ -105,6 +107,8 @@ test('changed road, company, revision or receipt cannot authorize native send',(
     'request.companyEntity=3142',
     "current.coordinationBinding.players['player-a']=3142",
     'road.objects={{81,1}}',
+    'roadOwner={player=3142}',
+    "roadOwner={player='invalid'}",
     'api.engine.getRevision=function()return{num={3}}end',
     "current.preparationReceipt.status='unknown'",
     "current.watchdogLease.expiresTick=15",
@@ -113,6 +117,24 @@ test('changed road, company, revision or receipt cannot authorize native send',(
     assert.equal(observed.sends,0,change);
     assert.equal(observed.status,'',change);
   }
+});
+test('held execution rechecks road ownership after arming',()=>{
+  const observed=run("api.engine.getComponent=function(id,kind) if kind=='GAME_TIME'then return{tickCount=15,updateCount=update}end if kind=='GAME_SPEED'then return{speedup=0}end if kind=='PLAYER'and id==3141 then return{}end if kind=='BASE_EDGE'and id==53417 then return road end if kind=='PLAYER_OWNED'and id==53417 then return{player=update==108 and 3142 or 3141}end end");
+  assert.equal(observed.armed,true);
+  assert.equal(observed.sends,0);
+  assert.equal(observed.status,'unknown');
+  assert.equal(observed.consumed,'consumed');
+});
+test('held execution accepts public and same-company roads',()=>{
+  assert.equal(run('roadOwner={player=0}').status,'ok');
+  assert.equal(run('roadOwner={player=3141}').status,'ok');
+});
+test('held execution uses roster target company while the local lease belongs to the host',()=>{
+  const change="current.coordinationBinding.players['player-a']=3142;current.coordinationBinding.players['player-b']=3141;current.preparationReceipt.ownerCompanyEntity=3142;current.preparedCommand.companyEntity=3142;roadOwner={player=3142};api.engine.entityExists=function(id)return id==3141 or id==3142 or id==53417 end;local prior=api.engine.getComponent;api.engine.getComponent=function(id,kind)if id==3142 and kind=='PLAYER'then return{}end return prior(id,kind)end";
+  const observed=run(change,1,'request.companyEntity=3142');
+  assert.equal(observed.armed,true);
+  assert.equal(observed.sends,1);
+  assert.equal(observed.status,'ok');
 });
 test('unknown callback preserves consumed latch without replay',()=>{
   const observed=run("result.after=function()return{code='unknown'}end");

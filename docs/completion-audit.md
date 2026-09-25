@@ -1,5 +1,16 @@
 # Completion audit against the build prompt
 
+## Separate-company road ownership recheck — 25 September 2026
+
+The game-side ordered Stop preparation and held execution now read the road's
+`PLAYER_OWNED` component and reject a malformed owner or one outside the
+public/target-company set. Execution rechecks after arming and before native
+submission; an ownership change consumes the one-use barrier as `unknown`
+without sending construction. Focused Fengari tests pass 13/13, including a
+roster target company different from the local host company. Mod review
+accepts the revised source. This change has not been exercised in TF3 and
+does not prove separate-company gameplay or synchronized economy.
+
 ## Independent held-world road Stop readback — 25 September 2026
 
 One build-40396 TF3 process loaded the disposable source save and Production
