@@ -2,6 +2,20 @@
 
 ## Current build gate — 25 September 2026
 
+The exact-40401 **single-game Stop cancellation** check has passed on the
+disposable save. A Host-bound, one-use arm claimed exactly one UI Stop for
+vehicle 66005/company 3141. Its callback and marshaler returned zero, the
+native send body completed cleanup, and all seven correlated action counters
+advanced once with no drops. Independent bridge readback kept `stopFlag=0`
+while tick/update advanced from 57444/3156 to 57634/3346; the vehicle was
+still moving in the UI. The runtime restored both observers on exit
+(`cancel-40401-stop 2 2`); TF3 closed without saving, the source save hash was
+unchanged, and the hash-matched diagnostic DLLs were removed. Private trace:
+`reports/cancel-40401-20260925`. This remains an unqualified diagnostic with
+no Host order, held replay or two-instance proof. Next qualify the production
+40401 adapter/gate combination and run one Host-ordered Stop with a correlated
+engine postcondition. Do not repeat cancellation alone.
+
 The exact-40401 boundary-only experiment has now passed in a real disposable
 TF3 game. A Host-bound native gate held the world while eight authenticated
 pings succeeded and the observed tick/update clocks stayed fixed. One release

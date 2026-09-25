@@ -44,3 +44,13 @@ for (const [selector, expected] of [['boundary-pipe', 6], ['boundary-conflict', 
     assert.match(run.stdout, new RegExp(`status=${expected}\\b`));
   });
 }
+for (const [selector, expected] of [['cancel-pipe', 6], ['cancel-conflict', 11]]) {
+  test(`40401 cancellation handoff ${selector} rejects an owned image or conflicting mode`, {skip}, () => {
+    const run = spawnSync(host, [dll, '40401', selector],
+      {windowsHide: true, encoding: 'utf8', timeout: 15_000});
+    assert.ifError(run.error);
+    assert.equal(run.status, 0, run.stderr || run.stdout);
+    assert.match(run.stdout, /diagnostic-rejected-no-probe=1/);
+    assert.match(run.stdout, new RegExp(`status=${expected}\\b`));
+  });
+}

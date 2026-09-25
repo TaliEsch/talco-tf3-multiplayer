@@ -1,5 +1,32 @@
 # Completion audit against the build prompt
 
+## Build 40401 real-game Stop cancellation — 25 September 2026
+
+The cancellation-only diagnostic loaded in TF3 PID 35228 against executable
+SHA-256 `6ABDEDD8FBBD3117FE909D8747BD2690A76B9098A251AABB1AE9BA6B4F9659CA`.
+After the disposable save loaded, bridge observation reported company 3141,
+speed 1 and a running vehicle 66005. A Host-bound native arm for exactly one
+Stop claimed invocation 1. The accepted arm, callback result zero, send return,
+post-send body and matching factory/admission/callback/marshaler counters passed
+`confirmCancelledStop`; no candidates dropped. Independent vehicle readback
+remained `stopFlag=0` at revision 17 as tick/update advanced from 57444/3156
+to 57634/3346. The UI still showed Road Vehicle 1 moving after the click.
+
+The first launch (PID 9296) exposed a runner ordering error: it connected to
+the one-client native pipe before a fresh bridge sample and then closed without
+arming. The runner now waits for bridge readiness before consuming the native
+connection. No Stop was clicked in that launch. Both runs closed without
+saving. The source save retained SHA-256
+`CCBF4BEB740E53323E06D20890FD029C8E174D3E85EFB06801A8B4275C762FB5`.
+The successful runtime ended `cancel-40401-stop 2 2` and `runtime-returned 0 0`;
+the hash-recorded DLLs, handoff and manifest were removed. Private trace:
+`reports/cancel-40401-20260925`.
+
+This qualifies one-use cancellation and cleanup in one real game only. The
+diagnostic advertises `productionQualified=false`, has no simulation gate and
+performs no replay. Host-ordered Stop, exact-once engine execution, general
+40401 production qualification and Stage 7 road service remain open.
+
 ## Empty ROAD line removal source — 25 September 2026
 
 The opt-in `road.line.remove` path now runs from Host/queue admission through

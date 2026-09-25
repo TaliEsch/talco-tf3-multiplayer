@@ -374,6 +374,35 @@ tf3runtimeipc::PassiveVehicleActionObservation ReadPassiveVehicleObservation() n
             snapshot.latest_post_send_body_thread};
 }
 
+DWORD Run40401CancellationExperiment(const std::wstring& pipe, const std::string& token) {
+    // Cancellation only: no production qualification, simulation controls or
+    // replay provider. Arm is authenticated, Host-bound and process-lifetime
+    // one-use; the original native send body retains all cleanup ownership.
+    const auto vehicle = tf3vehicleobserver::Start40401CancellationExperiment();
+    const auto post = vehicle == tf3vehicleobserver::Status::started
+        ? tf3postobserver::Start40401Passive() : tf3postobserver::Status::never_started;
+    TraceNativeStart(L"-runtime-cancel40401.txt", "cancel-40401-start",
+        static_cast<unsigned>(vehicle), static_cast<unsigned>(post));
+    int server_status = -1;
+    if (vehicle == tf3vehicleobserver::Status::started && post == tf3postobserver::Status::started) {
+        try {
+            server_status = tf3runtimeipc::ServeInProcess(pipe, token, &ReadObservation, 0,
+                nullptr, TF3_RUNTIME_IPC_INPROCESS_GATE_LEASE_MS,
+                &ReadPassiveVehicleObservation, &production_vehicle_cancel_provider);
+        } catch (...) { /* Restore observers; no uncertain action is retried. */ }
+    }
+    const auto post_stop = tf3postobserver::Stop();
+    const auto vehicle_stop = tf3vehicleobserver::Stop();
+    TraceNativeStart(L"-runtime-cancel40401-stop.txt", "cancel-40401-stop",
+        static_cast<unsigned>(vehicle_stop), static_cast<unsigned>(post_stop));
+    if ((post_stop != tf3postobserver::Status::stopped && post_stop != tf3postobserver::Status::never_started) ||
+        (vehicle_stop != tf3vehicleobserver::Status::stopped && vehicle_stop != tf3vehicleobserver::Status::never_started))
+        return TF3_INPROCESS_RUNTIME_OBSERVER_STOP_FAILED;
+    if (vehicle != tf3vehicleobserver::Status::started || post != tf3postobserver::Status::started)
+        return TF3_INPROCESS_RUNTIME_UNSUPPORTED_EXECUTABLE;
+    return server_status == 0 ? TF3_INPROCESS_RUNTIME_STOPPED : TF3_INPROCESS_RUNTIME_SERVER_FAILED;
+}
+
 extern "C" __declspec(dllexport) DWORD WINAPI Tf3InProcessRuntimeV1(
     const Tf3InProcessRuntimeRequestV1* request) {
     TraceNativeStart(L"-runtime-enter.txt", "runtime-entered");
@@ -413,6 +442,11 @@ extern "C" __declspec(dllexport) DWORD WINAPI Tf3InProcessRuntimeV1(
                                                   diagnostic_pipe) == 0;
     const bool environment_diagnostic = diagnostic_length != 0 ||
         diagnostic_error != ERROR_ENVVAR_NOT_FOUND;
+    constexpr wchar_t cancellation_pipe[] = L"tf3mp_cancel40401_";
+    if (pipe.compare(0, _countof(cancellation_pipe) - 1, cancellation_pipe) == 0) {
+        if (environment_diagnostic) return TF3_INPROCESS_RUNTIME_INVALID_DIAGNOSTIC;
+        return Run40401CancellationExperiment(pipe, token);
+    }
     constexpr wchar_t boundary_pipe[] = L"tf3mp_boundary40401_";
     if (pipe.compare(0, _countof(boundary_pipe) - 1, boundary_pipe) == 0) {
         if (environment_diagnostic) return TF3_INPROCESS_RUNTIME_INVALID_DIAGNOSTIC;

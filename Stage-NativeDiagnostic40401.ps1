@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
   [string]$GameDirectory = 'E:\Steam\steamapps\common\Transport Fever 3',
-  [ValidateSet('NoHook', 'Passive', 'Boundary')][string]$Mode = 'NoHook'
+  [ValidateSet('NoHook', 'Passive', 'Boundary', 'Cancel')][string]$Mode = 'NoHook'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -41,6 +41,7 @@ try {
   $manifestMode = switch ($Mode) {
     'Passive' { 'passive-diagnostic-40401' }
     'Boundary' { 'boundary-diagnostic-40401' }
+    'Cancel' { 'cancel-diagnostic-40401' }
     default { 'no-hook-diagnostic-40401' }
   }
   $manifestJson = [ordered]@{schemaVersion=1;mode=$manifestMode;

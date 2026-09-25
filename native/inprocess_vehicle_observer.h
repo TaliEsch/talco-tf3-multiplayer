@@ -106,6 +106,8 @@ struct Snapshot {
 // Start/Stop must run on an ordinary worker, never DllMain or an engine callback.
 Status Start() noexcept;
 Status Start40401Passive() noexcept;
+// Isolated one-use cancellation qualification. Never authorizes replay.
+Status Start40401CancellationExperiment() noexcept;
 Status Stop() noexcept;
 Snapshot Read() noexcept;
 // A request is accepted at most once in a process lifetime. It atomically

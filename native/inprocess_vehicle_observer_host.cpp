@@ -29,6 +29,7 @@ extern "C" __declspec(dllexport) LONG TestDispatch(EXCEPTION_POINTERS* pointers)
 #include <atomic>
 #include <cstdio>
 #include <cstdlib>
+#include <stdexcept>
 #include <thread>
 
 extern "C" unsigned char OwnedVehicleFactorySite;
@@ -60,10 +61,33 @@ struct Entry {
 struct CallbackValue { std::array<std::byte, 0x38> prefix{}; void* implementation = nullptr; };
 struct CallbackImplementation { void* vtable = nullptr; };
 std::array<std::uintptr_t, 3> image_adapter_table{};
+struct CleanupCounts {
+    unsigned entry = 0, callback = 0, progress = 0, false_callbacks = 0, original_submissions = 0;
+    bool throw_callback = false;
+};
+CleanupCounts* cleanup_counts = nullptr;
+struct OwnedCleanup {
+    unsigned& count;
+    ~OwnedCleanup() { ++count; }
+};
+void CountOriginalSubmission(void*, void*, void*, void*) {
+    ++cleanup_counts->original_submissions;
+}
+void CountFalseCallback(void* implementation, void* entry) {
+    Require(cleanup_counts != nullptr && cleanup_counts->entry == 0 &&
+        cleanup_counts->callback == 0 && cleanup_counts->progress == 0,
+        "callback runs while caller owns all three live values");
+    Require(*reinterpret_cast<const unsigned char*>(static_cast<unsigned char*>(entry) + 0x30) == 0,
+        "failure callback receives zero result");
+    ++cleanup_counts->false_callbacks;
+    (void)OwnedVehicleCallbackExecute(implementation, entry);
+    if (cleanup_counts->throw_callback) throw std::runtime_error("owned callback unwind");
+}
 }
 
 int wmain(int argc, wchar_t** argv) {
-    Require(argc == 2, "DLL argument");
+    Require(argc == 2 || (argc == 3 && wcscmp(argv[2], L"unwind") == 0), "DLL argument");
+    const bool unwind_test = argc == 3;
     HMODULE library = LoadLibraryExW(argv[1], nullptr,
         LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32);
     Require(library != nullptr, "load observer DLL");
@@ -120,10 +144,10 @@ int wmain(int argc, wchar_t** argv) {
     std::array<unsigned char, 0x9c0> command{};
     Entry entry{};
     std::array<std::uintptr_t, 3> callback_vtable{};
-    callback_vtable[2] = reinterpret_cast<std::uintptr_t>(&OwnedVehicleCallbackExecute);
+    callback_vtable[2] = reinterpret_cast<std::uintptr_t>(&CountFalseCallback);
     CallbackImplementation callback_implementation{callback_vtable.data()};
     std::array<std::uintptr_t, 3> submission_vtable{};
-    submission_vtable[2] = reinterpret_cast<std::uintptr_t>(&OwnedVehicleCallbackExecute);
+    submission_vtable[2] = reinterpret_cast<std::uintptr_t>(&CountOriginalSubmission);
     CallbackImplementation submission_implementation{submission_vtable.data()};
     CallbackValue callback_value{};
     callback_value.implementation = &callback_implementation;
@@ -185,8 +209,33 @@ int wmain(int argc, wchar_t** argv) {
     using FailureCall = void (*)(void*, void*, void*, void*);
     const auto failure_call = reinterpret_cast<FailureCall>(
         *reinterpret_cast<const std::uintptr_t*>(arm_admission.Rax + 0x10));
-    failure_call(reinterpret_cast<void*>(arm_admission.Rcx), &entry, &callback_value,
-                 progress_pair.data());
+    CleanupCounts ownership{};
+    ownership.throw_callback = unwind_test;
+    cleanup_counts = &ownership;
+    bool callback_threw = false;
+    try {
+        // Model the send body's caller-owned locals around the substituted
+        // native call. The shim must neither destroy nor retain these values.
+        OwnedCleanup progress_owner{ownership.progress};
+        OwnedCleanup callback_owner{ownership.callback};
+        OwnedCleanup entry_owner{ownership.entry};
+        failure_call(reinterpret_cast<void*>(arm_admission.Rcx), &entry, &callback_value,
+                     progress_pair.data());
+    } catch (const std::runtime_error&) { callback_threw = true; }
+    Require(callback_threw == unwind_test && ownership.entry == 1 && ownership.callback == 1 &&
+        ownership.progress == 1 && ownership.false_callbacks == 1 && ownership.original_submissions == 0,
+        "caller cleans each value once on normal return or callback unwind without original submission");
+    if (unwind_test) {
+        Require(arm_snapshot().state == tf3vehicleobserver::CancellationArmState::claimed &&
+            arm_snapshot().callback_result_zero && !arm_snapshot().send_return && !arm_snapshot().post_send_body,
+            "callback unwind remains claimed unknown without completion receipts");
+        Require(arm_cancellation(&cancellation_request) == S::restart_disallowed,
+            "uncertain callback unwind cannot rearm");
+        Require(stop() == S::stopped, "unwind observer restored");
+        std::puts("owned-cancel-unwind=1 false-callback=1 original-submissions=0 caller-cleanup=1 unknown=1");
+        return 0;
+    }
+    std::puts("owned-cancel-normal=1 false-callback=1 original-submissions=0 caller-cleanup=1");
     syntheticTrapHere(&OwnedVehicleSendReturnSite, arm_admission);
     CONTEXT arm_post{};
     arm_post.Rsp = arm_admission.Rsp + 0x180;

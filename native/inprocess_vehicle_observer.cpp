@@ -23,6 +23,8 @@ constexpr DWORD kMarshalerReturnRva = 0xe11a17;
 constexpr DWORD kPostSendBodyRva = 0xe1bb48;
 constexpr DWORD kCallbackVtableRva = 0x373fa70;
 constexpr DWORD kCallbackInvokeRva = 0xe3e810;
+// Enabled only after the dedicated exact-40401 qualifier succeeds.
+std::atomic<bool> cancellation_40401{false};
 constexpr std::array<unsigned char, 3> kFactoryBytes{0x41, 0x8b, 0xd8}; // mov ebx,r8d
 constexpr std::array<unsigned char, 1> kFactoryPostBytes{0x90}; // nop after constructed output
 constexpr std::array<unsigned char, 3> kAdmissionBytes{0x48, 0x8b, 0xd3}; // mov rdx,rbx
@@ -515,8 +517,9 @@ bool SafeReadCheckedCallback(const CONTEXT* context, std::uintptr_t* implementat
         const auto target = *reinterpret_cast<const std::uintptr_t*>(original_table + 0x10);
         // Exact build-40396 PE pointers. The former third/fourth adapters have
         // multiple static candidates and remain rejected until identified.
-        const bool allowed_adapter =
-            (original_table == base + 0x367cc00 && target == base + 0x1201a0) ||
+        const bool allowed_adapter = cancellation_40401.load(std::memory_order_acquire)
+            ? (original_table == base + 0x3788840 && target == base + 0x27c8820)
+            : (original_table == base + 0x367cc00 && target == base + 0x1201a0) ||
             (original_table == base + 0x367cb20 && target == base + 0x1201a0) ||
             (original_table == base + 0x367cc38 && target == base + 0x120410);
         if (!allowed_adapter || table != base + kCallbackVtableRva ||
@@ -1153,6 +1156,25 @@ Status Start40401Passive() noexcept {
             base + kAdmissionRva, base + kCallbackTailRva, base + kSendReturnRva,
             base + kMarshalerReturnRva, base + kPostSendBodyRva,
             GetModuleHandleW(nullptr), reinterpret_cast<std::uintptr_t>(base) + kCallbackContinuationRva, false);
+    }
+    ReleaseSRWLockExclusive(&lifecycle_lock);
+    return result;
+}
+
+Status Start40401CancellationExperiment() noexcept {
+    AcquireSRWLockExclusive(&lifecycle_lock);
+    Status result = active.load(std::memory_order_acquire) ? Status::already_started
+        : attempted ? Status::restart_disallowed : Status::unsupported_image;
+    if (result == Status::unsupported_image &&
+        tf3postobserver::Diagnose40401WithoutHooks() == tf3postobserver::Status::started) {
+        auto* base = reinterpret_cast<unsigned char*>(GetModuleHandleW(nullptr));
+        cancellation_40401.store(true, std::memory_order_release);
+        passive_only.store(false, std::memory_order_release);
+        result = StartSites(base + kFactoryRva, base + kFactoryPostRva,
+            base + kAdmissionRva, base + kCallbackTailRva, base + kSendReturnRva,
+            base + kMarshalerReturnRva, base + kPostSendBodyRva,
+            GetModuleHandleW(nullptr), reinterpret_cast<std::uintptr_t>(base) + kCallbackContinuationRva, false);
+        if (result != Status::started) cancellation_40401.store(false, std::memory_order_release);
     }
     ReleaseSRWLockExclusive(&lifecycle_lock);
     return result;

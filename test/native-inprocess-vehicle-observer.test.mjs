@@ -17,5 +17,14 @@ test('owned in-process vehicle observer correlates actual factory/submission tra
     const run=spawnSync(host,[dll],{cwd:root,windowsHide:true,encoding:'utf8',timeout:15_000});
     assert.ifError(run.error);
     assert.equal(run.status,0,run.stderr||run.stdout);
+    assert.match(run.stdout,/owned-cancel-normal=1 false-callback=1 original-submissions=0 caller-cleanup=1/);
     assert.match(run.stdout,/actual-traps=1 correlation=1 invalid-tag=1 mismatch=1 cross-thread=1 restored=1/);
+  });
+
+test('owned cancellation callback unwind cleans caller values once and never completes or rearms',
+  {skip:process.platform!=='win32'||!fresh()},()=>{
+    const run=spawnSync(host,[dll,'unwind'],{cwd:root,windowsHide:true,encoding:'utf8',timeout:15_000});
+    assert.ifError(run.error);
+    assert.equal(run.status,0,run.stderr||run.stdout);
+    assert.match(run.stdout,/owned-cancel-unwind=1 false-callback=1 original-submissions=0 caller-cleanup=1 unknown=1/);
   });
