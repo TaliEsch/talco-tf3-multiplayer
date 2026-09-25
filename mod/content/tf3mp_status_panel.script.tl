@@ -911,6 +911,9 @@ local function exchangePreparation() : nil
       if lineCreateOrderWire.decode(request) == nil then return nil end
       eventName = "tf3mp_prepare_line_create"
       payload.stationB = request.stationB
+    elseif request.commandType == "road.line.remove" then
+      eventName = "tf3mp_prepare_line_remove"
+      expectedCount = 14
     elseif request.commandType == "road.vehicle.assignLine" then
       if vehicleLineAssignWire.decode(request) == nil then return nil end
       eventName = "tf3mp_prepare_vehicle_line_assign"
@@ -1002,6 +1005,9 @@ local function dispatchExecutionAtUpdate() : nil
       eventName = "tf3mp_execute_vehicle_buy"
     elseif request.commandType == "road.line.create" then
       eventName = "tf3mp_execute_line_create"
+    elseif request.commandType == "road.line.remove" then
+      expectedCount = 14
+      eventName = "tf3mp_execute_line_remove"
     elseif request.commandType == "road.vehicle.assignLine" then
       eventName = "tf3mp_execute_vehicle_line_assign"
   end
@@ -1045,6 +1051,9 @@ local function exchangeExecution() : nil
       if lineCreateOrderWire.decode(request) == nil then return nil end
       eventName = "tf3mp_arm_line_create_hold"
       payload.stationB = request.stationB
+    elseif request.commandType == "road.line.remove" then
+      expectedCount = 14
+      eventName = "tf3mp_arm_line_remove_hold"
     elseif request.commandType == "road.vehicle.assignLine" then
       if vehicleLineAssignWire.decode(request) == nil then return nil end
       eventName = "tf3mp_arm_vehicle_line_assign_hold"
@@ -1090,7 +1099,7 @@ local function exchangeExecution() : nil
     or receipt.stage == "await_callback") then
     if (liveRequest.commandType == "road.stop.place" or liveRequest.commandType == "road.depot.build"
       or liveRequest.commandType == "road.vehicle.buy" or liveRequest.commandType == "road.line.create"
-      or liveRequest.commandType == "road.vehicle.assignLine")
+      or liveRequest.commandType == "road.line.remove" or liveRequest.commandType == "road.vehicle.assignLine")
       and coordinationSent == "" then
       -- This exchange already runs only every 30 GUI steps. Observe once per
       -- exchange so the held-world receipt can arrive before the deadline.
@@ -1100,6 +1109,7 @@ local function exchangeExecution() : nil
         if liveRequest.commandType == "road.depot.build" then observationEvent = "tf3mp_observe_depot_build" end
         if liveRequest.commandType == "road.vehicle.buy" then observationEvent = "tf3mp_observe_vehicle_buy" end
         if liveRequest.commandType == "road.line.create" then observationEvent = "tf3mp_observe_line_create" end
+        if liveRequest.commandType == "road.line.remove" then observationEvent = "tf3mp_observe_line_remove" end
         if liveRequest.commandType == "road.vehicle.assignLine" then observationEvent = "tf3mp_observe_vehicle_line_assign" end
         api.cmd.sendCommand(api.cmd.makeScriptingSendEventCmd("tf3mp_status_1::/tf3mp_status.gs", "tf3mp_engine_bridge", observationEvent, {
           nonce = bridgeNonce, operationId = executionSent }))
@@ -1152,6 +1162,13 @@ local function exchangeExecution() : nil
   elseif receipt.status == "ok" and receipt.snapshotVersion == 5 then
     if liveRequest.commandType ~= "road.vehicle.assignLine" then return nil end
     for _, key in ipairs({ "snapshotVersion", "hostSequence", "entity", "vehicleEntity", "lineEntity", "ownerCompanyEntity", "lineOwnerCompanyEntity" }) do
+      local number = receipt[key]
+      if type(number) ~= "number" or number < 0 or number > 2147483647 or number % 1 ~= 0 then return nil end
+      payload[key] = number
+    end
+  elseif receipt.status == "ok" and receipt.snapshotVersion == 6 then
+    if liveRequest.commandType ~= "road.line.remove" then return nil end
+    for _, key in ipairs({ "snapshotVersion", "hostSequence", "entity", "lineEntity", "ownerCompanyEntity" }) do
       local number = receipt[key]
       if type(number) ~= "number" or number < 0 or number > 2147483647 or number % 1 ~= 0 then return nil end
       payload[key] = number

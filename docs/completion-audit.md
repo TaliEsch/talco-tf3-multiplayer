@@ -1,5 +1,24 @@
 # Completion audit against the build prompt
 
+## Empty ROAD line removal source — 25 September 2026
+
+The opt-in `road.line.remove` path now runs from Host/queue admission through
+the participant, mailbox and game-side one-use held command. It accepts only a
+target-owned two-stop ROAD line with no assigned vehicles at prepare and
+immediately before send. A native callback alone cannot complete it: the
+held-world receipt requires both `entityExists=false` and absence from
+`lineSystem.getLines()`. Unknown outcomes consume the attempt and do not retry.
+This adapts installed TF3 declarations for `makeLineDestroyCmd`,
+`transportVehicleSystem.getLineVehicles` and `lineSystem.getLines`.
+The focused create/assign/remove/review tests passed 46/46; the 51-file mod
+review passed. No removal has run in TF3, and active-line removal or line edit
+is not yet qualified. The full suite exposed six stale subscription-version
+source assertions, which were updated and passed 25/25 in a focused rerun. A
+direct full-suite attempt then reached the known native observer debugger
+teardown failures (target survival/Win32 121); the redirected run had also
+produced broad native-spawn failures, so its incomplete result is not used as
+line-removal evidence.
+
 ## Build 40401 real-game boundary hold/release — 25 September 2026
 
 An explicit boundary-only runtime loaded in TF3 PID 17360 against executable

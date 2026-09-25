@@ -35,6 +35,13 @@ Twenty-four focused tests and 50-file mod review pass. It has not run in TF3;
 validate it with the ordered road service on a disposable save after the native
 build gate is qualified.
 
+An opt-in `road.line.remove` path now handles an empty target-owned two-stop
+ROAD line through Host ordering, held one-use native destroy, callback and
+observed entity/getLines absence. It rechecks ownership and no assigned
+vehicles immediately before send. Focused create/assign/remove/review tests
+pass 46/46 and the 51-file mod review passes. This is source/model evidence;
+the deletion and broader line-edit semantics still need real TF3 checks.
+
 Steam updated TF3 to build 40401 (SHA-256
 `6ABDEDD8FBBD3117FE909D8747BD2690A76B9098A251AABB1AE9BA6B4F9659CA`)
 during the funded depot and vehicle purchase launch. The launcher stopped at

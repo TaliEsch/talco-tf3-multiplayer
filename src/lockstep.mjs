@@ -7,6 +7,7 @@ import { parseRoadStopOrderPayload } from './road-stop-order-payload.mjs';
 import {parseDepotBuildOrderPayload} from './depot-build-order-payload.mjs';
 import {parseVehicleBuyOrderPayload} from './vehicle-buy-order-payload.mjs';
 import {parseLineCreateOrderPayload} from './line-create-order-payload.mjs';
+import {parseLineRemoveOrderPayload} from './line-remove-order-payload.mjs';
 import {parseVehicleLineAssignOrderPayload} from './vehicle-line-assign-order-payload.mjs';
 
 export class ProtocolError extends Error {
@@ -21,11 +22,12 @@ export class HostAuthority {
   #lastScheduledUpdate = 0;
   constructor({ sessionId, buildHash, modManifestHash, leadUpdates = MIN_SCHEDULE_LEAD,
     resolveEntityOwner = () => null, enableDepotBuild=false, enableVehicleBuy=false,
-    enableLineCreate=false,enableVehicleLineAssign=false }) {
+    enableLineCreate=false,enableLineRemove=false,enableVehicleLineAssign=false }) {
     if (!Number.isSafeInteger(leadUpdates) || leadUpdates < MIN_SCHEDULE_LEAD || leadUpdates > MAX_SCHEDULE_LEAD) throw new RangeError("invalid leadUpdates");
     if(typeof enableDepotBuild!=='boolean')throw new TypeError('invalid depot capability');
     if(typeof enableVehicleBuy!=='boolean')throw new TypeError('invalid vehicle purchase capability');
     if(typeof enableLineCreate!=='boolean')throw new TypeError('invalid line creation capability');
+    if(typeof enableLineRemove!=='boolean')throw new TypeError('invalid line removal capability');
     if(typeof enableVehicleLineAssign!=='boolean')throw new TypeError('invalid vehicle line assignment capability');
     this.sessionId = sessionId;
     this.buildHash = buildHash;
@@ -35,6 +37,7 @@ export class HostAuthority {
     this.enableDepotBuild=enableDepotBuild;
     this.enableVehicleBuy=enableVehicleBuy;
     this.enableLineCreate=enableLineCreate;
+    this.enableLineRemove=enableLineRemove;
     this.enableVehicleLineAssign=enableVehicleLineAssign;
   }
   admit({ displayName, buildHash, modManifestHash }) {
@@ -95,6 +98,7 @@ export class HostAuthority {
       && request.commandType !== 'road.stop.place' && request.commandType !== 'road.depot.build'
       && request.commandType !== 'road.vehicle.buy'
       && request.commandType !== 'road.line.create'
+      && request.commandType !== 'road.line.remove'
       && request.commandType !== 'road.vehicle.assignLine') {
       throw new ProtocolError("UNSUPPORTED_COMMAND", "command type is not enabled");
     }
@@ -150,6 +154,16 @@ export class HostAuthority {
       if(secondOwner===null||secondOwner===undefined)throw new ProtocolError('OWNERSHIP_UNAVAILABLE','second station ownership is unavailable');
       if(secondOwner!==player.companyEntity)throw new ProtocolError('NOT_OWNER','second station belongs to a different company');
     }
+    if(request.commandType==='road.line.remove'){
+      if(!this.enableLineRemove)throw new ProtocolError('UNSUPPORTED_COMMAND','road line removal is not qualified');
+      if(!Number.isSafeInteger(request.targetEntity)||request.targetEntity<1
+        ||request.targetEntity>2147483647)throw new ProtocolError('BAD_ENTITY','invalid line entity');
+      const lineOwner=this.resolveEntityOwner(request.targetEntity);
+      if(lineOwner===null||lineOwner===undefined)throw new ProtocolError('OWNERSHIP_UNAVAILABLE','line ownership is unavailable');
+      if(lineOwner!==player.companyEntity)throw new ProtocolError('NOT_OWNER','line belongs to a different company');
+      try{roadPayload=parseLineRemoveOrderPayload(request.payload,player.companyEntity,request.targetEntity);}
+      catch{throw new ProtocolError('BAD_LINE_REMOVE_PAYLOAD','invalid bounded line removal payload');}
+    }
     if(request.commandType==='road.vehicle.assignLine'){
       if(!this.enableVehicleLineAssign)throw new ProtocolError('UNSUPPORTED_COMMAND','road vehicle line assignment is not qualified');
       if(!Number.isSafeInteger(request.targetEntity)||request.targetEntity<1
@@ -196,18 +210,21 @@ export class CommandQueue {
   #enableDepotBuild;
   #enableVehicleBuy;
   #enableLineCreate;
+  #enableLineRemove;
   #enableVehicleLineAssign;
   constructor({ maxPending = 4096,enableDepotBuild=false,enableVehicleBuy=false,
-    enableLineCreate=false,enableVehicleLineAssign=false } = {}) {
+    enableLineCreate=false,enableLineRemove=false,enableVehicleLineAssign=false } = {}) {
     if (!Number.isSafeInteger(maxPending) || maxPending < 1 || maxPending > MAX_SESSION_MESSAGES) throw new RangeError("invalid queue capacity");
     if(typeof enableDepotBuild!=='boolean')throw new TypeError('invalid depot capability');
     if(typeof enableVehicleBuy!=='boolean')throw new TypeError('invalid vehicle purchase capability');
     if(typeof enableLineCreate!=='boolean')throw new TypeError('invalid line creation capability');
+    if(typeof enableLineRemove!=='boolean')throw new TypeError('invalid line removal capability');
     if(typeof enableVehicleLineAssign!=='boolean')throw new TypeError('invalid vehicle line assignment capability');
     this.#maxPending = maxPending;
     this.#enableDepotBuild=enableDepotBuild;
     this.#enableVehicleBuy=enableVehicleBuy;
     this.#enableLineCreate=enableLineCreate;
+    this.#enableLineRemove=enableLineRemove;
     this.#enableVehicleLineAssign=enableVehicleLineAssign;
   }
   get fault() { return this.#fault?.code ?? null; }
@@ -272,6 +289,12 @@ export class CommandQueue {
       if(resolveEntityOwner(command.targetEntity)!==mappedOwner
         ||resolveEntityOwner(payload.stationB)!==mappedOwner)
         throw new ProtocolError('AUTH_RECHECK_FAILED','station ownership changed before queue admission');
+    } else if(command.commandType==='road.line.remove'){
+      if(!this.#enableLineRemove)throw new ProtocolError('AUTH_RECHECK_FAILED','road line removal is not qualified');
+      try{parseLineRemoveOrderPayload(command.payload,mappedOwner,command.targetEntity);}
+      catch{throw new ProtocolError('AUTH_RECHECK_FAILED','accepted line removal payload changed');}
+      if(resolveEntityOwner(command.targetEntity)!==mappedOwner)
+        throw new ProtocolError('AUTH_RECHECK_FAILED','line ownership changed before queue admission');
     } else if(command.commandType==='road.vehicle.assignLine'){
       if(!this.#enableVehicleLineAssign)throw new ProtocolError('AUTH_RECHECK_FAILED','road vehicle line assignment is not qualified');
       let payload;
@@ -316,6 +339,9 @@ export class CommandQueue {
         && (entry.resolveEntityOwner(next.targetEntity)!==entry.companyEntity
           ||entry.resolveEntityOwner(next.payload.stationB)!==entry.companyEntity))
         this.#stop('AUTH_RECHECK_FAILED','station ownership changed before execution');
+      if(next.commandType==='road.line.remove'
+        && entry.resolveEntityOwner(next.targetEntity)!==entry.companyEntity)
+        this.#stop('AUTH_RECHECK_FAILED','line ownership changed before execution');
       if(next.commandType==='road.vehicle.assignLine'
         && (entry.resolveEntityOwner(next.targetEntity)!==entry.companyEntity
           ||entry.resolveEntityOwner(next.payload.lineEntity)!==entry.companyEntity))

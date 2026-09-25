@@ -18,6 +18,7 @@ const EXPECTED_CONTENT = Object.freeze([
   "tf3mp_line_create_order_execute.lua",
   "tf3mp_line_create_order_prepare.lua",
   "tf3mp_line_create_order_wire.lua",
+  "tf3mp_line_remove_order.lua",
   "tf3mp_load_probe.script.lua",
   "tf3mp_native_controls.res.lua",
   "tf3mp_native_controls.script.tl",
@@ -141,6 +142,7 @@ export async function validateReviewPackage(root) {
     ['tf3mp_line_create_order_execute.lua', 'cbf9305d92c54a344d419a9e78bb582a5b2ad70c20263c461bc1c1a2246458b7'],
     ['tf3mp_line_create_order_prepare.lua', '8b14ef165314238b56a2f63019701faf76f88cc7665185265129029bbead1f2a'],
     ['tf3mp_line_create_order_wire.lua', '14fc690e53a97eb50e545c3d874adb65d0ec00c8e3b16a7c2e85884b8cc66502'],
+    ['tf3mp_line_remove_order.lua', '319c86380d677fd35013644384061cbead10690dff2af85b68e7ecf5b6818a72'],
     ['tf3mp_depot_build_order_readback.lua', 'ee8fafa52736e95d639cebf657aecc11454ca179c710a88b55e3d73068904a9f'],
     ['tf3mp_road_stop_simple_prepare.lua', 'b9de96bbb92f212b3d8cc83d97564f2b7a814cfd6aa65ac4116ad9208add382c'],
     ['tf3mp_road_stop_simple_dispatch.lua', 'c3b689756b181097b62ecc2b0477d490075a9e4e1d477be7ddb587f1632d5a6b'],
@@ -210,7 +212,7 @@ export async function validateReviewPackage(root) {
   for (const event of ["tf3mp_engine_probe", "tf3mp_get_engine_receipt", "tf3mp_get_status", "tf3mp_vehicle_command", "tf3mp_get_vehicle_receipt", "tf3mp_company_probe", "tf3mp_get_company_receipt", "tf3mp_finance_probe", "tf3mp_get_finance_receipt"]) {
     if (!gameScript.includes(`state:subscribeToEvent("${event}")`)) throw new Error(`missing script event subscription: ${event}`);
   }
-  if (!gameScript.includes("current.eventSubscriptionsVersion ~= 28")) throw new Error("missing event subscription migration");
+  if (!gameScript.includes("current.eventSubscriptionsVersion ~= 29")) throw new Error("missing event subscription migration");
   for(const event of ['tf3mp_inspect_road_preflight','tf3mp_get_road_preflight'])
     if(!gameScript.includes(`state:subscribeToEvent("${event}")`))throw new Error('missing road preflight subscription');
   for (const event of ['tf3mp_native_road_stop_replay', 'tf3mp_get_native_road_stop_replay']) {
@@ -414,6 +416,25 @@ export async function validateReviewPackage(root) {
     'observationEvent = "tf3mp_observe_line_create"',
     'receipt.snapshotVersion == 4'])
     if(!panelScript.includes(marker))throw new Error('ordered line create GUI route is missing');
+  const removeSource=await readFile(path.join(absoluteRoot,'content','tf3mp_line_remove_order.lua'),'utf8');
+  for(const marker of ['current.nativeLineRemoveAttempted=true','barrier.phase="consumed"',
+    'not live(api,r) then','api.cmd.makeLineDestroyCmd(r.entity)',
+    'receipt.stage="await_world"','api.engine.entityExists(work.request.entity)==true or found'])
+    if(!removeSource.includes(marker))throw new Error('ordered line remove safety check is missing');
+  for(const marker of ['state:subscribeToEvent("tf3mp_prepare_line_remove")',
+    'state:subscribeToEvent("tf3mp_arm_line_remove_hold")',
+    'state:subscribeToEvent("tf3mp_execute_line_remove")',
+    'state:subscribeToEvent("tf3mp_observe_line_remove")',
+    'lineRemoveOrder.prepare(state, param as table, api)',
+    'lineRemoveOrder.arm(state, param as table, api)',
+    'lineRemoveOrder.execute(state, param as table, api)',
+    'lineRemoveOrder.observe(state, api)'])
+    if(!gameScript.includes(marker))throw new Error('ordered line remove game route is missing');
+  for(const marker of ['eventName = "tf3mp_prepare_line_remove"',
+    'eventName = "tf3mp_arm_line_remove_hold"',
+    'eventName = "tf3mp_execute_line_remove"',
+    'observationEvent = "tf3mp_observe_line_remove"','receipt.snapshotVersion == 6'])
+    if(!panelScript.includes(marker))throw new Error('ordered line remove GUI route is missing');
   const assignSource=await readFile(path.join(absoluteRoot,'content','tf3mp_vehicle_line_assign_order.lua'),'utf8');
   for(const marker of ['current.nativeVehicleLineAssignAttempted=true',
     'barrier.phase="consumed"','binding.phase="execution_unknown"',

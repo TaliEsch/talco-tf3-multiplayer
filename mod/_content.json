@@ -14,6 +14,7 @@
     "tf3mp_line_create_order_execute.lua",
     "tf3mp_line_create_order_prepare.lua",
     "tf3mp_line_create_order_wire.lua",
+    "tf3mp_line_remove_order.lua",
     "tf3mp_load_probe.script.lua",
     "tf3mp_native_controls.res.lua",
     "tf3mp_native_controls.script.tl",
