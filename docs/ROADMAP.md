@@ -2,9 +2,11 @@
 
 ## Held economy readback extension — 25 September 2026
 
-The ordered Stop readback now carries the local company's balance from the
-same paused engine observation and independently checks it in the game-side
-finance API, alongside the acting company's native debit. Distinct target and
+For separate companies, the ordered Stop readback carries the local company's
+balance from the same paused engine observation and independently checks it
+in the game-side finance API, alongside the acting company's native debit.
+When the local company acted, it uses the native post-Stop balance because the
+observation may precede the action within that update. Distinct target and
 local balances and a mismatched local balance pass/fail in focused fixtures.
 This extension is not yet TF3 verified. The next controlled game batch should
 exercise it while extending the separate-company road loop; two-instance

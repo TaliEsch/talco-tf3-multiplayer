@@ -2,10 +2,11 @@
 
 ## Independent local-company economy check — 25 September 2026
 
-The ordered Stop readback now binds a paused engine observation of the local
-company balance to the nonce-bound request and checks that balance with a
-fresh game-side finance read. It separately retains the acting company's
-signed native debit. Distinct-company balance and mismatch fixtures passed;
+For a separate acting company, the ordered Stop readback binds a paused engine
+observation of the local company balance to the nonce-bound request and checks
+that balance with a fresh game-side finance read. For a local-company action,
+it uses the native post-Stop balance because the observation may precede the
+action within that update. Distinct-company balance and mismatch fixtures passed;
 18 focused tests passed and mod review accepted the revised source. No TF3
 process was launched for this change, so the previous one-engine Stop remains
 the latest live result. Stage 7 service and economy acceptance remains open.

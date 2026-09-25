@@ -68,5 +68,16 @@ test('bridge obtains one receipt while held and removes request',async()=>{
       localBalance:issued.localBalance,localBalanceNegative:issued.localBalanceNegative}));
     assert.equal((await awaiting).code,'observed');
     await assert.rejects(readFile(path.join(directory,'ordered_road_readback_request.lua')),{code:'ENOENT'});
+    const localAction=bridge.inspectOrderedRoadReadback({...request,balance:53000,timeoutMs:1000});
+    await until(async()=>{try{return parseFlatDataFile(await readFile(path.join(directory,
+      'ordered_road_readback_request.lua'),'utf8')).requestId>issued.requestId;}catch{return false;}});
+    const localIssued=parseFlatDataFile(await readFile(path.join(directory,
+      'ordered_road_readback_request.lua'),'utf8'));
+    assert.equal(localIssued.localBalance,53000);
+    assert.equal(localIssued.localBalanceNegative,0);
+    await writeFile(path.join(directory,'ordered_road_readback_receipt.lua'),lua({
+      ...observed,nonce:bridge.nonce,requestId:localIssued.requestId,
+      balance:53000,localBalance:53000}));
+    assert.equal((await localAction).code,'observed');
   }finally{await bridge.close();await rm(root,{recursive:true,force:true});}
 });
