@@ -28,6 +28,7 @@ import {checkRoadStopReplayIdentity} from './road-stop-replay-case.mjs';
 import {publishRoadStopReplayRequest,readRoadStopReplayReceipt} from './road-stop-replay-mailbox.mjs';
 import {parseVehicleDiscoveryReceipt} from './vehicle-discovery-receipt.mjs';
 import {parseRoadPreflightReceipt} from './road-preflight-receipt.mjs';
+import {parseOrderedRoadReadback} from './ordered-road-readback.mjs';
 import {setTimeout as delay} from 'node:timers/promises';
 
 const LIMIT = 4096;
@@ -123,6 +124,7 @@ export async function startGameBridge({ directory, logger = () => {}, intervalMs
   let vehicleTest = null;
   let vehicleDiscoveryBusy = false;
   let roadPreflightBusy = false;
+  let orderedRoadReadbackBusy = false;
   let singleStopPermitBusy = false;
   let pauseTest = null;
   let controlLease = null;
@@ -784,6 +786,59 @@ export async function startGameBridge({ directory, logger = () => {}, intervalMs
         roadPreflightBusy=false;
       }
     },
+    async inspectOrderedRoadReadback({hostSequence,company,sourceRoad,road,stop,update,
+      balance,charge,timeoutMs=10000}={}){
+      if(orderedRoadReadbackBusy)throw new Error('ORDERED_ROAD_READBACK_BUSY');
+      if(![hostSequence,company,sourceRoad,road,stop].every(n=>Number.isSafeInteger(n)&&n>0&&n<=2147483647)
+        ||!Number.isSafeInteger(update)||update<0||update>2147483647
+        ||!Number.isSafeInteger(balance)||balance<0
+        ||!Number.isSafeInteger(charge)||charge<1
+        ||!Number.isSafeInteger(timeoutMs)||timeoutMs<100||timeoutMs>30000)
+        throw new TypeError('INVALID_ORDERED_ROAD_READBACK_REQUEST');
+      orderedRoadReadbackBusy=true;
+      try{
+        const observationDeadline=Date.now()+Math.min(timeoutMs,3000);
+        while(!stopped&&Date.now()<observationDeadline){
+          const observation=observations.status;
+          if(observation.available&&observation.sample.speedup===0
+            &&observation.sample.updateCount===update
+            &&observation.sample.companyEntity===company)break;
+          await delay(50);
+        }
+        const start=pending.then(async()=>{
+          if(stopped||!connected||!coordinationLease?.active)
+            throw new Error('ORDERED_ROAD_READBACK_CONTEXT_LOST');
+          const observation=observations.status;
+          if(!observation.available||observation.sample.speedup!==0
+            ||observation.sample.updateCount!==update
+            ||observation.sample.companyEntity!==company)
+            throw new Error('ORDERED_ROAD_READBACK_CONTEXT_LOST');
+          const requestId=++requestSequence;
+          const request={schemaVersion:1,kind:'ordered_road_readback_request',nonce,
+            requestId,hostSequence,company,sourceRoad,road,stop,update,balance,charge};
+          await publish(directory,'ordered_road_readback_request.lua',request);
+          return request;
+        });
+        pending=start.catch(()=>{});
+        const request=await start;
+        const deadline=Date.now()+timeoutMs;
+        while(!stopped&&Date.now()<deadline){
+          const observation=observations.status;
+          if(!connected||!coordinationLease?.active||!observation.available
+            ||observation.sample.speedup!==0||observation.sample.updateCount!==update)
+            throw new Error('ORDERED_ROAD_READBACK_CONTEXT_LOST');
+          try{
+            return parseOrderedRoadReadback(await readBounded(directory,
+              'ordered_road_readback_receipt.lua'),request);
+          }catch{}
+          await delay(50);
+        }
+        throw new Error(stopped?'ORDERED_ROAD_READBACK_CLOSED':'ORDERED_ROAD_READBACK_TIMEOUT');
+      }finally{
+        await unlink(path.join(directory,'ordered_road_readback_request.lua')).catch(()=>{});
+        orderedRoadReadbackBusy=false;
+      }
+    },
     get haltState() { return haltTest?.phase ?? "not_requested"; },
     get coordinationLeaseState() { return coordinationLease?.phase ?? "not_started"; },
     get coordinatorSetup() {
@@ -1262,6 +1317,7 @@ export async function startGameBridge({ directory, logger = () => {}, intervalMs
       for (const name of ["vehicle_intent.lua", "vehicle_command.lua", "vehicle_receipt.lua"]) await unlink(path.join(directory, name)).catch(() => {});
       await unlink(path.join(directory, 'vehicle_discovery_request.lua')).catch(() => {});
       await unlink(path.join(directory, 'road_preflight_request.lua')).catch(() => {});
+      await unlink(path.join(directory, 'ordered_road_readback_request.lua')).catch(() => {});
       await unlink(path.join(directory, 'stop_permit_request.lua')).catch(() => {});
       await unlink(path.join(directory, 'stop_permit_receipt.lua')).catch(() => {});
       await unlink(path.join(directory, "bridge.lua")).catch(() => {});

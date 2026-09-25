@@ -84,7 +84,7 @@ export async function createLocalCoordinatorRun({directory,bridge,playerId,compa
     send:(kind,payload)=>reports.push({kind,payload})});
   event(roadStop?'LOCAL_ONLY_ONE_ROAD_STOP':'LOCAL_ONLY_NO_BUILDING_OR_NATIVE_ACTIONS');await persist();
   const roster=[...companies].map(([playerId,companyEntity])=>({playerId,companyEntity}));
-  function processReport({kind,payload}) {
+  async function processReport({kind,payload}) {
     if(kind==='participant_ready') {
       // Do not release startup until actual local controls acknowledge acquisition.
       if(!bridge.coordinationControlsLocked){reports.unshift({kind,payload});return false;}
@@ -110,6 +110,19 @@ export async function createLocalCoordinatorRun({directory,bridge,playerId,compa
         ||!Number.isSafeInteger(state.roadStop?.chargedCost)||state.roadStop.chargedCost<1
         ||!Number.isSafeInteger(state.company?.balance)))
         throw new Error('ACCEPTED_ROAD_POSTCONDITION_MISSING');
+      if(roadStop){
+        const readback=await bridge.inspectOrderedRoadReadback({hostSequence:payload.hostSequence,
+          company:state.roadStop.ownerCompanyEntity,
+          sourceRoad:state.roadStop.sourceRoadEntity,road:state.roadStop.roadEntity,
+          stop:state.roadStop.stopEntity,update:payload.updateCount,
+          balance:state.company.balance,charge:state.roadStop.chargedCost});
+        report.independentRoadReadback={code:readback.code,
+          ...(readback.stage?{stage:readback.stage}:{}),hostSequence:payload.hostSequence,
+          updateCount:payload.updateCount};
+        event('INDEPENDENT_ROAD_READBACK',report.independentRoadReadback);
+        await persist();
+        if(readback.code!=='observed')throw new Error('ORDERED_ROAD_READBACK_UNKNOWN');
+      }
       for(const member of roster)coordinator.applied(member.playerId,payload);
       report.checks.push({hostSequence:payload.hostSequence,updateCount:payload.updateCount,stateHash:payload.stateHash,
         ...(roadStop?{roadPostcondition:{sourceRoadEntity:state.roadStop.sourceRoadEntity,
@@ -161,7 +174,7 @@ export async function createLocalCoordinatorRun({directory,bridge,playerId,compa
       }
     }
     // Bounded queue draining prevents callbacks from recursively applying work.
-    for(let i=0;i<32&&reports.length;i++)if(!processReport(reports.shift()))break;
+    for(let i=0;i<32&&reports.length;i++)if(!await processReport(reports.shift()))break;
     for(let i=0;i<32&&messages.length;i++) {
       const message=messages.shift();
       if(!adapter.receive(message.kind,message.payload)){fail(adapter.fault??'MESSAGE_REJECTED');return;}

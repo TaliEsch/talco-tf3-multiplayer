@@ -10,6 +10,7 @@ end
 local roadCapture = ug_require "tf3mp_status_1::/tf3mp_road_capture.lua" as Tf3MpCaptureEncoding
 local record Tf3MpRoadStopOutcome
   probe : function(any, table) : table
+  probeOrdered : function(any, table) : table
 end
 local roadStopOutcome = ug_require "tf3mp_status_1::/tf3mp_road_stop_outcome.lua" as Tf3MpRoadStopOutcome
 local roadStopOrderWire = ug_require "tf3mp_status_1::/tf3mp_road_stop_order_wire.lua" as table
@@ -77,6 +78,7 @@ local probeResult = "diagnostics"
 local vehiclePhaseKey = ""
 local vehicleDiscoverySent : integer = 0
 local roadPreflightSent : integer = 0
+local orderedRoadReadbackSent : integer = 0
 local companyProbeSent : integer = 0
 local phase2FundingSent : integer = 0
 local phase2FundingReported : integer = 0
@@ -385,6 +387,12 @@ local function exchangeStopReadback() : nil
 end
 local outcomeFinished = false
 local outcomeSteps : integer = 0
+local function userdataExists(name : string) : boolean
+  for _, file in ipairs(app.getAllUserdata("tf3mp_status_1")) do
+    if file == name or file == name .. ".lua" then return true end
+  end
+  return false
+end
 local function exchangeRoadOutcome() : nil
   if outcomeFinished or #bridgeNonce ~= 32 then return nil end
   outcomeSteps = outcomeSteps + 1
@@ -396,8 +404,21 @@ local function exchangeRoadOutcome() : nil
   app.saveUserdata("tf3mp_status_1", "road_stop_outcome_receipt", result)
   return nil
 end
+local function exchangeOrderedRoadReadback() : nil
+  if #bridgeNonce ~= 32 or not userdataExists("ordered_road_readback_request") then return nil end
+  local request = app.loadUserdata("tf3mp_status_1", "ordered_road_readback_request")
+  if type(request) ~= "table" or request.kind ~= "ordered_road_readback_request"
+    or request.nonce ~= bridgeNonce or type(request.requestId) ~= "number"
+    or request.requestId < 1 or request.requestId > 2147483647
+    or request.requestId % 1 ~= 0 or request.requestId <= orderedRoadReadbackSent then return nil end
+  orderedRoadReadbackSent = request.requestId as integer
+  local result = roadStopOutcome.probeOrdered(api, request as table)
+  app.saveUserdata("tf3mp_status_1", "ordered_road_readback_receipt", result)
+  return nil
+end
 local function flushRoadCapture() : nil
   pcall(exchangeRoadOutcome)
+  pcall(exchangeOrderedRoadReadback)
   if not preActionFinished then
     local probeOk = pcall(exchangeRoadPreAction)
     if not probeOk then preActionFinished = true end
@@ -433,13 +454,6 @@ local function restoreSpeedControls() : nil
   end
   controlFinished = true
   return nil
-end
-
-local function userdataExists(name : string) : boolean
-  for _, file in ipairs(app.getAllUserdata("tf3mp_status_1")) do
-    if file == name or file == name .. ".lua" then return true end
-  end
-  return false
 end
 
 -- The dispatcher validates again, but never forward userdata-derived tables
@@ -2122,6 +2136,7 @@ local function exchangeTelemetry(tickCount : integer, updateCount : integer) : s
     vehiclePhaseKey = ""
     vehicleDiscoverySent = 0
     roadPreflightSent = 0
+    orderedRoadReadbackSent = 0
     companyProbeSent = 0
     phase2FundingSent = 0
     phase2FundingReported = 0

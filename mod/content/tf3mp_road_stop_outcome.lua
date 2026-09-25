@@ -159,4 +159,70 @@ function M.probe(api, request)
   if ok then return result end
   return {code="unknown", nonce=type(request) == "table" and request.nonce or "", stage=progress.stage}
 end
+
+-- Independent, targeted readback while an ordered action remains held. The
+-- engine execution receipt supplies IDs, but this query reads the live world
+-- through the GUI API and never sends a construction command.
+function M.probeOrdered(api, request)
+  local progress = {stage="request"}
+  local function inspect()
+    if type(request) ~= "table" or getmetatable(request) ~= nil then fail() end
+    local allowed = {schemaVersion=true, kind=true, nonce=true, requestId=true,
+      hostSequence=true, company=true, sourceRoad=true, road=true, stop=true,
+      update=true, balance=true, charge=true}
+    local fields = 0
+    for key in pairs(request) do if not allowed[key] then fail() end; fields = fields + 1 end
+    if fields ~= 12 or request.schemaVersion ~= 1
+      or request.kind ~= "ordered_road_readback_request"
+      or type(request.nonce) ~= "string" or #request.nonce ~= 32
+      or not request.nonce:match("^[0-9a-f]+$")
+      or not entity(request.requestId) or not entity(request.hostSequence)
+      or not entity(request.company) or not entity(request.sourceRoad)
+      or not entity(request.road) or not entity(request.stop)
+      or request.sourceRoad == request.road
+      or not integer(request.update) or request.update < 0
+      or not integer(request.balance) or request.balance < 0
+      or not integer(request.charge) or request.charge < 1 then fail() end
+    progress.stage = "clock"
+    local world = api.engine.util.getWorld()
+    local speed = component(api, world, "GAME_SPEED")
+    local time = component(api, world, "GAME_TIME")
+    if not native(speed) or speed.speedup ~= 0
+      or not native(time) or time.updateCount ~= request.update
+      or api.engine.util.getPlayer() ~= request.company then fail() end
+    progress.stage = "balance"
+    if api.engine.util.finance.getPlayersBalance(request.company) ~= request.balance then fail() end
+    progress.stage = "source_road"
+    local sourcePresent = api.engine.entityExists(request.sourceRoad)
+    if type(sourcePresent) ~= "boolean" then fail() end
+    if sourcePresent and native(component(api, request.sourceRoad, "BASE_EDGE")) then fail() end
+    progress.stage = "stop"
+    if api.engine.entityExists(request.stop) ~= true then fail() end
+    local object = component(api, request.stop, "EDGE_OBJECT")
+    local owner = component(api, request.stop, "PLAYER_OWNED")
+    if not native(object) or not native(owner) or owner.player ~= request.company then fail() end
+    progress.stage = "attachment"
+    local street = api.engine.system and api.engine.system.streetSystem
+    if not street or street.getEdgeForEdgeObject(request.stop) ~= request.road then fail() end
+    local road = component(api, request.road, "BASE_EDGE")
+    if not native(road) or not dense(road.objects, 64) then fail() end
+    local attached = 0
+    for _, pair in ipairs(road.objects) do
+      if not dense(pair, 2) or #pair ~= 2 then fail() end
+      if pair[1] == request.stop then attached = attached + 1 end
+    end
+    if attached ~= 1 then fail() end
+    return {schemaVersion=1, kind="ordered_road_readback_receipt", code="observed",
+      nonce=request.nonce, requestId=request.requestId, hostSequence=request.hostSequence,
+      company=request.company, sourceRoad=request.sourceRoad, road=request.road,
+      stop=request.stop, update=request.update, balance=request.balance,
+      charge=request.charge}
+  end
+  local ok, result = pcall(inspect)
+  if ok then return result end
+  return {schemaVersion=1, kind="ordered_road_readback_receipt", code="unknown",
+    nonce=type(request)=="table" and request.nonce or "",
+    requestId=type(request)=="table" and request.requestId or 0,
+    stage=progress.stage}
+end
 return M

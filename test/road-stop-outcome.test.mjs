@@ -5,6 +5,53 @@ import fengari from 'fengari';
 
 const {lua,lauxlib,lualib,to_luastring}=fengari;
 const source=await readFile(new URL('../mod/content/tf3mp_road_stop_outcome.lua',import.meta.url),'utf8');
+test('ordered GUI exchange resolves the local userdata helper before use',async()=>{
+  const panel=await readFile(new URL('../mod/content/tf3mp_status_panel.script.tl',import.meta.url),'utf8');
+  const helper=panel.indexOf('local function userdataExists(');
+  const exchange=panel.indexOf('local function exchangeOrderedRoadReadback(');
+  assert.ok(helper>=0&&exchange>helper);
+  assert.match(panel.slice(exchange,panel.indexOf('local function flushRoadCapture(',exchange)),
+    /roadStopOutcome\.probeOrdered\(api, request as table\)/);
+});
+function runOrdered(change=''){
+  const script=`local module=(function() ${source} end)()
+local request={schemaVersion=1,kind='ordered_road_readback_request',nonce=string.rep('a',32),
+  requestId=3,hostSequence=1,company=10,sourceRoad=24,road=25,stop=81,
+  update=50,balance=53652,charge=46348}
+local map={[81]=25};local components={EDGE_OBJECT={[81]={param=.5}},
+  PLAYER_OWNED={[81]={player=10}},BASE_EDGE={[25]={objects={{81,1}}}}}
+local api={type={ComponentType={EDGE_OBJECT='EDGE_OBJECT',PLAYER_OWNED='PLAYER_OWNED',
+  BASE_EDGE='BASE_EDGE',GAME_SPEED='GAME_SPEED',GAME_TIME='GAME_TIME'}},
+  engine={entityExists=function(id)return id==81 or id==25 end,
+    getComponent=function(id,kind)if id==24 and not components.BASE_EDGE[24]then error('absent entity')end
+      if kind=='GAME_SPEED'then return{speedup=0}end
+      if kind=='GAME_TIME'then return{updateCount=50}end
+      return components[kind] and components[kind][id] end,
+    system={streetSystem={getEdgeForEdgeObject=function(id)return map[id] end}},
+    util={getWorld=function()return 0 end,getPlayer=function()return 10 end,
+      finance={getPlayersBalance=function()return 53652 end}}}}
+${change}
+local result=module.probeOrdered(api,request)
+return result.code,result.stage or ''`;
+  const L=lauxlib.luaL_newstate();lualib.luaL_openlibs(L);
+  try{
+    lua.lua_sethook(L,()=>lauxlib.luaL_error(L,to_luastring('TEST_INSTRUCTION_LIMIT')),lua.LUA_MASKCOUNT,1_000_000);
+    assert.equal(lauxlib.luaL_loadstring(L,to_luastring(script)),lua.LUA_OK,lua.lua_tojsstring(L,-1));
+    assert.equal(lua.lua_pcall(L,0,2,0),lua.LUA_OK,lua.lua_tojsstring(L,-1));
+    return {code:lua.lua_tojsstring(L,-2),stage:lua.lua_tojsstring(L,-1)};
+  }finally{lua.lua_close(L);}
+}
+test('ordered road readback independently checks held world and rejects mismatches',()=>{
+  assert.deepEqual(runOrdered(),{code:'observed',stage:''});
+  for(const [change,stage] of [
+    ['request.update=51','clock'],
+    ["local prior=api.engine.getComponent;api.engine.getComponent=function(id,kind)if kind=='GAME_SPEED'then return{speedup=1}end return prior(id,kind)end",'clock'],
+    ['api.engine.util.finance.getPlayersBalance=function()return 1 end','balance'],
+    ['components.BASE_EDGE[24]={objects={}};local prior=api.engine.entityExists;api.engine.entityExists=function(id)if id==24 then return true end return prior(id)end','source_road'],
+    ['components.PLAYER_OWNED[81].player=11','stop'],
+    ['map[81]=26','attachment'],
+  ])assert.deepEqual(runOrdered(change),{code:'unknown',stage});
+});
 function run(change='', includeMissing=false){
   const script=`local module=(function() ${source} end)()
 local request={nonce=string.rep('a',32),companyEntity=10,originalEdgeEntity=24,

@@ -1,5 +1,30 @@
 # Completion audit against the build prompt
 
+## Independent held-world road Stop readback — 25 September 2026
+
+One build-40396 TF3 process loaded the disposable source save and Production
+Host ordered one Stop on public road 53417 for company 3141. The host assigned
+sequence 1 and scheduled update 3044. The held engine receipt reported a
+successful native charge of 46348. Before release, an independent read-only
+probe reported `observed` at update 3044: original road gone, exactly one
+matching owned Stop 8919 attached to replacement road 8918, company balance
+40183205. The coordinator released at update 3044, confirmed native terminal
+halt and recorded `local_cycle_and_explicit_halt_passed` in
+`reports/local-batch-c79d3a01-deab-46dc-9fe8-963d7360e2e5/report.json`.
+The raw receipt is nonce and sequence bound. The source save SHA-256 remained
+`CCBF4BEB740E53323E06D20890FD029C8E174D3E85EFB06801A8B4275C762FB5`.
+This is one real engine with one simulated participant; the report correctly
+keeps `gameplayVerified` and `multiGameVerified` false. The first readback
+attempt timed out due to GUI helper declaration order. A second returned
+`unknown` because the probe queried a removed TF3 entity; a held-world
+diagnostic proved the Stop existed and the corrected probe passed on the third
+run. Neither failed attempt was retried within its game process. Real
+two-instance comparison remains deferred by the user.
+Focused readback and local-run tests passed 17/17, and mod review accepted the
+exact staged manifest. The integration suite was run; native Windows
+debugger/controller fixture failures remain, including detach and target
+survival checks. No full-suite pass is claimed.
+
 ## Production telemetry road probe and local-run gate — 25 September 2026
 
 With the production Host helper on exact TF3 build 40396, the revised GUI

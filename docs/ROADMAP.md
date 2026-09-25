@@ -2,6 +2,20 @@
 
 ## Current direction — 25 September 2026
 
+The held-boundary readback now passed in one real build-40396 TF3 process.
+Production Host ordered one public-road Stop as sequence 1, prepared it,
+executed it at scheduled update 3044, and obtained an independent read-only
+game-world receipt at the same paused update. TF3 reported original road
+53417 removed, one company-3141 Stop 8919 on replacement road 8918, native
+charge 46348 and balance 40183205. The coordinator then released and
+confirmed terminal halt. The disposable source save hash stayed unchanged;
+the report is `reports/local-batch-c79d3a01-deab-46dc-9fe8-963d7360e2e5/report.json`.
+This is one engine plus a simulated participant, so multi-instance gameplay
+remains unverified and the user has deferred that test. Next extend the
+verified ordering and readback path to separate-company road gameplay and
+economy while keeping the two-instance comparison ready for when permitted.
+Readiness is approximately 6.7/10, not stage 7 completion.
+
 The revised production Host telemetry panel returned two read-only TF3
 receipts on build 40396 without changing the source save: road 53417 was
 `found` for company 3141 with public owner 0 and revision 23 at update 2955;
