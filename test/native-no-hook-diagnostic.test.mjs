@@ -16,3 +16,11 @@ for (const mode of ['40401', '40396', '40401-extra', 'x'.repeat(64)]) {
     assert.match(run.stdout, new RegExp(`status=${mode === '40401' ? 6 : 11}\\b`));
   });
 }
+test('one-use handoff pipe selects no-hook diagnostic without inherited mode', {skip}, () => {
+  const run = spawnSync(host, [dll, '40401', 'pipe'],
+    {windowsHide: true, encoding: 'utf8', timeout: 15_000});
+  assert.ifError(run.error);
+  assert.equal(run.status, 0, run.stderr || run.stdout);
+  assert.match(run.stdout, /diagnostic-rejected-no-probe=1/);
+  assert.match(run.stdout, /status=6\b/);
+});

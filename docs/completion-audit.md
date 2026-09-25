@@ -1,5 +1,19 @@
 # Completion audit against the build prompt
 
+## Build 40401 no-hook diagnostic — 25 September 2026
+
+The exact build-40401 executable loaded a separate diagnostic runtime through
+the reversible two-DLL staging path. The one-use handoff selected the no-hook
+branch after Steam relaunched the process without optional environment values.
+The live trace reported `diagnostic-40401-no-hooks 0 0` and
+`runtime-returned 10 0`; no probe, gate or server trace was created. No save was
+loaded and no gameplay command ran. TF3 was closed, both hash-matched diagnostic
+DLLs were removed, and the disposable source save remained
+`CCBF4BEB740E53323E06D20890FD029C8E174D3E85EFB06801A8B4275C762FB5`.
+Private evidence: `reports/native-diag-40401-6c362928ca9047f4aee394cd4d385b7e/report.json`.
+This qualifies the mapped image/post-update site only. Vehicle and callback
+ABI, production hooks and funded purchase remain unverified on 40401.
+
 ## Build 40401 interrupted funded purchase attempt — 25 September 2026
 
 The first disposable-save launch passed the build-40396 native gate but used

@@ -293,8 +293,17 @@ extern "C" __declspec(dllexport) DWORD WINAPI Tf3InProcessRuntimeV1(
     const DWORD diagnostic_length = GetEnvironmentVariableW(
         L"TF3MP_NATIVE_DIAGNOSTIC", diagnostic, _countof(diagnostic));
     const DWORD diagnostic_error = GetLastError();
-    if (diagnostic_length != 0 || diagnostic_error != ERROR_ENVVAR_NOT_FOUND) {
-        if (diagnostic_length != 5 || wcscmp(diagnostic, L"40401") != 0) {
+    // The one-use handoff carries the pipe name across a Steam relaunch even
+    // when optional environment variables are lost. This prefix can select
+    // only the terminal no-hook diagnostic, never a production capability.
+    constexpr wchar_t diagnostic_pipe[] = L"tf3mp_diag40401_";
+    const bool handoff_diagnostic = pipe.compare(0, _countof(diagnostic_pipe) - 1,
+                                                  diagnostic_pipe) == 0;
+    const bool environment_diagnostic = diagnostic_length != 0 ||
+        diagnostic_error != ERROR_ENVVAR_NOT_FOUND;
+    if (handoff_diagnostic || environment_diagnostic) {
+        if (environment_diagnostic &&
+            (diagnostic_length != 5 || wcscmp(diagnostic, L"40401") != 0)) {
             TraceNativeStart(L"-runtime-diagnostic.txt", "diagnostic-invalid");
             return TF3_INPROCESS_RUNTIME_INVALID_DIAGNOSTIC;
         }

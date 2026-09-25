@@ -9,6 +9,13 @@ its exact-build gate before any command. Requalify the native boundary,
 callback and adapter sites for 40401 before resuming the disposable-save
 integration run; keep other Stage 7 road/economy work moving offline.
 
+A separate no-hook 40401 run now confirms the live image, mapped post-update
+site and mitigations, with runtime result 10. Steam dropped environment values
+on relaunch, but the one-use diagnostic handoff survived. No probe, boundary,
+vehicle traps or IPC server started. This does not qualify the vehicle ABI or
+permit production gameplay; the next experiment must establish those contracts
+before the funded purchase run.
+
 ## Ordered vehicle purchase integration — 25 September 2026
 
 The road vehicle purchase path is now opt-in from Host admission through a
