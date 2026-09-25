@@ -1,23 +1,28 @@
 import { SessionCoordinator } from './session-coordinator.mjs';
 import { createEngineSessionAdapter } from './engine-session-adapter.mjs';
 import { randomUUID } from 'node:crypto';
+import {parseRoadStopOrderPayload} from './road-stop-order-payload.mjs';
 
 // Controlled single-game exercise of the real adapter/coordinator. Other roster
 // members are explicitly receipt mirrors, NOT independent engines or peers.
 // This remains useful as a regression harness after real network integration.
 export async function createLocalCoordinatorRun({directory,bridge,playerId,companies,vehicleEntity,
   logger=()=>{},saveReport,now=Date.now,leadUpdates=60,metadata={},
-  beforeFirstCommand=null,commandLimit=4,nativeRuntime=null}) {
+  beforeFirstCommand=null,commandLimit=4,nativeRuntime=null,roadStopPayload=null}) {
   if(!(companies instanceof Map)||companies.size!==2||!companies.has(playerId)
     ||!Number.isSafeInteger(vehicleEntity)||vehicleEntity<0||vehicleEntity>2147483647
     ||!Number.isSafeInteger(leadUpdates)||leadUpdates<40||leadUpdates>150
     ||(beforeFirstCommand!==null&&typeof beforeFirstCommand!=='function')
     ||!Number.isSafeInteger(commandLimit)||commandLimit<1||commandLimit>4
-    ||typeof saveReport!=='function') throw new TypeError('INVALID_LOCAL_RUN_OPTIONS');
+    ||typeof saveReport!=='function'||roadStopPayload!==null&&(commandLimit!==1||beforeFirstCommand!==null))
+    throw new TypeError('INVALID_LOCAL_RUN_OPTIONS');
+  const roadStop=roadStopPayload===null?null:parseRoadStopOrderPayload(
+    roadStopPayload,vehicleEntity,companies.get(playerId));
   const messages=[],reports=[];
   const hash=value=>typeof value==='string'&&/^[a-f0-9]{64}$/.test(value)?value:null;
-  const report={schemaVersion:1,batchId:randomUUID(),scope:beforeFirstCommand
-    ?'single_game_cancelled_stop_with_receipt_mirror':'single_game_real_adapter_with_receipt_mirror',
+  const report={schemaVersion:1,batchId:randomUUID(),scope:roadStop
+    ?'single_game_ordered_road_stop_with_receipt_mirror':beforeFirstCommand
+      ?'single_game_cancelled_stop_with_receipt_mirror':'single_game_real_adapter_with_receipt_mirror',
     metadata:{gameHash:hash(metadata.gameHash),modManifestHash:hash(metadata.modManifestHash)},
     gameplayVerified:false,multiGameVerified:false,realEngineCount:1,simulatedParticipantCount:1,
     outcome:'in_progress',haltState:'not_requested',haltSource:nativeRuntime?'native_terminal_parked':'game_mailbox',
@@ -75,7 +80,7 @@ export async function createLocalCoordinatorRun({directory,bridge,playerId,compa
     healthy:()=>!closed&&!reportFailed&&phase!=='failed',controlsReady:()=>bridge.coordinationControlsLocked,
     disconnect:()=>{if(phase!=='stopping')fail(adapter?.fault??'ADAPTER_DISCONNECTED');},
     send:(kind,payload)=>reports.push({kind,payload})});
-  event('LOCAL_ONLY_NO_BUILDING_OR_NATIVE_ACTIONS');await persist();
+  event(roadStop?'LOCAL_ONLY_ONE_ROAD_STOP':'LOCAL_ONLY_NO_BUILDING_OR_NATIVE_ACTIONS');await persist();
   const roster=[...companies].map(([playerId,companyEntity])=>({playerId,companyEntity}));
   function processReport({kind,payload}) {
     if(kind==='participant_ready') {
@@ -165,13 +170,16 @@ export async function createLocalCoordinatorRun({directory,bridge,playerId,compa
         const measuredUpdatesPerSecond=(update-lastRelease.updateCount)*1000/(now()-lastRelease.at);
         const lead=Math.min(600,Math.max(leadUpdates,Math.ceil(measuredUpdatesPerSecond*10)));
         sequence++;
-        const resumeSpeed=[2,4,1,1][sequence-1];
+        const resumeSpeed=roadStop?1:[2,4,1,1][sequence-1];
         coordinator.setResumeSpeed(resumeSpeed);
         timings.set(sequence,{proposedAt:now(),proposedUpdate:update,scheduledUpdate:update+lead,sourceSpeed:speed,measuredUpdatesPerSecond,requestedReleaseSpeed:resumeSpeed});
         coordinator.propose({protocolVersion:2,hostSequence:sequence,scheduledUpdate:update+lead,
           originPlayerId:playerId,targetCompanyEntity:companies.get(playerId),targetEntity:vehicleEntity,
-          commandType:'vehicle.setRunning',payload:{running:sequence%2===0},clientSequence:sequence,requestMessageId:'local-run:'+sequence},update);
-        phase='cycling';event('VEHICLE_ACTION_SCHEDULED',{hostSequence:sequence,scheduledUpdate:update+lead,resumeSpeed});
+          commandType:roadStop?'road.stop.place':'vehicle.setRunning',
+          payload:roadStop??{running:sequence%2===0},clientSequence:sequence,
+          requestMessageId:'local-run:'+sequence},update);
+        phase='cycling';event(roadStop?'ROAD_STOP_SCHEDULED':'VEHICLE_ACTION_SCHEDULED',
+          {hostSequence:sequence,scheduledUpdate:update+lead,resumeSpeed});
       }
     }
     await persist();

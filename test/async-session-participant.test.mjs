@@ -123,10 +123,11 @@ test('receipt dated before its request is not accepted as merely delayed',()=>{
 
 test('failed execution preserves bounded timing evidence after halt replaces its pending request',()=>{
   const f=fixture();f.start();f.prepare();f.commit();
-  f.reply({status:'unknown',updateCount:109,held:false,secret:'not-for-report'});
+  f.reply({status:'unknown',updateCount:109,held:false,stage:'after_result_entities',secret:'not-for-report'});
   assert.equal(f.p.phase,'halted');
   assert.deepEqual(f.p.faultEvidence,{operation:'executeHeld',phase:'executing',receiptStatus:'unknown',
-    receiptUpdate:109,expectedUpdate:108,observedUpdate:100,held:false,hostSequence:1});
+    receiptUpdate:109,expectedUpdate:108,observedUpdate:100,held:false,hostSequence:1,
+    stage:'after_result_entities'});
   const copy=f.p.faultEvidence;copy.receiptUpdate=0;
   assert.equal(f.p.faultEvidence.receiptUpdate,109);
   f.reply({held:true,updateCount:110});

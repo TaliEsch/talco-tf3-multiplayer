@@ -82,17 +82,19 @@ lines.on('line',async line=>{
     host.on('exit',(code,signal)=>{process.stdout.write(`HOST_EXIT ${code??signal}\n`);host=null;hostReady=false;});
     return;
   }
-  if(command.startsWith('RUN ')&&host&&hostReady&&!runSent){
+  if((command.startsWith('RUN ')||command.startsWith('ROAD '))&&host&&hostReady&&!runSent){
     const [,second,entity]=command.split(/\s+/);
     if(!/^[1-9][0-9]*$/.test(second??'')||!/^[1-9][0-9]*$/.test(entity??''))
-      throw new Error('RUN_REQUIRES_SECOND_COMPANY_AND_VEHICLE_ENTITY');
+      throw new Error('RUN_REQUIRES_SECOND_COMPANY_AND_TARGET_ENTITY');
     runSent=true;
-    host.stdin.write(`coordinator-cancel-stop-confirmed ${second} ${entity}\n`);
+    host.stdin.write(command.startsWith('ROAD ')
+      ?`coordinator-road-stop-confirmed ${second} ${entity}\n`
+      :`coordinator-cancel-stop-confirmed ${second} ${entity}\n`);
     return;
   }
   if(command==='STOP'){
     host?.stdin.write('stop\n');
     return;
   }
-  process.stdout.write('Expected START_HOST, RUN <second-company> <vehicle-entity>, or STOP.\n');
+  process.stdout.write('Expected START_HOST, RUN <second-company> <vehicle-entity>, ROAD <second-company> <road-entity>, or STOP.\n');
 });

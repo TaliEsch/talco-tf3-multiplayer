@@ -1,5 +1,25 @@
 # Completion audit against the build prompt
 
+## First Host-ordered road Stop world outcome — 25 September 2026
+
+On TF3 build 40396, the production Host accepted sequence 1 for a road Stop
+and game preparation returned `ok`. The held game-side executor reached
+scheduled update 3238 and consumed its one-use barrier. Its execution receipt
+remained `unknown` with `held=false`; the coordinator reported
+`ENGINE_OUTCOME_UNKNOWN` and did not retry. The preserved source save was
+unchanged. A later read-only load of the separately saved outcome found one
+matching Stop 73730 owned by company 3141 on replacement road 9075, with the
+same source-road node IDs, endpoint positions and tangents. Company balance
+was $40,183,205, versus $40,393,094 before the action. The world therefore
+shows one paid Stop, while the production completion receipt does not prove
+success. There is no two-instance evidence. The next build carries bounded
+execution-stage diagnostics; focused tests and mod review pass, but that
+diagnostic revision has not run in TF3. The elevated integration suite ran
+1,016 tests: 1,009 passed, the same five native debugger/controller fixture
+tests failed, and two were skipped. The sandboxed attempt could not launch
+native fixtures and was interrupted after it stalled, so its failures are not
+counted as regressions.
+
 ## Ordered road Stop execution wiring — 25 September 2026
 
 Production Host now admits the bounded road action to its existing coordinator;

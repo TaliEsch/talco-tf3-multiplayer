@@ -64,23 +64,24 @@ local consumed=current.executionBarrier and current.executionBarrier.phase or ''
 local duplicate=executor.execute(state,request,api)
 if callback then callback({},true,{}) end
 return armed,executed,duplicate,consumed,current.executionReceipt.status or '',
- current.coordinationBinding.phase,sends,saves,current.executionReceipt.stopEntity or 0`;
+ current.coordinationBinding.phase,sends,saves,current.executionReceipt.stopEntity or 0,
+ current.executionReceipt.stage or ''`;
   const L=lauxlib.luaL_newstate();lualib.luaL_openlibs(L);
   try{
     lua.lua_sethook(L,()=>lauxlib.luaL_error(L,to_luastring('TEST_INSTRUCTION_LIMIT')),lua.LUA_MASKCOUNT,1_000_000);
     assert.equal(lauxlib.luaL_loadstring(L,to_luastring(script)),lua.LUA_OK,lua.lua_tojsstring(L,-1));
-    assert.equal(lua.lua_pcall(L,0,9,0),lua.LUA_OK,lua.lua_tojsstring(L,-1));
-    return {armed:lua.lua_toboolean(L,-9),executed:lua.lua_toboolean(L,-8),
-      duplicate:lua.lua_toboolean(L,-7),consumed:lua.lua_tojsstring(L,-6),
-      status:lua.lua_tojsstring(L,-5),phase:lua.lua_tojsstring(L,-4),
-      sends:lua.lua_tonumber(L,-3),saves:lua.lua_tonumber(L,-2),
-      stop:lua.lua_tonumber(L,-1)};
+    assert.equal(lua.lua_pcall(L,0,10,0),lua.LUA_OK,lua.lua_tojsstring(L,-1));
+    return {armed:lua.lua_toboolean(L,-10),executed:lua.lua_toboolean(L,-9),
+      duplicate:lua.lua_toboolean(L,-8),consumed:lua.lua_tojsstring(L,-7),
+      status:lua.lua_tojsstring(L,-6),phase:lua.lua_tojsstring(L,-5),
+      sends:lua.lua_tonumber(L,-4),saves:lua.lua_tonumber(L,-3),
+      stop:lua.lua_tonumber(L,-2),stage:lua.lua_tojsstring(L,-1)};
   }finally{lua.lua_close(L);}
 }
 
 test('held road execution consumes before one native send and correlates callback receipt',()=>{
   assert.deepEqual(run(),{armed:true,executed:true,duplicate:false,consumed:'consumed',
-    status:'ok',phase:'action_held',sends:1,saves:3,stop:73312});
+    status:'ok',phase:'action_held',sends:1,saves:8,stop:73312,stage:''});
   assert.equal(run('request.clientSequence=0;current.preparedCommand.clientSequence=0').status,'ok');
 });
 test('changed road, company, revision or receipt cannot authorize native send',()=>{
@@ -104,5 +105,12 @@ test('unknown callback preserves consumed latch without replay',()=>{
   assert.equal(observed.duplicate,false);
   assert.equal(observed.status,'unknown');
   assert.equal(observed.phase,'execution_unknown');
+  assert.equal(observed.sends,1);
+  assert.equal(observed.stage,'after_unknown');
+});
+test('readback failure records a bounded post-send stage without another command',()=>{
+  const observed=run("result.after=function()return{code='unknown',stage='result_entities'}end");
+  assert.equal(observed.stage,'after_result_entities');
+  assert.equal(observed.status,'unknown');
   assert.equal(observed.sends,1);
 });

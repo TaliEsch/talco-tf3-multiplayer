@@ -27,6 +27,7 @@ import {liveHostUpdateCount} from './live-host-clock.mjs';
 import {createTwoCompanyHostCapture} from './two-company-host-capture.mjs';
 import {createHostRosterCapture} from './host-roster-capture.mjs';
 import {createHostCancelledStop} from './host-cancelled-stop.mjs';
+import {ROAD_STOP_MODEL} from './road-stop-order-payload.mjs';
 import {createJoinEngineBootstrap} from './join-engine-bootstrap.mjs';
 import {fileURLToPath} from 'node:url';
 
@@ -257,17 +258,19 @@ if (command === "host" || command === "join") createInterface({ input: process.s
   }
   else if(coordinatorRun||coordinatorStarting) rawLog({level:"warn",event:"coordinator_local_run",code:"RUN_OWNS_HELPER_STOP_TO_EXIT"});
   else if(line.trim()==="coordinator-run-confirmed"||line.trim().startsWith("coordinator-run-confirmed ")
-    ||line.trim().startsWith('coordinator-cancel-stop-confirmed ')) {
+    ||line.trim().startsWith('coordinator-cancel-stop-confirmed ')
+    ||line.trim().startsWith('coordinator-road-stop-confirmed ')) {
     const args=line.trim().split(/\s+/);
     const cancelledRun=args[0]==='coordinator-cancel-stop-confirmed';
-    const selectInGame=!cancelledRun&&args.length===1;
+    const roadRun=args[0]==='coordinator-road-stop-confirmed';
+    const selectInGame=!cancelledRun&&!roadRun&&args.length===1;
     let secondCompany=Number(args[1]),vehicleEntity=Number(args[2]);
     let localCompany=bridge?.engineObservation.sample?.companyEntity;
-    if(!selectInGame&&(args.length!==3||![secondCompany,vehicleEntity,localCompany].every(n=>Number.isSafeInteger(n)&&n>=0&&n<=2147483647)||secondCompany===localCompany))
+    if(!selectInGame&&(args.length!==3||![secondCompany,vehicleEntity,localCompany].every(n=>Number.isSafeInteger(n)&&n>=0&&n<=2147483647)||secondCompany===localCompany||roadRun&&vehicleEntity<1))
       rawLog({level:"warn",event:"coordinator_local_run",code:"VERIFIED_COMPANY_AND_VEHICLE_REQUIRED"});
     else if(command!=="host"||!bridge||!hostInstance||vehicleTestActive||integrationBatch||batchStarting
       ||hostInstance.coordinator.phase!=='lobby'
-      ||(cancelledRun
+      ||(cancelledRun||roadRun
         ?nativeGate?.ready!==true||hostInstance.authority.players().length!==1
           ||hostInstance.authority.players()[0].playerId!==hostLocalParticipant?.connection?.playerId
         :hostInstance.authority.players().length!==0))
@@ -297,12 +300,14 @@ if (command === "host" || command === "join") createInterface({ input: process.s
         coordinatorRun=await createLocalCoordinatorRun({directory:opt["bridge-dir"],bridge,playerId:"local",
           companies:new Map([["local",localCompany],["receipt-mirror",secondCompany]]),vehicleEntity,
           logger:rawLog,saveReport,metadata:{gameHash:observedGameHash,modManifestHash:opt["mod-hash"]},
-          commandLimit:cancelledRun?1:4,
+          commandLimit:cancelledRun||roadRun?1:4,
+          roadStopPayload:roadRun?{edgeEntity:vehicleEntity,companyEntity:localCompany,
+            param:0.5,left:true,oneWay:false,model:ROAD_STOP_MODEL,name:'TalCo Road Stop'}:null,
           beforeFirstCommand:cancelledRun?({entity,company,recordCancellationEvidence})=>cancelOneLocalStop({
             nativeGate,bridge,entity,company,logger:value=>{
               rawLog(value);recordCancellationEvidence(value);
             }}):null,
-          nativeRuntime:cancelledRun?{
+          nativeRuntime:cancelledRun||roadRun?{
             client:nativeGate.client,binding:nativeGate.binding,
             sessionId:nativeGate.binding.sessionId,role:'host',logger:rawLog,
             gateControl:request=>nativeGate.gateControl(request),

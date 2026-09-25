@@ -235,6 +235,7 @@ export class AsyncSessionParticipant {
       expectedUpdate:r.command?.scheduledUpdate??r.updateCount??null,
       observedUpdate:this.#update,held:typeof p.held==='boolean'?p.held:null,
       hostSequence:r.command?.hostSequence??null,
+      ...(typeof p.stage==='string'&&/^[A-Za-z_]{1,48}$/.test(p.stage)?{stage:p.stage}:{}),
     };
     return accepted;
   }

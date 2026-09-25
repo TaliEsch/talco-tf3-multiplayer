@@ -1008,6 +1008,11 @@ local function exchangeExecution() : nil
   if type(receipt.updateCount) ~= "number" or receipt.updateCount < 0 or receipt.updateCount > 2147483647 or receipt.updateCount % 1 ~= 0 then return nil end
   local payload : table = {schemaVersion = 1, nonce = bridgeNonce, operationId = executionSent, roundId = receipt.roundId,
     operation = "executeHeld", status = receipt.status, updateCount = receipt.updateCount, held = receipt.held}
+  if receipt.status == "unknown" and type(receipt.stage) == "string"
+    and #receipt.stage >= 1 and #receipt.stage <= 48
+    and string.match(receipt.stage as string, "^[A-Za-z_]+$") then
+    payload.stage = receipt.stage
+  end
   if receipt.status == "ok" and receipt.snapshotVersion == 2 then
     for _, key in ipairs({ "snapshotVersion", "hostSequence", "entity", "ownerCompanyEntity", "stopEntity", "roadEntity", "chargedCost", "balance", "negative" }) do
       local number = receipt[key]

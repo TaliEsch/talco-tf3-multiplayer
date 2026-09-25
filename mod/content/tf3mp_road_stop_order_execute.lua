@@ -122,20 +122,40 @@ local function execute(state,request,api)
   barrier.phase="consumed"
   current.executionReceipt={schemaVersion=1,nonce=request.nonce,roundId=request.roundId,
     operationId=request.operationId,operation="executeHeld",status="unknown",
-    updateCount=clock.updateCount,held=false}
+    updateCount=clock.updateCount,held=false,stage="latched"}
   binding.phase="execution_unknown"
   state:set(current) -- Durable one-use latch before snapshots or native submission.
   if clock.updateCount ~= request.scheduledUpdate then return false end
+  current.executionReceipt.stage="live_gate"
+  state:set(current)
   local speed=api.engine.getComponent(api.engine.util.getWorld(),api.type.ComponentType.GAME_SPEED)
   if not native(speed) or speed.speedup ~= 0 or not liveRoad(api,request,prepared) then return false end
   local companies=roster(binding)
   if companies == nil then return false end
+  current.executionReceipt.stage="before_snapshot"
+  state:set(current)
   local before=results.before(api,capture,companies)
   if type(before) ~= "table" or before.code ~= "observed"
-    or before.updateCount ~= request.scheduledUpdate then return false end
+    or before.updateCount ~= request.scheduledUpdate then
+    if type(before) == "table" and type(before.stage) == "string" then
+      current.executionReceipt.stage="before_"..before.stage
+      state:set(current)
+    end
+    return false
+  end
+  current.executionReceipt.stage="construct"
+  state:set(current)
   local constructed=prepare.prepare(api,capture)
-  if type(constructed) ~= "table" or constructed.code ~= "prepared" then return false end
+  if type(constructed) ~= "table" or constructed.code ~= "prepared" then
+    if type(constructed) == "table" and type(constructed.stage) == "string" then
+      current.executionReceipt.stage="construct_"..constructed.stage
+      state:set(current)
+    end
+    return false
+  end
   local operation=request.operationId
+  current.executionReceipt.stage="send_attempt"
+  state:set(current)
   api.cmd.sendCommand(constructed.command,function(data,success,entities)
     pcall(function()
       local saved=state:get()
@@ -150,7 +170,16 @@ local function execute(state,request,api)
       if type(observed) ~= "table" or observed.code ~= "verified"
         or not entity(observed.stopEntity) or not entity(observed.edgeEntity)
         or not integer(observed.chargedCost) or observed.chargedCost < 1
-        or observed.updateCount ~= request.scheduledUpdate then return end
+        or observed.updateCount ~= request.scheduledUpdate then
+        receipt.stage="after_unknown"
+        if type(observed) == "table" and type(observed.stage) == "string" then
+          receipt.stage="after_"..observed.stage
+        end
+        state:set(saved)
+        return
+      end
+      receipt.stage="balance"
+      state:set(saved)
       local balance=api.engine.util.finance.getPlayersBalance(request.companyEntity)
       if type(balance) ~= "number" or balance ~= math.floor(balance)
         or math.abs(balance) > 9007199254740991 then return end
@@ -159,7 +188,7 @@ local function execute(state,request,api)
       receipt.stopEntity=observed.stopEntity; receipt.roadEntity=observed.edgeEntity
       receipt.chargedCost=observed.chargedCost
       receipt.balance=math.abs(balance); receipt.negative=balance < 0 and 1 or 0
-      receipt.updateCount=observed.updateCount; receipt.held=true; receipt.status="ok"
+      receipt.updateCount=observed.updateCount; receipt.held=true; receipt.status="ok"; receipt.stage=nil
       savedBinding.phase="action_held"
       state:set(saved)
     end)

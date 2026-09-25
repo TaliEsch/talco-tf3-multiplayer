@@ -2,6 +2,20 @@
 
 ## Current direction — 25 September 2026
 
+The first Host-ordered road Stop reached its scheduled TF3 engine update
+3238 in build 40396, but its execution receipt stayed `unknown`; the one-use
+barrier was consumed and the game halted without retry. A read-only load of
+the preserved outcome save subsequently found exactly one matching owned Stop
+73730 attached to replacement road 9075. That road matches the selected
+source road 53417's nodes, endpoints and tangents; company 3141's balance is
+$40,183,205, the expected native debit from $40,393,094. This establishes a
+single-game world change after Host ordering, not a verified completion
+receipt or two-instance replay. Bounded execution-stage diagnostics have been
+added to the next build so a later disposable-save attempt can identify the
+unknown link. Keep readiness at about 6.3/10 until the Host acceptance,
+successful engine receipt and observed postcondition agree in one run.
+Two-instance testing remains deferred by the user.
+
 The bounded road Stop now traverses production Host admission, the existing
 ordered participant and mailbox, a road-specific game-script prepare and held
 execution, and a raw execution decoder. The game script consumes the one-use
