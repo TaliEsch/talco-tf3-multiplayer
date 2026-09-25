@@ -155,7 +155,11 @@ local function verify(api, before, input, data, success, resultEntities, progres
   if api.engine.entityExists(input.companyEntity) ~= true
     or not native(component(api, input.companyEntity, "PLAYER")) then fail() end
   progress.stage = "result_road"
-  if api.engine.entityExists(input.edgeEntity) ~= false then fail() end
+  -- TF3 may reuse the removed road's entity ID during the same proposal.
+  -- Its continued existence is safe only when it no longer names a road.
+  local originalExists = api.engine.entityExists(input.edgeEntity)
+  if originalExists ~= true and originalExists ~= false then fail() end
+  if component(api, input.edgeEntity, "BASE_EDGE") ~= nil then fail() end
   progress.stage = "result_model"
   if api.res.modelRep.find(input.model) ~= before.modelId then fail() end
   progress.stage = "result_cost"

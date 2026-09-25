@@ -2,6 +2,14 @@
 
 ## Current direction — 25 September 2026
 
+The callback verifier previously required the removed source road's entity ID
+to cease existing. TF3's saved ordered outcome shows that ID still exists but
+no longer has a road component. The verifier now requires the old ID to have
+no `BASE_EDGE`, even if another entity has reused the ID; a surviving road
+still fails. Focused fixtures and mod review pass. This correction and the
+bounded stage diagnostics still need a fresh controlled TF3 result; they do
+not upgrade the last `unknown` receipt.
+
 The first Host-ordered road Stop reached its scheduled TF3 engine update
 3238 in build 40396, but its execution receipt stayed `unknown`; the one-use
 barrier was consumed and the game halted without retry. A read-only load of

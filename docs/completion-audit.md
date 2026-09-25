@@ -1,5 +1,15 @@
 # Completion audit against the build prompt
 
+## Callback treatment of reused road IDs — 25 September 2026
+
+The saved Host-ordered outcome has the original road ID present as a non-road
+entity. The callback verifier now rejects any remaining `BASE_EDGE` at that
+ID, while allowing TF3 to reuse the ID for another entity. A focused fixture
+accepts the observed reuse pattern and rejects a surviving road or
+inconsistent removed-road component. The focused callback/executor tests
+passed 14/14 and mod review passed. This revision has not run in TF3; the
+previous `unknown` receipt remains unknown.
+
 ## First Host-ordered road Stop world outcome — 25 September 2026
 
 On TF3 build 40396, the production Host accepted sequence 1 for a road Stop
