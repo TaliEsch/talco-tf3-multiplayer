@@ -2,6 +2,15 @@
 
 ## Current direction — 25 September 2026
 
+A read-only build-40396 TF3 probe on the unchanged source save returned a
+nonce-bound road preflight receipt for road 53417 and company 3141:
+`outcome=found`, `ownerCompany=0` (public), `revision=23`, update 3313.
+The original save hash remained unchanged. This exposed a production routing
+gap: the GUI exchange ran in watchdog mode but not Host telemetry mode. That
+route is now wired in both modes and awaits a fresh production Host check;
+the probe alone does not prove ordered road admission. Readiness remains about
+6.6/10.
+
 The local ordered-run report now retains the accepted game receipt's road ID,
 Stop ID, owner company, native charge and balance alongside Host sequence and
 update. This is source and fixture verification only for the new reporting;

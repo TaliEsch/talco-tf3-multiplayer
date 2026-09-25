@@ -445,6 +445,10 @@ if (command === 'prepare-join') {
       if(nativeGate?.ready!==true)throw new Error('NATIVE_GATE_UNAVAILABLE');
       return bridge.inspectVehicleOwner({entity:targetEntity,company:targetCompanyEntity});
     },
+    inspectRoadPreflight:nativeMode.diagnosticOnly?null:async ({entity,company})=>{
+      if(nativeGate?.ready!==true)throw new Error('NATIVE_GATE_UNAVAILABLE');
+      return bridge.inspectRoadPreflight({entity,company});
+    },
     admissionAllowed: () => !nativeMode.diagnosticOnly && nativeGate?.ready===true && localFactory!==null && !vehicleTestActive && !hostCaptureAttempted });
   hostInstance = instance;
   await once(instance.server, "listening");

@@ -1,5 +1,21 @@
 # Completion audit against the build prompt
 
+## Read-only Host road admission preflight — 25 September 2026
+
+Host road Stop admission now requests a nonce-bound, fresh TF3 road receipt
+before sequencing. The game-side inspection reads the company, road,
+occupancy, owner and revision without submitting a construction command;
+Host rejects missing, stale and cross-company evidence. The production GUI
+telemetry route is wired as well as the local watchdog route. In one real
+build-40396 read-only trial, the watchdog route returned `found` for road
+53417 and company 3141, with public owner 0 and revision 23 at update 3313.
+The source save SHA-256 remained
+`CCBF4BEB740E53323E06D20890FD029C8E174D3E85EFB06801A8B4275C762FB5`.
+The production telemetry route has not yet run in TF3; this trial does not
+prove Host admission. Focused network, parser and mod-review tests passed
+46/46. The elevated full suite still reports native Windows fixture failures;
+the road preflight focused tests passed.
+
 ## Accepted road postcondition reporting — 25 September 2026
 
 The single-game coordinator report now records the decoded, accepted TF3 road

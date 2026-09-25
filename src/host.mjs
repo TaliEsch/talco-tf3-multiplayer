@@ -7,9 +7,10 @@ import {ownerProofClockCurrent} from './vehicle-owner-proof.mjs';
 import { SessionCoordinator } from "./session-coordinator.mjs";
 import { connectClient } from "./client.mjs";
 
-export function startHost({ secret, sessionId = randomUUID(), bind = DEFAULT_BIND, port = DEFAULT_PORT, buildHash, modManifestHash, requiredSave = null, expiresAt = null, getUpdateCount = () => 0, resolveEntityOwner = () => null, inspectVehicleOwner = null, admissionAllowed = () => true, logger = () => {}, legacyModelRelay = false, requireReleaseAck = true, leadUpdates, coordinationTimeoutMs }) {
+export function startHost({ secret, sessionId = randomUUID(), bind = DEFAULT_BIND, port = DEFAULT_PORT, buildHash, modManifestHash, requiredSave = null, expiresAt = null, getUpdateCount = () => 0, resolveEntityOwner = () => null, inspectVehicleOwner = null, inspectRoadPreflight = null, admissionAllowed = () => true, logger = () => {}, legacyModelRelay = false, requireReleaseAck = true, leadUpdates, coordinationTimeoutMs }) {
   if (expiresAt !== null && (!Number.isSafeInteger(expiresAt) || expiresAt <= Date.now())) throw new RangeError("session expiry must be a future Unix timestamp in milliseconds");
   if(inspectVehicleOwner!==null&&typeof inspectVehicleOwner!=='function')throw new TypeError('INVALID_VEHICLE_OWNER_INSPECTOR');
+  if(inspectRoadPreflight!==null&&typeof inspectRoadPreflight!=='function')throw new TypeError('INVALID_ROAD_PREFLIGHT_INSPECTOR');
   const authority = new HostAuthority({ sessionId, buildHash, modManifestHash, resolveEntityOwner,
     ...(leadUpdates===undefined?{}:{leadUpdates}) });
   const peers = new Set();
@@ -182,6 +183,7 @@ export function startHost({ secret, sessionId = randomUUID(), bind = DEFAULT_BIN
                       peerUpdateCount:member.clockUpdateCount});
                 }
                 let verifiedOwner;
+                let verifiedRoad;
                 if(body.kind==='action_request'&&body.payload?.commandType==='vehicle.setRunning'&&inspectVehicleOwner!==null){
                   const request=body.payload;
                   const boundPlayer=authority.players().find(p=>p.playerId===peer.player.playerId);
@@ -204,8 +206,34 @@ export function startHost({ secret, sessionId = randomUUID(), bind = DEFAULT_BIN
                     throw new ProtocolError('OWNERSHIP_UNAVAILABLE','engine owner receipt is stale or mismatched');
                   verifiedOwner=proof;
                 }
+                if(body.kind==='action_request'&&body.payload?.commandType==='road.stop.place'){
+                  if(inspectRoadPreflight===null)
+                    throw new ProtocolError('ROAD_PREFLIGHT_UNAVAILABLE','read-only TF3 road inspection is required');
+                  const request=body.payload;
+                  const boundPlayer=authority.players().find(p=>p.playerId===peer.player.playerId);
+                  if(request.originPlayerId!==peer.player.playerId
+                    ||request.targetCompanyEntity!==boundPlayer?.companyEntity
+                    ||!Number.isSafeInteger(request.targetEntity)||request.targetEntity<1)
+                    throw new ProtocolError('NOT_OWNER','road request identity or company is invalid');
+                  if(!legacyModelRelay)coordinator.beforeCommand(entryHostUpdate);
+                  try{verifiedRoad=await inspectRoadPreflight({entity:request.targetEntity,
+                    company:request.targetCompanyEntity});}
+                  catch{throw new ProtocolError('ROAD_PREFLIGHT_UNAVAILABLE','TF3 road inspection did not complete');}
+                  if(socket.destroyed||!authority.players().some(p=>p.playerId===peer.player.playerId
+                    &&p.companyEntity===request.targetCompanyEntity)
+                    ||verifiedRoad?.entity!==request.targetEntity
+                    ||verifiedRoad?.company!==request.targetCompanyEntity
+                    ||verifiedRoad?.outcome!=='found'
+                    ||verifiedRoad.ownerCompany!==0
+                      &&verifiedRoad.ownerCompany!==request.targetCompanyEntity)
+                    throw new ProtocolError('ROAD_PREFLIGHT_UNAVAILABLE','road receipt is stale or mismatched');
+                }
                 // One sampled update drives authority acceptance and proposal.
                 const hostUpdate=getUpdateCount();
+                if(verifiedRoad!==undefined
+                  &&!ownerProofClockCurrent({issuedUpdate:verifiedRoad.issuedUpdate,
+                    receiptUpdate:verifiedRoad.updateCount,hostUpdate,paused:verifiedRoad.paused}))
+                  throw new ProtocolError('ROAD_PREFLIGHT_UNAVAILABLE','road receipt is stale');
                 if(verifiedOwner!==undefined){
                   if(!ownerProofClockCurrent({issuedUpdate:verifiedOwner.issuedUpdate,
                     receiptUpdate:verifiedOwner.updateCount,hostUpdate,paused:verifiedOwner.paused}))

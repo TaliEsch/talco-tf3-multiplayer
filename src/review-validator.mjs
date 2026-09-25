@@ -178,7 +178,9 @@ export async function validateReviewPackage(root) {
   for (const event of ["tf3mp_engine_probe", "tf3mp_get_engine_receipt", "tf3mp_get_status", "tf3mp_vehicle_command", "tf3mp_get_vehicle_receipt", "tf3mp_company_probe", "tf3mp_get_company_receipt", "tf3mp_finance_probe", "tf3mp_get_finance_receipt"]) {
     if (!gameScript.includes(`state:subscribeToEvent("${event}")`)) throw new Error(`missing script event subscription: ${event}`);
   }
-  if (!gameScript.includes("current.eventSubscriptionsVersion ~= 23")) throw new Error("missing event subscription migration");
+  if (!gameScript.includes("current.eventSubscriptionsVersion ~= 24")) throw new Error("missing event subscription migration");
+  for(const event of ['tf3mp_inspect_road_preflight','tf3mp_get_road_preflight'])
+    if(!gameScript.includes(`state:subscribeToEvent("${event}")`))throw new Error('missing road preflight subscription');
   for (const event of ['tf3mp_native_road_stop_replay', 'tf3mp_get_native_road_stop_replay']) {
     if (!gameScript.includes(`state:subscribeToEvent("${event}")`)) throw new Error('missing road replay subscription');
   }
@@ -319,6 +321,16 @@ export async function validateReviewPackage(root) {
     throw new Error("update must discard saved vehicle work, not execute it");
   }
   const panelScript = await readFile(path.join(absoluteRoot, "content", "tf3mp_status_panel.script.tl"), "utf8");
+  for(const marker of ['name == "tf3mp_inspect_road_preflight"',
+    'current.roadPreflightReceipt = receipt',
+    'name == "tf3mp_get_road_preflight"'])
+    if(!gameScript.includes(marker))throw new Error('read-only road preflight route is missing');
+  for(const marker of ['local function exchangeRoadPreflight()',
+    'app.loadUserdata("tf3mp_status_1", "road_preflight_request")',
+    'app.saveUserdata("tf3mp_status_1", "road_preflight_receipt", result)'])
+    if(!panelScript.includes(marker))throw new Error('road preflight GUI exchange is missing');
+  if(panelScript.split('pcall(exchangeRoadPreflight)').length!==3)
+    throw new Error('road preflight must run in local and production modes');
   if (!gameScript.includes('state:subscribeToEvent("tf3mp_prepare_road_stop")')
     || !gameScript.includes('roadStopOrderPrepare.handle(state, param as table, api)')
     || !panelScript.includes('roadStopOrderWire.decode(request) == nil')

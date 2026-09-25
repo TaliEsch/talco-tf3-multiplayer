@@ -365,7 +365,9 @@ test('road Stop remains rejected on the live Host until its engine adapter exist
 
 test('production Host admits a bounded road Stop to coordinator ordering',async()=>{
   const instance=startHost({secret:SECRET,sessionId:'road-production-admission',
-    port:0,buildHash:BUILD,modManifestHash:MODS,getUpdateCount:()=>50});
+    port:0,buildHash:BUILD,modManifestHash:MODS,getUpdateCount:()=>50,
+    inspectRoadPreflight:async()=>({outcome:'found',entity:53417,company:3141,
+      ownerCompany:3141,revision:1,issuedUpdate:50,updateCount:50,paused:true})});
   await once(instance.server,'listening');
   let handle;
   const proposed=new Promise((resolve,reject)=>{
@@ -392,6 +394,35 @@ test('production Host admits a bounded road Stop to coordinator ordering',async(
     assert.equal(command.hostSequence,1);
     assert.ok(command.scheduledUpdate>50);
   }finally{await shutdown(instance.server,[handle.socket]);}
+});
+
+test('production Host rejects cross-company road evidence before sequencing',async()=>{
+  const instance=startHost({secret:SECRET,sessionId:'road-cross-company-refusal',
+    port:0,buildHash:BUILD,modManifestHash:MODS,getUpdateCount:()=>50,
+    inspectRoadPreflight:async()=>({outcome:'found',entity:53417,company:3141,
+      ownerCompany:55652,revision:1,issuedUpdate:50,updateCount:50,paused:true})});
+  await once(instance.server,'listening');
+  let handle;
+  const rejected=new Promise((resolve,reject)=>{
+    instance.coordinator.beforeCommand=()=>{};
+    instance.coordinator.propose=()=>reject(new Error('unverified road was sequenced'));
+    handle=connectClient({secret:SECRET,sessionId:instance.sessionId,
+      port:instance.server.address().port,displayName:'Alice',buildHash:BUILD,modManifestHash:MODS,
+      onMessage(message,context){
+        if(message.kind==='admitted'){
+          instance.authority.bindCompanyEntity(message.payload.player.playerId,3141);
+          context.send('action_request',{clientSequence:1,commandType:'road.stop.place',
+            originPlayerId:message.payload.player.playerId,targetCompanyEntity:3141,
+            targetEntity:53417,payload:{edgeEntity:53417,companyEntity:3141,
+              param:0.5,left:true,oneWay:false,
+              model:'::/stations/street/small_stops/small_mid.mdl',name:'TalCo Road Stop'}});
+        }
+        if(message.kind==='command_rejected')resolve(message.payload.code);
+        if(message.kind==='error')reject(new Error(message.payload.code));
+      }});
+  });
+  try{assert.equal(await rejected,'ROAD_PREFLIGHT_UNAVAILABLE');}
+  finally{await shutdown(instance.server,[handle.socket]);}
 });
 
 test("authenticated socket subscribers observe signed coordination frames with stable ordered fanout", async () => {

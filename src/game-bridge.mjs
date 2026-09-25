@@ -27,6 +27,7 @@ import {createRoadStopReplayRequest} from './road-stop-replay-request.mjs';
 import {checkRoadStopReplayIdentity} from './road-stop-replay-case.mjs';
 import {publishRoadStopReplayRequest,readRoadStopReplayReceipt} from './road-stop-replay-mailbox.mjs';
 import {parseVehicleDiscoveryReceipt} from './vehicle-discovery-receipt.mjs';
+import {parseRoadPreflightReceipt} from './road-preflight-receipt.mjs';
 import {setTimeout as delay} from 'node:timers/promises';
 
 const LIMIT = 4096;
@@ -121,6 +122,7 @@ export async function startGameBridge({ directory, logger = () => {}, intervalMs
   let probe = null, requestSequence = 0;
   let vehicleTest = null;
   let vehicleDiscoveryBusy = false;
+  let roadPreflightBusy = false;
   let singleStopPermitBusy = false;
   let pauseTest = null;
   let controlLease = null;
@@ -723,6 +725,65 @@ export async function startGameBridge({ directory, logger = () => {}, intervalMs
         vehicleDiscoveryBusy=false;
       }
     },
+    async inspectRoadPreflight({entity,company,timeoutMs=15000}={}) {
+      if(roadPreflightBusy)throw new Error('ROAD_PREFLIGHT_BUSY');
+      if(!Number.isSafeInteger(entity)||entity<1||entity>2147483647
+        ||!Number.isSafeInteger(company)||company<1||company>2147483647
+        ||!Number.isSafeInteger(timeoutMs)||timeoutMs<100||timeoutMs>30000)
+        throw new TypeError('INVALID_ROAD_PREFLIGHT');
+      roadPreflightBusy=true;
+      try {
+        const start=pending.then(async()=>{
+          const observation=observations.status;
+          if(stopped||!connected||!observation.available)throw new Error('FRESH_BRIDGE_OBSERVATION_REQUIRED');
+          if(vehicleTest||companyTestUsed||(haltTest&&!coordinationLease?.active)||pauseTest||probe)
+            throw new Error('ROAD_PREFLIGHT_BUSY');
+          const update=observation.sample.updateCount;
+          const tick=observation.sample.tickCount;
+          const paused=observation.sample.speedup===0;
+          const requestId=++requestSequence;
+          await publish(directory,'road_preflight_request.lua',{
+            schemaVersion:1,kind:'road_preflight_request',nonce,requestId,company,entity});
+          return {requestId,update,tick,paused};
+        });
+        pending=start.catch(()=>{});
+        const context=await start;
+        const deadline=Date.now()+timeoutMs;
+        while(!stopped&&Date.now()<deadline){
+          const observation=observations.status;
+          if(!connected||!observation.available
+            ||(observation.sample.speedup===0)!==context.paused
+            ||observation.sample.updateCount<context.update
+            ||context.paused&&observation.sample.updateCount!==context.update)
+            throw new Error('ROAD_PREFLIGHT_CONTEXT_LOST');
+          try {
+            const receipt=parseRoadPreflightReceipt(await readBounded(directory,'road_preflight_receipt.lua'),{
+              nonce,requestId:context.requestId,company,entity});
+            if(receipt.updateCount<context.update||receipt.tickCount<context.tick)
+              throw new Error('ROAD_PREFLIGHT_CLOCK_MISMATCH');
+            if(receipt.outcome!=='found')throw new Error('ROAD_PREFLIGHT_NOT_CONFIRMED');
+            const latest=observations.status;
+            if(!context.paused&&latest.available&&latest.sample.updateCount<receipt.updateCount){
+              await delay(100);continue;
+            }
+            if(stopped||!connected||!latest.available
+              ||(latest.sample.speedup===0)!==context.paused
+              ||!ownerProofClockCurrent({issuedUpdate:context.update,
+                receiptUpdate:receipt.updateCount,hostUpdate:latest.sample.updateCount,
+                paused:context.paused}))
+              throw new Error('ROAD_PREFLIGHT_CONTEXT_LOST');
+            return Object.freeze({...receipt,issuedUpdate:context.update,paused:context.paused});
+          } catch(error){
+            if(['ROAD_PREFLIGHT_CLOCK_MISMATCH','ROAD_PREFLIGHT_NOT_CONFIRMED','ROAD_PREFLIGHT_CONTEXT_LOST'].includes(error.message))throw error;
+          }
+          await delay(100);
+        }
+        throw new Error(stopped?'ROAD_PREFLIGHT_CLOSED':'ROAD_PREFLIGHT_TIMEOUT');
+      } finally {
+        await unlink(path.join(directory,'road_preflight_request.lua')).catch(()=>{});
+        roadPreflightBusy=false;
+      }
+    },
     get haltState() { return haltTest?.phase ?? "not_requested"; },
     get coordinationLeaseState() { return coordinationLease?.phase ?? "not_started"; },
     get coordinatorSetup() {
@@ -1200,6 +1261,7 @@ export async function startGameBridge({ directory, logger = () => {}, intervalMs
       if (vehicleTest) await vehicleTest.close();
       for (const name of ["vehicle_intent.lua", "vehicle_command.lua", "vehicle_receipt.lua"]) await unlink(path.join(directory, name)).catch(() => {});
       await unlink(path.join(directory, 'vehicle_discovery_request.lua')).catch(() => {});
+      await unlink(path.join(directory, 'road_preflight_request.lua')).catch(() => {});
       await unlink(path.join(directory, 'stop_permit_request.lua')).catch(() => {});
       await unlink(path.join(directory, 'stop_permit_receipt.lua')).catch(() => {});
       await unlink(path.join(directory, "bridge.lua")).catch(() => {});

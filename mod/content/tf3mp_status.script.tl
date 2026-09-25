@@ -14,6 +14,7 @@ local record Tf3MpState
   probePreviousUpdate : integer
   vehicleReceipt : table
   vehicleDiscoveryReceipt : table
+  roadPreflightReceipt : table
   vehicleInbox : table
   companyTestAttempted : boolean
   companyReceipt : table
@@ -1379,7 +1380,7 @@ local ret : GameScriptWithGui<Tf3MpState, Tf3MpGuiState> = {
     -- GUI events use the script's event subscriptions too. Existing saves may
     -- already have the engine-only subscription, so hasEventSubscriptions alone
     -- is not sufficient when adding the receipt/status events.
-    if not state:hasEventSubscriptions() or current.eventSubscriptionsVersion ~= 23 then
+    if not state:hasEventSubscriptions() or current.eventSubscriptionsVersion ~= 24 then
       state:subscribeToEvent("tf3mp_native_road_stop_replay")
       state:subscribeToEvent("tf3mp_get_native_road_stop_replay")
       state:subscribeToEvent("tf3mp_placement_observer_selftest")
@@ -1428,6 +1429,8 @@ local ret : GameScriptWithGui<Tf3MpState, Tf3MpGuiState> = {
       state:subscribeToEvent("tf3mp_get_vehicle_receipt")
       state:subscribeToEvent("tf3mp_discover_vehicle")
       state:subscribeToEvent("tf3mp_get_vehicle_discovery")
+      state:subscribeToEvent("tf3mp_inspect_road_preflight")
+      state:subscribeToEvent("tf3mp_get_road_preflight")
       state:subscribeToEvent("tf3mp_company_probe")
       state:subscribeToEvent("tf3mp_get_company_receipt")
       state:subscribeToEvent("tf3mp_finance_probe")
@@ -1436,7 +1439,7 @@ local ret : GameScriptWithGui<Tf3MpState, Tf3MpGuiState> = {
       state:subscribeToEvent("tf3mp_get_pause_receipt")
       state:subscribeToEvent("tf3mp_station_template_probe")
       state:subscribeToEvent("tf3mp_get_station_template")
-      current.eventSubscriptionsVersion = 23
+      current.eventSubscriptionsVersion = 24
     end
     if subscriptionsMissing or current.readbackEventVersion ~= 3 then
       state:subscribeToEvent("tf3mp_stop_readback")
@@ -2256,6 +2259,59 @@ local ret : GameScriptWithGui<Tf3MpState, Tf3MpGuiState> = {
       state:set(current)
       return nil
     end
+    if src == "tf3mp_status_1::/tf3mp_status.gs" and id == "tf3mp_engine_bridge" and name == "tf3mp_inspect_road_preflight" and type(param) == "table" then
+      local request = param as table
+      local count : integer = 0
+      for key, _ in pairs(request) do
+        if key ~= "schemaVersion" and key ~= "kind" and key ~= "nonce"
+          and key ~= "requestId" and key ~= "company" and key ~= "entity" then return nil end
+        count = count + 1
+      end
+      if count ~= 6 or request.schemaVersion ~= 1 or request.kind ~= "road_preflight_request"
+        or type(request.nonce) ~= "string" or #request.nonce ~= 32
+        or not string.match(request.nonce, "^[0-9a-f]+$")
+        or not validInteger(request.requestId) or request.requestId < 1
+        or not validInteger(request.company) or request.company < 1
+        or not validInteger(request.entity) or request.entity < 1 then return nil end
+      local current = state:get()
+      if current == nil or current.schemaVersion == nil then return nil end
+      local old = current.roadPreflightReceipt or {}
+      if old.nonce == request.nonce and type(old.requestId) == "number"
+        and old.requestId >= request.requestId then return nil end
+      local clock = readClock()
+      local receipt : table = { schemaVersion = 1, kind = "road_preflight_receipt",
+        nonce = request.nonce, requestId = request.requestId, company = request.company,
+        entity = request.entity, ownerCompany = 0, revision = 0,
+        tickCount = clock.tickCount, updateCount = clock.updateCount, outcome = "unknown" }
+      local ok = pcall(function()
+        if api.engine.entityExists(request.company) ~= true
+          or api.engine.getComponent(request.company, api.type.ComponentType.PLAYER) == nil
+          or api.engine.entityExists(request.entity) ~= true then
+          receipt.outcome = "missing"; return
+        end
+        local edge = api.engine.getComponent(request.entity, api.type.ComponentType.BASE_EDGE)
+        if edge == nil then receipt.outcome = "missing"; return end
+        if type(edge.objects) ~= "table" or #edge.objects ~= 0 then
+          receipt.outcome = "occupied"; return
+        end
+        local owner = api.engine.getComponent(request.entity, api.type.ComponentType.PLAYER_OWNED)
+        if owner ~= nil then
+          if not validInteger(owner.player) then return end
+          receipt.ownerCompany = owner.player
+          if owner.player ~= 0 and owner.player ~= request.company then
+            receipt.outcome = "not_owner"; return
+          end
+        end
+        local revision = api.engine.getRevision(request.entity)
+        if revision == nil or revision.num == nil or not validInteger(revision.num[1]) then return end
+        receipt.revision = revision.num[1]
+        receipt.outcome = "found"
+      end)
+      if not ok then receipt.outcome = "unknown"; receipt.revision = 0 end
+      current.roadPreflightReceipt = receipt
+      state:set(current)
+      return nil
+    end
     if src == "tf3mp_status_1::/tf3mp_status.gs" and id == "tf3mp_engine_bridge" and name == "tf3mp_vehicle_command" and type(param) == "table" then
       local current = state:get()
       if current ~= nil and current.schemaVersion ~= nil then
@@ -2465,6 +2521,11 @@ local ret : GameScriptWithGui<Tf3MpState, Tf3MpGuiState> = {
     if id == "tf3mp_engine_bridge" and name == "tf3mp_get_vehicle_discovery" then
       local current = state:get()
       if current ~= nil and current.vehicleDiscoveryReceipt ~= nil then return current.vehicleDiscoveryReceipt end
+      return nil
+    end
+    if id == "tf3mp_engine_bridge" and name == "tf3mp_get_road_preflight" then
+      local current = state:get()
+      if current ~= nil and current.roadPreflightReceipt ~= nil then return current.roadPreflightReceipt end
       return nil
     end
     if id == "tf3mp_engine_bridge" and name == "tf3mp_get_engine_receipt" then

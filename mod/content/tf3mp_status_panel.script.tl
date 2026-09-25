@@ -76,6 +76,7 @@ local probeFailed = false
 local probeResult = "diagnostics"
 local vehiclePhaseKey = ""
 local vehicleDiscoverySent : integer = 0
+local roadPreflightSent : integer = 0
 local companyProbeSent : integer = 0
 local phase2FundingSent : integer = 0
 local phase2FundingReported : integer = 0
@@ -1311,6 +1312,52 @@ local function exchangeVehicleDiscovery() : nil
   return nil
 end
 
+local function exchangeRoadPreflight() : nil
+  if not userdataExists("road_preflight_request") then return nil end
+  local request = app.loadUserdata("tf3mp_status_1", "road_preflight_request")
+  if type(request) ~= "table" or request.schemaVersion ~= 1
+    or request.kind ~= "road_preflight_request" or request.nonce ~= bridgeNonce then return nil end
+  local count : integer = 0
+  for key, _ in pairs(request) do
+    if key ~= "schemaVersion" and key ~= "kind" and key ~= "nonce"
+      and key ~= "requestId" and key ~= "company" and key ~= "entity" then return nil end
+    count = count + 1
+  end
+  if count ~= 6 then return nil end
+  for _, key in ipairs({ "requestId", "company", "entity" }) do
+    local value = request[key]
+    if type(value) ~= "number" or value < 1 or value > 2147483647 or value % 1 ~= 0 then return nil end
+  end
+  if request.requestId > roadPreflightSent then
+    roadPreflightSent = request.requestId as integer
+    api.cmd.sendCommand(api.cmd.makeScriptingSendEventCmd("tf3mp_status_1::/tf3mp_status.gs",
+      "tf3mp_engine_bridge", "tf3mp_inspect_road_preflight", request))
+  end
+  if request.requestId ~= roadPreflightSent then return nil end
+  local value = api.gui.fireGuiScriptEvent("tf3mp_engine_bridge", "tf3mp_get_road_preflight", {})
+  if type(value) ~= "table" then return nil end
+  local receipt = value as table
+  if receipt.schemaVersion ~= 1 or receipt.kind ~= "road_preflight_receipt"
+    or receipt.nonce ~= bridgeNonce or receipt.requestId ~= roadPreflightSent
+    or receipt.company ~= request.company or receipt.entity ~= request.entity then return nil end
+  if receipt.outcome ~= "found" and receipt.outcome ~= "missing"
+    and receipt.outcome ~= "occupied" and receipt.outcome ~= "not_owner"
+    and receipt.outcome ~= "unknown" then return nil end
+  local result : table = {schemaVersion=1, kind="road_preflight_receipt",
+    nonce=bridgeNonce, requestId=roadPreflightSent, outcome=receipt.outcome}
+  for _, key in ipairs({"company","entity","ownerCompany","revision","tickCount","updateCount"}) do
+    local numberValue = receipt[key]
+    if type(numberValue) ~= "number" or numberValue < 0
+      or numberValue > 2147483647 or numberValue % 1 ~= 0 then return nil end
+    result[key] = numberValue
+  end
+  if receipt.outcome == "found" and receipt.ownerCompany ~= 0
+    and receipt.ownerCompany ~= receipt.company then return nil end
+  if receipt.outcome ~= "found" and receipt.revision ~= 0 then return nil end
+  app.saveUserdata("tf3mp_status_1", "road_preflight_receipt", result)
+  return nil
+end
+
 local function exchangeVehicleTest() : nil
   if not userdataExists("vehicle_command") then return nil end
   local request = app.loadUserdata("tf3mp_status_1", "vehicle_command")
@@ -2074,6 +2121,7 @@ local function exchangeTelemetry(tickCount : integer, updateCount : integer) : s
     probeResult = "diagnostics"
     vehiclePhaseKey = ""
     vehicleDiscoverySent = 0
+    roadPreflightSent = 0
     companyProbeSent = 0
     phase2FundingSent = 0
     phase2FundingReported = 0
@@ -2165,6 +2213,8 @@ local function exchangeTelemetry(tickCount : integer, updateCount : integer) : s
     -- terminal watchdog mode that owns those command phases.
     local discoveryOk = pcall(exchangeVehicleDiscovery)
     if not discoveryOk then return "vehicle discovery error / see launcher" end
+    local roadOk = pcall(exchangeRoadPreflight)
+    if not roadOk then return "road preflight error / see launcher" end
     local watchdogOk = pcall(exchangeWatchdog)
     if missedAcks > 10 then return watchdogOk and "helper disconnected / observing engine stop" or "helper disconnected / stop evidence unavailable" end
     if lastAck < 0 then return "bridge connecting" end
@@ -2188,6 +2238,8 @@ local function exchangeTelemetry(tickCount : integer, updateCount : integer) : s
   if not rosterOk then return "roster inspection unavailable / see launcher" end
   local discoveryOk = pcall(exchangeVehicleDiscovery)
   if not discoveryOk then return "vehicle discovery error / see launcher" end
+  local roadOk = pcall(exchangeRoadPreflight)
+  if not roadOk then return "road preflight error / see launcher" end
   if config.mode == "company_test" then
     local roadReplayOk = pcall(exchangeNativeRoadStopReplay)
     if not roadReplayOk then return "road replay outcome unknown / do not retry" end
