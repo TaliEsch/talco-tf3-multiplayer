@@ -141,7 +141,7 @@ export class SessionCoordinator {
     if (this.#phase !== "awaiting_prepare" || !exact(p, "roundId,hostSequence,scheduledUpdate,updateCount")
         || p.hostSequence !== this.#command?.hostSequence || p.scheduledUpdate !== this.#command?.scheduledUpdate
         || !uint(p.updateCount) || p.updateCount < member.updateCount || p.updateCount >= p.scheduledUpdate
-        || !uint(hostUpdate) || hostUpdate >= p.scheduledUpdate) this.#fail("INVALID_PREPARE_ACK");
+        || !uint(hostUpdate) || hostUpdate >= p.scheduledUpdate || member.prepared) this.#fail("INVALID_PREPARE_ACK");
     member.prepared = true; member.updateCount = p.updateCount; member.seen = this.now();
     if ([...this.#members.values()].every(m => m.prepared)) {
       this.#phase = "awaiting_applied"; this.#deadline = this.now() + this.timeoutMs;
@@ -152,9 +152,8 @@ export class SessionCoordinator {
     const member = this.#member(id, p);
     if (this.#phase !== "awaiting_applied" || !exact(p, "roundId,hostSequence,updateCount,stateHash")
         || p.hostSequence !== this.#command?.hostSequence || p.updateCount !== this.#command?.scheduledUpdate
-        || p.updateCount < member.updateCount || !hash(p.stateHash)) this.#fail("INVALID_APPLIED_ACK");
-    const expectedEntry = member.applied !== null ? [id, member]
-      : [...this.#members].find(([, candidate]) => candidate.applied !== null);
+        || p.updateCount < member.updateCount || !hash(p.stateHash) || member.applied !== null) this.#fail("INVALID_APPLIED_ACK");
+    const expectedEntry = [...this.#members].find(([, candidate]) => candidate.applied !== null);
     if (expectedEntry && expectedEntry[1].applied !== p.stateHash) {
       this.#divergence = Object.freeze({ kind: "state", roundId: this.#round,
         updateCount: p.updateCount, hostSequence: p.hostSequence, playerId: id,

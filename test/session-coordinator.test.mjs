@@ -29,6 +29,19 @@ for (const count of [2, 4]) test(`${count} participant barrier needs all ready, 
   f.applied(`p${count - 1}`); assert.equal(f.c.phase, "running");
   assert.equal(f.events.filter(e => e.kind === "command_completed").length, 1);
 });
+test("duplicate prepare and applied receipts halt without advancing the barrier", () => {
+  const preparing = setup(); preparing.ready(); preparing.c.propose(preparing.command, 100);
+  preparing.prepared("p0");
+  assert.throws(() => preparing.prepared("p0"), { code: "INVALID_PREPARE_ACK" });
+  assert.equal(preparing.c.phase, "halted");
+  assert.equal(preparing.events.some(e => e.kind === "command_commit"), false);
+
+  const applying = setup(); applying.ready(); applying.c.propose(applying.command, 100);
+  applying.prepared("p0"); applying.prepared("p1"); applying.applied("p0");
+  assert.throws(() => applying.applied("p0"), { code: "INVALID_APPLIED_ACK" });
+  assert.equal(applying.c.phase, "halted");
+  assert.equal(applying.events.some(e => e.kind === "command_completed"), false);
+});
 test("unverified companies or duplicate users cannot seal roster", () => {
   for (const roster of [[players[0]], [{ ...players[0], companyEntity: null }, players[1]], [players[0], players[0]]]) {
     const c = new SessionCoordinator(); assert.throws(() => c.prepare(roster, { updateCount: 100, checkpointHash }), /verified companies/);
