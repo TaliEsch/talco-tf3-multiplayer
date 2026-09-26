@@ -110,6 +110,16 @@ test("different state hashes halt the coordinated socket session", async () => {
     await until(() => f.clients[0].messages.some(m => m.kind === "session_halted"));
     assert.equal(f.host.coordinator.phase, "halted");
     assert.equal(f.clients[0].messages.some(m => m.kind === "command_completed"), false);
+    const divergence=f.events.filter(event=>event.event==='session_divergence');
+    assert.equal(divergence.length,1);
+    assert.equal(divergence[0].kind,'state');
+    assert.equal(divergence[0].expectedHash,stateHash);
+    assert.equal(divergence[0].observedHash,'f'.repeat(64));
+    assert.equal(divergence[0].hostSequence,command.hostSequence);
+    f.request(2);
+    await until(()=>f.clients[0].messages.some(m=>m.kind==='command_rejected'));
+    assert.equal(f.clients[0].messages.some(m=>m.kind==='command_completed'),false);
+    assert.equal(f.events.filter(event=>event.event==='session_divergence').length,1);
   } finally { await f.close(); }
 });
 

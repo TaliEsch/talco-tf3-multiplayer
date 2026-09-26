@@ -18,16 +18,21 @@ export class SessionCoordinator {
   #lastHeartbeat = -Infinity;
   #releaseUpdate = null;
   #resumeSpeed = null;
-  constructor({ broadcast = () => {}, now = Date.now, timeoutMs = 15000, heartbeatMs = 10000, requireReleaseAck = false } = {}) {
+  #divergence = null;
+  #soloStopTest;
+  constructor({ broadcast = () => {}, now = Date.now, timeoutMs = 15000, heartbeatMs = 10000, requireReleaseAck = false, soloStopTest = false } = {}) {
     this.broadcast = broadcast; this.now = now;
     if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 100 || !Number.isSafeInteger(heartbeatMs) || heartbeatMs < 100) throw new TypeError("invalid coordination timeout");
     this.timeoutMs = timeoutMs; this.heartbeatMs = heartbeatMs;
     if (typeof requireReleaseAck !== "boolean") throw new TypeError("invalid release-ack mode");
+    if (typeof soloStopTest !== "boolean") throw new TypeError("invalid solo Stop test mode");
     this.requireReleaseAck = requireReleaseAck;
+    this.#soloStopTest = soloStopTest;
   }
   get phase() { return this.#phase; }
   get locked() { return this.#phase !== "lobby"; }
   get roundId() { return this.#round; }
+  get divergence() { return this.#divergence === null ? null : { ...this.#divergence }; }
   // Host policy for the next barrier release, frozen while a round is pending.
   // Zero is a hold, not a release. Require every participant's speed receipt.
   setResumeSpeed(speedup) {
@@ -51,7 +56,8 @@ export class SessionCoordinator {
   }
   #prepare(players, { updateCount, checkpointHash }) {
     if (this.locked) throw new ProtocolError("ROSTER_LOCKED", "coordination cannot restart in the same session");
-    if (!uint(updateCount) || checkpointHash !== undefined && !hash(checkpointHash) || players.length < 2 || players.length > 4
+    if (!uint(updateCount) || checkpointHash !== undefined && !hash(checkpointHash)
+        || players.length < (this.#soloStopTest ? 1 : 2) || players.length > 4
         || new Set(players.map(p => p.playerId)).size !== players.length
         || new Set(players.map(p => p.companyEntity)).size !== players.length
         || players.some(p => typeof p.playerId !== "string" || !uint(p.companyEntity))) throw new ProtocolError("INVALID_ROSTER", "verified companies and 2-4 participants required");
@@ -73,8 +79,14 @@ export class SessionCoordinator {
     const member = this.#member(id, p);
     if (this.#phase !== "preparing") this.#fail("UNEXPECTED_READY");
     if (!exact(p, "roundId,updateCount,checkpointHash,companyEntity") || p.companyEntity !== member.companyEntity || member.ready
-        || p.updateCount !== this.#checkpoint.updateCount || !hash(p.checkpointHash)
-        || this.#checkpoint.checkpointHash !== undefined && p.checkpointHash !== this.#checkpoint.checkpointHash) this.#fail("CHECKPOINT_MISMATCH");
+        || p.updateCount !== this.#checkpoint.updateCount || !hash(p.checkpointHash)) this.#fail("CHECKPOINT_MISMATCH");
+    if (this.#checkpoint.checkpointHash !== undefined && p.checkpointHash !== this.#checkpoint.checkpointHash) {
+      this.#divergence = Object.freeze({ kind: "checkpoint", roundId: this.#round,
+        updateCount: p.updateCount, hostSequence: this.#lastSequence, playerId: id,
+        companyEntity: member.companyEntity, expectedHash: this.#checkpoint.checkpointHash,
+        observedHash: p.checkpointHash });
+      this.#fail("CHECKPOINT_MISMATCH");
+    }
     // First observed digest is a candidate, never release authorization by itself.
     this.#checkpoint.checkpointHash = p.checkpointHash;
     member.ready = true; member.updateCount=p.updateCount; member.seen = this.now();
@@ -134,10 +146,15 @@ export class SessionCoordinator {
     if (this.#phase !== "awaiting_applied" || !exact(p, "roundId,hostSequence,updateCount,stateHash")
         || p.hostSequence !== this.#command?.hostSequence || p.updateCount !== this.#command?.scheduledUpdate
         || p.updateCount < member.updateCount || !hash(p.stateHash)) this.#fail("INVALID_APPLIED_ACK");
-    if (member.applied !== null && member.applied !== p.stateHash) this.#fail("STATE_MISMATCH");
+    const expected = member.applied ?? [...this.#members.values()].map(m => m.applied).find(h => h !== null);
+    if (expected !== undefined && expected !== p.stateHash) {
+      this.#divergence = Object.freeze({ kind: "state", roundId: this.#round,
+        updateCount: p.updateCount, hostSequence: p.hostSequence, playerId: id,
+        companyEntity: member.companyEntity, expectedHash: expected, observedHash: p.stateHash });
+      this.#fail("STATE_MISMATCH");
+    }
     member.applied = p.stateHash; member.updateCount = p.updateCount; member.seen = this.now();
     const observed = [...this.#members.values()].map(m => m.applied).filter(h => h !== null);
-    if (new Set(observed).size > 1) this.#fail("STATE_MISMATCH");
     if (observed.length === this.#members.size) {
       this.#lastSequence = this.#command.hostSequence;
       this.#beginRelease(p.updateCount);

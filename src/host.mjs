@@ -7,7 +7,7 @@ import {ownerProofClockCurrent} from './vehicle-owner-proof.mjs';
 import { SessionCoordinator } from "./session-coordinator.mjs";
 import { connectClient } from "./client.mjs";
 
-export function startHost({ secret, sessionId = randomUUID(), bind = DEFAULT_BIND, port = DEFAULT_PORT, buildHash, modManifestHash, requiredSave = null, expiresAt = null, getUpdateCount = () => 0, resolveEntityOwner = () => null, inspectVehicleOwner = null, inspectRoadPreflight = null, admissionAllowed = () => true, logger = () => {}, legacyModelRelay = false, requireReleaseAck = true, leadUpdates, coordinationTimeoutMs }) {
+export function startHost({ secret, sessionId = randomUUID(), bind = DEFAULT_BIND, port = DEFAULT_PORT, buildHash, modManifestHash, requiredSave = null, expiresAt = null, getUpdateCount = () => 0, resolveEntityOwner = () => null, inspectVehicleOwner = null, inspectRoadPreflight = null, admissionAllowed = () => true, logger = () => {}, legacyModelRelay = false, requireReleaseAck = true, soloStopTest = false, leadUpdates, coordinationTimeoutMs }) {
   if (expiresAt !== null && (!Number.isSafeInteger(expiresAt) || expiresAt <= Date.now())) throw new RangeError("session expiry must be a future Unix timestamp in milliseconds");
   if(inspectVehicleOwner!==null&&typeof inspectVehicleOwner!=='function')throw new TypeError('INVALID_VEHICLE_OWNER_INSPECTOR');
   if(inspectRoadPreflight!==null&&typeof inspectRoadPreflight!=='function')throw new TypeError('INVALID_ROAD_PREFLIGHT_INSPECTOR');
@@ -34,10 +34,14 @@ export function startHost({ secret, sessionId = randomUUID(), bind = DEFAULT_BIN
     return socket.write(frame);
   };
   const broadcast = (kind, payload) => { for (const peer of peers) if (peer.player) send(peer.socket, kind, payload, peer.player.playerId); };
-  const coordinator = new SessionCoordinator({ requireReleaseAck,
+  const coordinator = new SessionCoordinator({ requireReleaseAck, soloStopTest,
     ...(coordinationTimeoutMs===undefined?{}:{timeoutMs:coordinationTimeoutMs}),
     broadcast: (kind, payload) => {
-    broadcast(kind, payload); logger({ level: kind === "session_halted" ? "warn" : "info", event: kind, code: payload.code, hostSequence: payload.hostSequence });
+    broadcast(kind, payload);
+    if (kind === "session_halted" && coordinator.divergence)
+      logger({ level: "warn", event: "session_divergence", sessionId, buildHash,
+        modManifestHash, ...coordinator.divergence });
+    logger({ level: kind === "session_halted" ? "warn" : "info", event: kind, code: payload.code, hostSequence: payload.hostSequence });
   } });
   const server = net.createServer((socket) => {
     if (expiresAt !== null && Date.now() > expiresAt) { logger({ level: "warn", event: "expired_connection_rejected" }); socket.destroy(); return; }

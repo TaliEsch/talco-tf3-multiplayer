@@ -2,6 +2,30 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { diagnosticLogger } from "../src/diagnostics.mjs";
 
+test("Join save progress exposes bounded counts and phase without private metadata", () => {
+  const records=[];
+  const log=diagnosticLogger({write:text=>records.push(JSON.parse(text))});
+  log({event:"join_save_transfer_progress",phase:"downloading",receivedBytes:65536,
+    totalBytes:180000,host:"private",secret:"private"});
+  assert.equal(records[0].phase,"downloading");
+  assert.equal(records[0].receivedBytes,65536);
+  assert.equal(records[0].totalBytes,180000);
+  assert.equal(records[0].host,undefined);
+  assert.equal(records[0].secret,undefined);
+});
+
+test("Join preparation emits only a bounded save name for launcher receipt", () => {
+  const records=[];
+  const log=diagnosticLogger({write:text=>records.push(JSON.parse(text))});
+  const saveName=`tf3mp_disposable_${'a'.repeat(32)}`;
+  log({event:'join_save_prepared',saveName,path:'C:\\private\\save.sav',requestPath:'C:\\private\\request.lua',bytes:7,sha256:'b'.repeat(64)});
+  assert.equal(records[0].saveName,saveName);
+  assert.equal(records[0].path,undefined);
+  assert.equal(records[0].requestPath,undefined);
+  log({event:'join_save_prepared',saveName:'..\\private'});
+  assert.equal(records[1].saveName,undefined);
+});
+
 test("local cancel terminal diagnostic keeps bounded counters without raw evidence", () => {
   const records=[];
   const log=diagnosticLogger({write:text=>records.push(JSON.parse(text))});
@@ -13,6 +37,32 @@ test("local cancel terminal diagnostic keeps bounded counters without raw eviden
   assert.equal(records[0].expectedInvocation,42);
   assert.equal(records[0].counterDeltas.factoryHits,"1");
   assert.equal(records[0].secret,undefined);
+});
+
+test("Host Stop permit and terminal diagnostics retain only bounded evidence", () => {
+  const records=[];
+  const log=diagnosticLogger({write:text=>records.push(JSON.parse(text))});
+  log({event:'host_cancelled_stop_permit_ready',entity:77,expectedInvocation:'23',
+    permitDeadlineUnix:123,nonce:'private'});
+  assert.equal(records[0].entity,77);
+  assert.equal(records[0].expectedInvocation,'23');
+  assert.equal(records[0].permitDeadlineUnix,123);
+  assert.equal(records[0].nonce,undefined);
+  log({event:'host_cancelled_stop_native_terminal',armState:'expired',
+    correlatedHitsDelta:'0',callbackHitsDelta:'0',marshalerReturnHitsDelta:'0',
+    callbackResultZero:false,raw:{secret:true}});
+  assert.equal(records[1].armState,'expired');
+  assert.equal(records[1].correlatedHitsDelta,'0');
+  assert.equal(records[1].callbackResultZero,false);
+  assert.equal(records[1].raw,undefined);
+  log({event:'host_cancelled_stop_completed',entity:77,company:101,hostSequence:1,
+    nativeInvocation:'23',observedStopFlag:1,observedUpdateCount:60,
+    stateHash:'a'.repeat(64),singleGameStopVerified:true,nonce:'private'});
+  assert.equal(records[2].nativeInvocation,'23');
+  assert.equal(records[2].observedStopFlag,1);
+  assert.equal(records[2].observedUpdateCount,60);
+  assert.equal(records[2].singleGameStopVerified,true);
+  assert.equal(records[2].nonce,undefined);
 });
 
 test("replay workflow retains bounded launcher artifact identities without secrets", () => {
@@ -109,4 +159,20 @@ test('Stop evidence logger retains bounded correlation fields and redacts raw re
     assert.equal(records[5][field],undefined);
   log({event:'unrelated',roundId:'round-1',stateHash:hash,entity:42});
   for(const field of ['roundId','stateHash','entity'])assert.equal(records[6][field],undefined);
+});
+
+test('divergence diagnostics retain only bounded comparison evidence',()=>{
+  let output='';
+  diagnosticLogger({write:text=>{output+=text;}})({event:'session_divergence',sessionId:'session-1',
+    kind:'state',roundId:'round-1',playerId:'player-1',companyEntity:7,
+    updateCount:160,hostSequence:1,buildHash:'c'.repeat(64),modManifestHash:'d'.repeat(64),
+    expectedHash:'a'.repeat(64),observedHash:'b'.repeat(64),
+    rawReceipt:{secret:'private'},path:'C:\\private',nonce:'private'});
+  const record=JSON.parse(output);
+  assert.equal(record.expectedHash,'a'.repeat(64));
+  assert.equal(record.observedHash,'b'.repeat(64));
+  assert.equal(record.roundId,'round-1');
+  assert.equal(record.buildHash,'c'.repeat(64));
+  assert.equal(record.modManifestHash,'d'.repeat(64));
+  for(const field of ['rawReceipt','path','nonce'])assert.equal(record[field],undefined);
 });

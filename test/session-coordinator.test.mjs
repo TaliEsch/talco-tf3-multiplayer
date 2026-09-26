@@ -37,8 +37,21 @@ test("unverified companies or duplicate users cannot seal roster", () => {
 test("checkpoint mismatch halts permanently", () => {
   const f = setup();
   assert.throws(() => f.c.ready("p0", { roundId: f.c.roundId, updateCount: 101, checkpointHash, companyEntity: 100 }), /CHECKPOINT_MISMATCH/);
+  assert.equal(f.c.divergence, null);
   assert.equal(f.c.phase, "halted"); assert.throws(() => f.ready(), /new session/);
   assert.throws(() => f.c.prepare(players, { checkpointHash, updateCount: 100 }), /cannot restart/);
+});
+test("a valid differing checkpoint keeps bounded immutable evidence before halting", () => {
+  const f = setup(), observedHash = "c".repeat(64), roundId = f.c.roundId;
+  assert.throws(() => f.c.ready("p0", { roundId, updateCount: 100, checkpointHash: observedHash, companyEntity: 100 }), /CHECKPOINT_MISMATCH/);
+  assert.deepEqual(f.c.divergence, { kind: "checkpoint", roundId, updateCount: 100,
+    hostSequence: 0, playerId: "p0", companyEntity: 100,
+    expectedHash: checkpointHash, observedHash });
+  const copy = f.c.divergence; copy.observedHash = checkpointHash;
+  assert.equal(f.c.divergence.observedHash, observedHash);
+  assert.throws(() => f.c.ready("p1", { roundId, updateCount: 100, checkpointHash, companyEntity: 101 }),
+    error => error.code === "SESSION_HALTED");
+  assert.equal(f.c.divergence.observedHash, observedHash);
 });
 for (const bad of [{ updateCount: 159 }, { updateCount: 161 }, { hostSequence: 2 }, { stateHash: "bad" }, { extra: true }]) test(`invalid applied receipt halts: ${JSON.stringify(bad)}`, () => {
   const f = setup(); f.ready(); f.c.propose(f.command, 100); f.prepared("p0"); f.prepared("p1");
@@ -48,6 +61,9 @@ for (const bad of [{ updateCount: 159 }, { updateCount: 161 }, { hostSequence: 2
 test("state mismatch after execution halts future commands without claiming rollback", () => {
   const f = setup(); f.ready(); f.c.propose(f.command, 100); f.prepared("p0"); f.prepared("p1"); f.applied("p0");
   assert.throws(() => f.applied("p1", { stateHash: "c".repeat(64) }), /STATE_MISMATCH/);
+  assert.deepEqual(f.c.divergence, { kind: "state", roundId: f.c.roundId,
+    updateCount: 160, hostSequence: 1, playerId: "p1", companyEntity: 101,
+    expectedHash: stateHash, observedHash: "c".repeat(64) });
   assert.throws(() => f.c.beforeCommand(160), /new session/);
   assert.equal(f.events.at(-1).kind, "session_halted");
 });

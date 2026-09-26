@@ -17,10 +17,11 @@ for(const count of [2,4])for(const divergence of [false,true])test(`${count} obs
   const companies=new Map(Array.from({length:count},(_,i)=>['p'+i,10+i]));
   const players=[...companies].map(([playerId,companyEntity])=>({playerId,companyEntity}));
   const network=[],engines=new Map(),participants=new Map(),outgoing=[];
+  let time=0;
   const coordinator=new SessionCoordinator({now:()=>0,requireReleaseAck:true,broadcast:(kind,payload)=>network.push({kind,payload})});
   for(const [playerId] of companies){
     const requests=[];engines.set(playerId,requests);
-    const participant=new AsyncSessionParticipant({playerId,companies,requireEngineBinding:true,now:()=>0,
+    const participant=new AsyncSessionParticipant({playerId,companies,requireEngineBinding:true,now:()=>time,
       publish:r=>requests.push(r),disconnect:()=>{},send:(kind,payload)=>outgoing.push({playerId,kind,payload})});
     participant.observe({updateCount:100,held:false});participants.set(playerId,participant);
   }
@@ -41,7 +42,21 @@ for(const count of [2,4])for(const divergence of [false,true])test(`${count} obs
     assert.equal(requests.some(r=>r.operation==='release'),false);
     i++;
   }
-  if(divergence){assert.equal(coordinator.phase,'halted');assert.equal(network.some(m=>m.kind==='coordination_ready'),false);return;}
+  if(divergence){
+    assert.equal(coordinator.phase,'halted');assert.equal(network.some(m=>m.kind==='coordination_ready'),false);
+    const halt=network.find(m=>m.kind==='session_halted');assert.equal(halt.payload.code,'CHECKPOINT_MISMATCH');
+    for(const [playerId,p] of participants){
+      p.receive(halt.kind,halt.payload);
+      assert.equal(p.phase,'halted');
+      assert.equal(engines.get(playerId).filter(r=>r.operation==='halt').length,1);
+      assert.equal(engines.get(playerId).some(r=>r.operation==='release'),false);
+      p.receive('coordination_ready',{roundId:coordinator.roundId,updateCount:140,checkpointHash:digest});
+      assert.equal(engines.get(playerId).filter(r=>r.operation==='halt').length,1);
+    }
+    time=20000;
+    for(const p of participants.values()){p.poll();assert.equal(p.haltState,'unknown');}
+    return;
+  }
   const ready=network.find(m=>m.kind==='coordination_ready');assert.equal(ready.payload.checkpointHash,digest);
   assert.equal(coordinator.phase,'awaiting_release');
   for(const [playerId,p] of participants){p.receive(ready.kind,ready.payload);assert.equal(engines.get(playerId).at(-1).operation,'release');}
