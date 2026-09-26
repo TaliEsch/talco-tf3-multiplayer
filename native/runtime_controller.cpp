@@ -467,7 +467,11 @@ int Run(DWORD targetPid, bool owned, const std::wstring& pipeName, const std::st
         } else if (event.dwDebugEventCode == EXIT_THREAD_DEBUG_EVENT) {
             session.debugThreads.erase(event.dwThreadId);
             auto found = session.threads.find(event.dwThreadId);
-            if (found != session.threads.end()) { CloseHandle(found->second.handle); session.threads.erase(found); }
+            if (found != session.threads.end()) {
+                if (found->second.handle) CloseHandle(found->second.handle);
+                if (found->second.exitHandle) CloseHandle(found->second.exitHandle);
+                session.threads.erase(found);
+            }
             if (event.dwThreadId == simulationThread) emergency = true;
         } else if (event.dwDebugEventCode == LOAD_DLL_DEBUG_EVENT) {
             if (event.u.LoadDll.hFile) CloseHandle(event.u.LoadDll.hFile);

@@ -206,7 +206,7 @@ test('profile selection refuses unknown profiles, unqualified action tracing and
 test('action trace pairs nested mixed calls on four actual threads using matching entry RSP and return address', { skip }, () => {
   for (const suffix of ['', '-attach']) {
     const result = run([`--self-test-action-trace${suffix}`]);
-    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.status, 0, `action-trace${suffix || '-launch'}: ${result.stderr}\nstdout tail:\n${result.stdout.slice(-4096)}`);
     const observations = result.events.filter(event => event.event === 'action-trace-observation');
     assert.equal(observations.length, 256);
     const stacks = new Map();

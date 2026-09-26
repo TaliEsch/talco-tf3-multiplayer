@@ -408,8 +408,10 @@ void ValidateMapped(HANDLE process, ULONG64 base, const Image& image, const std:
 }
 struct SavedThread {
     HANDLE handle = nullptr;
+    HANDLE exitHandle = nullptr; // explicit query/synchronization rights, not implied by a debug event
     CONTEXT original{};
     bool armed = false;
+    bool terminatedConfirmed = false;
     bool cleanupSuspended = false;
     // One queued execution trap can be hidden behind another thread's event.
     // Capture its ownership before restoring the debug registers, never infer
@@ -487,11 +489,37 @@ struct Session {
         for (auto& pair : threads) {
             auto& thread = pair.second;
             if (thread.armed && !exited) {
-                DWORD code = 0;
-                if (GetExitCodeThread(thread.handle, &code) && code != STILL_ACTIVE) { thread.armed = false; continue; }
+                const DWORD exitedBeforeSuspend = WaitForSingleObject(thread.exitHandle, 0);
+                if (exitedBeforeSuspend == WAIT_OBJECT_0) {
+                    thread.armed = false;
+                    thread.terminatedConfirmed = true;
+                    continue;
+                }
+                if (exitedBeforeSuspend != WAIT_TIMEOUT) {
+                    teardownError = GetLastError();
+                    fprintf(stderr, "restore_thread_wait_failed thread=%lu error=%lu\n", pair.first, teardownError);
+                    ok = false; continue;
+                }
                 if (!thread.cleanupSuspended) {
                     const DWORD suspended = SuspendThread(thread.handle);
-                    if (suspended == static_cast<DWORD>(-1)) { fprintf(stderr, "restore_suspend_failed thread=%lu error=%lu\n", pair.first, GetLastError()); ok = false; continue; }
+                    if (suspended == static_cast<DWORD>(-1)) {
+                        const DWORD suspendError = GetLastError();
+                        const DWORD exitedAfterSuspend = WaitForSingleObject(thread.exitHandle, 0);
+                        if (exitedAfterSuspend == WAIT_OBJECT_0) {
+                            thread.armed = false;
+                            thread.terminatedConfirmed = true;
+                            continue;
+                        }
+                        DWORD code = 0;
+                        const BOOL exitQuery = GetExitCodeThread(thread.exitHandle, &code);
+                        const DWORD exitQueryError = exitQuery ? ERROR_SUCCESS : GetLastError();
+                        teardownError = suspendError;
+                        fprintf(stderr, "restore_suspend_failed thread=%lu error=%lu exit_wait=%lu exit_query=%s exit_query_error=%lu exit_code=%lu pending=%s pending_event=%lu pending_thread=%lu\n",
+                            pair.first, teardownError, exitedAfterSuspend, exitQuery ? "true" : "false", exitQueryError, code,
+                            pending ? "true" : "false", pending ? event.dwDebugEventCode : 0,
+                            pending ? event.dwThreadId : 0);
+                        ok = false; continue;
+                    }
                     thread.cleanupSuspended = true;
                 }
                 CONTEXT context{}; context.ContextFlags = CONTEXT_CONTROL | CONTEXT_DEBUG_REGISTERS;
@@ -533,7 +561,7 @@ struct Session {
         if (!ok) return ReportCleanup(false);
         restorationReadbackVerified = true;
         for (const auto& pair : threads) {
-            if (!pair.second.restorationReadbackVerified && !exited) {
+            if (!pair.second.restorationReadbackVerified && !pair.second.terminatedConfirmed && !exited) {
                 restorationReadbackVerified = false;
                 teardownState = TeardownState::RestorationReadbackFailed;
                 return ReportCleanup(false);
@@ -545,11 +573,17 @@ struct Session {
         for (auto& pair : threads) {
             auto& thread = pair.second;
             if (!thread.cleanupSuspended) continue;
-            DWORD code = 0;
-            if (exited || (GetExitCodeThread(thread.handle, &code) && code != STILL_ACTIVE)) {
+            const DWORD threadExitWait = exited ? WAIT_OBJECT_0 : WaitForSingleObject(thread.exitHandle, 0);
+            if (threadExitWait == WAIT_OBJECT_0) {
+                thread.terminatedConfirmed = true;
                 thread.cleanupSuspended = false;
+            } else if (threadExitWait != WAIT_TIMEOUT) {
+                teardownError = GetLastError();
+                fprintf(stderr, "restore_resume_wait_failed thread=%lu error=%lu\n", pair.first, teardownError);
+                ok = false;
             } else if (ResumeThread(thread.handle) == static_cast<DWORD>(-1)) {
-                fprintf(stderr, "restore_resume_failed thread=%lu error=%lu\n", pair.first, GetLastError()); ok = false;
+                teardownError = GetLastError();
+                fprintf(stderr, "restore_resume_failed thread=%lu error=%lu\n", pair.first, teardownError); ok = false;
             } else thread.cleanupSuspended = false;
         }
         if (!ok) return ReportCleanup(false);
@@ -683,7 +717,10 @@ struct Session {
         // an attached target if this process exits unexpectedly.  Only its
         // explicit shutdown path may call Clean and turn this back off.
         if (!failStop) Clean();
-        for (auto& pair : threads) if (pair.second.handle) CloseHandle(pair.second.handle);
+        for (auto& pair : threads) {
+            if (pair.second.handle) CloseHandle(pair.second.handle);
+            if (pair.second.exitHandle) CloseHandle(pair.second.exitHandle);
+        }
         for (auto& pair : debugThreads) if (pair.second) CloseHandle(pair.second);
         if (debugProcess) CloseHandle(debugProcess);
         if (process) CloseHandle(process);
@@ -694,6 +731,8 @@ struct Session {
         auto& saved = threads[id];
         Require(DuplicateHandle(GetCurrentProcess(), source, GetCurrentProcess(), &saved.handle, 0, FALSE,
                                 DUPLICATE_SAME_ACCESS) != FALSE, "cannot retain thread handle");
+        saved.exitHandle = OpenThread(SYNCHRONIZE | THREAD_QUERY_LIMITED_INFORMATION, FALSE, id);
+        Require(saved.exitHandle != nullptr, "cannot retain thread status handle");
         saved.original.ContextFlags = CONTEXT_DEBUG_REGISTERS;
         Require(GetThreadContext(saved.handle, &saved.original) != FALSE, "cannot read suspended thread debug registers");
         // Refuse to interfere with another hardware debugger, including disabled
@@ -1102,7 +1141,11 @@ int Observe(DWORD pid, bool selftest, bool mismatch, unsigned seconds, unsigned 
                 if (actionTraceProfile) actionTrace.Flush(event.dwThreadId, "thread-exited");
                 session.debugThreads.erase(event.dwThreadId);
                 auto found = session.threads.find(event.dwThreadId);
-                if (found != session.threads.end()) { CloseHandle(found->second.handle); session.threads.erase(found); }
+                if (found != session.threads.end()) {
+                    if (found->second.handle) CloseHandle(found->second.handle);
+                    if (found->second.exitHandle) CloseHandle(found->second.exitHandle);
+                    session.threads.erase(found);
+                }
                 break;
             }
             case LOAD_DLL_DEBUG_EVENT: if (event.u.LoadDll.hFile) CloseHandle(event.u.LoadDll.hFile); break;
