@@ -3,13 +3,22 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { parseProbeOutbox, processProbeOnce, serializeProbeInbox } from "../src/userdata-ipc.mjs";
+import { parseFlatDataFile, parseProbeOutbox, processProbeOnce, serializeProbeInbox } from "../src/userdata-ipc.mjs";
 
 const NONCE = "0123456789abcdef0123456789abcdef";
 
 test("strictly parses the flat userdata probe emitted by TF3", () => {
   const source = `function data()\r\nreturn { \r\n\t\tschemaVersion = 1,\r\n\t\tnonce = "${NONCE}",\r\n\t\tcounter = 7,\r\n\t\tkind = "probe",\r\n}\r\nend\r\n`;
   assert.deepEqual({ ...parseProbeOutbox(source) }, { schemaVersion: 1, nonce: NONCE, counter: 7, kind: "probe" });
+});
+
+test("sale receipt balances may be signed while entity and credit fields stay nonnegative", () => {
+  const source = 'function data() return {referenceBefore=-500,referenceAfter=-500,targetBefore=-100,targetAfter=100,creditedAmount=200,referenceCompanyEntity=7,} end';
+  const value = parseFlatDataFile(source);
+  assert.equal(value.referenceBefore, -500);
+  assert.equal(value.targetBefore, -100);
+  assert.throws(() => parseFlatDataFile(source.replace('creditedAmount=200', 'creditedAmount=-200')));
+  assert.throws(() => parseFlatDataFile(source.replace('referenceCompanyEntity=7', 'referenceCompanyEntity=-7')));
 });
 
 test("probe parser rejects code, nesting, duplicates, unknown fields and oversize input", () => {

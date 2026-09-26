@@ -41,7 +41,8 @@ export function parseFlatDataFile(source) {
         && !IDENTIFIER_VALUE.test(value)) fail(`string for ${key} is outside the allowlist`);
       offset = end + 1;
     } else {
-      const signedBalance = key === 'originalBefore' || key === 'originalAfter';
+      const signedBalance = ['originalBefore','originalAfter','referenceBefore',
+        'referenceAfter','targetBefore','targetAfter'].includes(key);
       const valueMatch = body.slice(offset).match(signedBalance
         ? /^(true|false|0|-?[1-9][0-9]*)/
         : /^(true|false|0|[1-9][0-9]*)/);
