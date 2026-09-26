@@ -109,13 +109,14 @@ local function copyButtons(source : {EntityWindowUtil.ActionBarButton}) : {Entit
     local fields : table = {}
     for key, value in pairs(button as table) do fields[key] = value end
     local copy = fields as EntityWindowUtil.ActionBarButton
-    if button.tag == "entityWindow.vehicle.startStop" then
-      local onClick = button.onClick
-      local onValueChange = button.onValueChange
-      -- Always wrap, even while unlocked: a previously rendered callback must
-      -- consult the current latch, not a captured boolean.
-      if onClick then copy.onClick = function()
-        if not blocked then onClick() end
+    local onClick = button.onClick
+    local onValueChange = button.onValueChange
+    -- Always wrap, even while unlocked: a previously rendered callback must
+    -- consult the current latch, not a captured boolean. The one-use Stop
+    -- exception applies only to its exact tag; every other action stays held.
+    if onClick then copy.onClick = function()
+        if not blocked then onClick(); return end
+        if button.tag ~= "entityWindow.vehicle.startStop" then return end
         if blocked then stopClickDiagnostic = "guarded_click" end
         local permitOk, permitted = pcall(stopPermitCurrent)
         if not permitOk then stopClickDiagnostic = "permit_error"; return end
@@ -143,8 +144,7 @@ local function copyButtons(source : {EntityWindowUtil.ActionBarButton}) : {Entit
           stopClickDiagnostic = permitted and "not_stop" or "permit_not_current"
         end
       end end
-      if onValueChange then copy.onValueChange = function(value : boolean) if not blocked then onValueChange(value) end end end
-    end
+    if onValueChange then copy.onValueChange = function(value : boolean) if not blocked then onValueChange(value) end end end
     result[#result + 1] = copy
   end
   return result

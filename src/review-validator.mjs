@@ -332,7 +332,8 @@ export async function validateReviewPackage(root) {
   for (const marker of [
     'if blocked then return owner == nonce end',
     'if not blocked or owner ~= nonce then return false end',
-    'if not blocked then onClick() end',
+    'if not blocked then onClick(); return end',
+    'if button.tag ~= "entityWindow.vehicle.startStop" then return end',
     'if not blocked then onValueChange(value) end',
     'local permitOk, permitted = pcall(stopPermitCurrent)',
     'if blocked and permitted and isStop then',
