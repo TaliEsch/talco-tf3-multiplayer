@@ -183,7 +183,15 @@ export class SessionCoordinator {
     if (["lobby", "halted"].includes(this.#phase)) return;
     if ([...this.#members.values()].some(m => this.now() - m.seen >= this.heartbeatMs)) { this.halt("HEARTBEAT_TIMEOUT"); return; }
     if (this.#phase !== "running" && this.now() >= this.#deadline) { this.halt("COORDINATION_TIMEOUT"); return; }
+    if (this.#phase === "preparing" && updateCount !== undefined
+      && (!uint(updateCount) || updateCount > this.#checkpoint.updateCount)) {
+      this.halt("CHECKPOINT_DEADLINE_MISSED"); return;
+    }
     if (this.#phase === "awaiting_prepare" && updateCount !== undefined && (!uint(updateCount) || updateCount >= this.#command.scheduledUpdate)) { this.halt("PREPARE_DEADLINE_MISSED"); return; }
+    if (this.#phase === "awaiting_applied" && updateCount !== undefined
+      && (!uint(updateCount) || updateCount > this.#command.scheduledUpdate)) {
+      this.halt("APPLY_DEADLINE_MISSED"); return;
+    }
     if (this.now() - this.#lastHeartbeat >= Math.min(1000, this.heartbeatMs / 3)) {
       this.#lastHeartbeat = this.now();
       this.broadcast("coordination_heartbeat", { roundId: this.#round });

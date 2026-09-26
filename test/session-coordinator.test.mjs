@@ -65,6 +65,25 @@ for (const count of [2, 4]) test(`${count} participant held barriers reject late
   assert.equal(command.events.some(e => e.kind === 'command_completed'), false);
   assert.throws(() => command.applied('p1'), { code: 'SESSION_HALTED' });
 });
+test('Host clock observation cannot overtake a held checkpoint or applied command', () => {
+  const checkpoint = setup();
+  checkpoint.c.ready('p0', { roundId: checkpoint.c.roundId, updateCount: 100,
+    checkpointHash, companyEntity: checkpoint.roster[0].companyEntity });
+  checkpoint.c.poll(101);
+  assert.equal(checkpoint.c.phase, 'halted');
+  assert.equal(checkpoint.events.at(-1).payload.code, 'CHECKPOINT_DEADLINE_MISSED');
+  assert.equal(checkpoint.events.some(e => e.kind === 'coordination_ready'), false);
+
+  const command = setup(); command.ready(); command.c.propose(command.command, 100);
+  command.prepared('p0'); command.prepared('p1'); command.applied('p0');
+  command.c.poll(161);
+  assert.equal(command.c.phase, 'halted');
+  assert.equal(command.events.at(-1).payload.code, 'APPLY_DEADLINE_MISSED');
+  assert.equal(command.events.some(e => e.kind === 'command_completed'), false);
+
+  const missing = setup(); missing.c.poll(Number.NaN);
+  assert.equal(missing.events.at(-1).payload.code, 'CHECKPOINT_DEADLINE_MISSED');
+});
 test("unverified companies or duplicate users cannot seal roster", () => {
   for (const roster of [[players[0]], [{ ...players[0], companyEntity: null }, players[1]], [players[0], players[0]]]) {
     const c = new SessionCoordinator(); assert.throws(() => c.prepare(roster, { updateCount: 100, checkpointHash }), /verified companies/);
