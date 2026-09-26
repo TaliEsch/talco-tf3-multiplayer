@@ -74,16 +74,25 @@ test('guided setup confirms a ready flat plan then completes the six real mailbo
     assert.equal(persisted.receipts.length,6);
     assert.equal(persisted.checkpointVerified,false);
     assert.equal(persisted.multiGameVerified,false);
-    await session.onEvent({event:'phase2_service_observation_result',action:'start',outcome:'raw_start_captured',
+    const rawStart={event:'phase2_service_observation_result',action:'start',outcome:'raw_start_captured',
       code:'RAW_START_CAPTURED',requestId:8,originalCompany:10,targetCompany:20,vehicleEntity:32,lineEntity:37,
-      accountNet:-100,nonce:bridge.nonce,secret:'must_not_persist'});
-    await session.onEvent({event:'phase2_service_observation_result',action:'end',outcome:'raw_end_captured',
-      code:'RAW_END_CAPTURED',requestId:9,intervalNet:300,intervalMaintenanceVehicle:-50,gameplayVerified:true});
+      tickCount:101,updateCount:80,gameTime:100,startGameTime:100,startUpdateCount:80,endGameTime:0,endUpdateCount:0,
+      accountNetWindowStart:0,accountNetWindowEnd:100,accountNet:-100,intervalNet:0,
+      intervalMaintenanceVehicle:0,intervalMaintenanceInfrastructure:0,intervalMaintenanceOther:0,
+      intervalMaintenanceVehicleMaintenance:0,startVisitedMask:0,endVisitedMask:0,startStopIndex:0,endStopIndex:0,
+      nonce:bridge.nonce,secret:'must_not_persist'};
+    await session.onEvent(rawStart);
+    await session.onEvent({...rawStart,action:'end',outcome:'raw_end_captured',code:'RAW_END_CAPTURED',
+      requestId:9,tickCount:121,updateCount:90,gameTime:200,endGameTime:200,endUpdateCount:90,
+      accountNetWindowEnd:200,accountNet:250,intervalNet:300,intervalMaintenanceVehicle:-50,
+      endVisitedMask:3,endStopIndex:1,gameplayVerified:true});
     const observed=JSON.parse(await readFile(path.join(root,'reports',`local-batch-${session.status.run.batchId}`,'report.json'),'utf8'));
     assert.equal(observed.receipts.length,6);
     assert.equal(observed.outcome,'SETUP_VERIFIED_SERVICE_NOT_OBSERVED');
     assert.equal(observed.serviceObservation.receipts.length,2);
     assert.equal(observed.serviceObservation.receipts[0].accountNet,-100);
+    assert.equal(observed.serviceObservation.pairedRawIntervalCorrelated,true);
+    assert.equal(observed.serviceObservation.routeStateChanged,true);
     assert.equal(observed.serviceObservation.serviceAccountingVerified,false);
     assert.equal(observed.serviceObservation.completedTripVerified,false);
     assert.equal(observed.serviceObservation.continuousOwnershipVerified,false);

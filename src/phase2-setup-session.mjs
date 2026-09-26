@@ -1,4 +1,5 @@
 import {createPhase2LocalRun} from './phase2-local-run.mjs';
+import {correlateRawServiceInterval} from './service-observation.mjs';
 
 // Local disposable-save setup only. The submitted plan is not permission to
 // mutate: a separate launcher confirmation must match its canonical hash.
@@ -94,7 +95,10 @@ export function createPhase2SetupSession({bridge,saveReport,logger=()=>{},checkp
         if(phase!=='complete')return;
         if(serviceEvidence.length>=2)throw new Error('SERVICE_EVIDENCE_LIMIT');
         serviceEvidence.push(row);
+        const paired=serviceEvidence.length===2
+          ?correlateRawServiceInterval(serviceEvidence[0],serviceEvidence[1]):null;
         await saveReport({...run.status,serviceObservation:{scope:'raw_endpoint_account_reads',
+          pairedRawIntervalCorrelated:paired!==null,routeStateChanged:paired?.routeStateChanged??false,
           serviceAccountingVerified:false,continuousOwnershipVerified:false,completedTripVerified:false,
           receipts:structuredClone(serviceEvidence)}});
       }).catch(async()=>{await fail();emit('SERVICE_REPORT_WRITE_FAILED_STOP_HELPER');});

@@ -62,3 +62,35 @@ export function parseServiceObservationReceipt(source,request){
   }
   return Object.freeze({...receipt,gameplayVerified:false,serviceAccountingVerified:false});
 }
+
+// This proves that two bounded raw reads refer to one observed interval. It
+// does not turn vehicle-level net totals into company revenue or a completed
+// trip: those meanings need separate TF3 evidence.
+export function correlateRawServiceInterval(start,end){
+  const rows=[start,end];
+  if(rows.some(row=>!row||typeof row!=='object'||Array.isArray(row)))return null;
+  const textFields=['action','outcome','code'];
+  const numericFields=['requestId','originalCompany','targetCompany','vehicleEntity','lineEntity',
+    'tickCount','updateCount','gameTime',...rawKeys];
+  if(rows.some(row=>textFields.some(key=>typeof row[key]!=='string')
+    ||numericFields.some(key=>!Number.isSafeInteger(row[key]))))return null;
+  if(start.action!=='start'||start.outcome!=='raw_start_captured'||start.code!=='RAW_START_CAPTURED'
+    ||end.action!=='end'||end.outcome!=='raw_end_captured'||end.code!=='RAW_END_CAPTURED'
+    ||!entity(start.requestId)||!entity(end.requestId)||end.requestId<=start.requestId
+    ||[start.originalCompany,start.targetCompany,start.vehicleEntity,start.lineEntity].some(value=>!entity(value))
+    ||new Set([start.originalCompany,start.targetCompany,start.vehicleEntity,start.lineEntity]).size!==4
+    ||['originalCompany','targetCompany','vehicleEntity','lineEntity'].some(key=>start[key]!==end[key])
+    ||end.tickCount<=start.tickCount||end.updateCount<=start.updateCount||end.gameTime<=start.gameTime
+    ||start.startUpdateCount!==start.updateCount||start.startGameTime!==start.gameTime
+    ||end.startUpdateCount!==start.updateCount||end.startGameTime!==start.gameTime
+    ||end.endUpdateCount!==end.updateCount||end.endGameTime!==end.gameTime
+    ||start.accountNetWindowStart<0||end.accountNetWindowStart<0
+    ||start.accountNetWindowEnd!==start.gameTime||end.accountNetWindowEnd!==end.gameTime
+    ||start.accountNetWindowStart>start.gameTime||end.accountNetWindowStart>end.gameTime
+    ||start.startVisitedMask<0||start.startVisitedMask>3||end.endVisitedMask<0||end.endVisitedMask>3
+    ||end.startVisitedMask!==start.startVisitedMask
+    ||start.startStopIndex<0||start.startStopIndex>1||end.endStopIndex<0||end.endStopIndex>1
+    ||end.startStopIndex!==start.startStopIndex)return null;
+  return Object.freeze({startUpdateCount:start.updateCount,endUpdateCount:end.updateCount,
+    routeStateChanged:end.endVisitedMask!==start.startVisitedMask||end.endStopIndex!==start.startStopIndex});
+}
