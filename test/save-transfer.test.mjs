@@ -18,9 +18,22 @@ test("client pulls and verifies the host save over loopback", async () => {
   await writeFile(source, content);
   const transfer = await startSaveServer({ secret: SECRET, sessionId: "loopback", saveFile: source, port: 0 });
   try {
-    const received = await downloadSave({ secret: SECRET, sessionId: "loopback", port: transfer.port, destinationDir: clientDir });
+    const progress = [];
+    const received = await downloadSave({ secret: SECRET, sessionId: "loopback", port: transfer.port,
+      destinationDir: clientDir, onProgress: update => progress.push(update) });
     assert.deepEqual(await readFile(received.path), content);
     assert.equal(received.sha256, transfer.sha256);
+    assert.deepEqual(progress[0], {phase:"downloading", receivedBytes:0, totalBytes:content.length});
+    assert.deepEqual(progress.at(-1), {phase:"verified", receivedBytes:content.length, totalBytes:content.length});
+    assert.equal(progress.at(-2).phase,"verifying");
+    assert.ok(progress.every((update,index) => update.totalBytes === content.length
+      && update.receivedBytes >= 0 && update.receivedBytes <= content.length
+      && (index === 0 || update.receivedBytes >= progress[index - 1].receivedBytes)));
+    const retryProgress=[];
+    const reused=await downloadSave({secret:SECRET,sessionId:"loopback",port:transfer.port,
+      destinationDir:clientDir,onProgress:update=>retryProgress.push(update)});
+    assert.deepEqual(reused,received);
+    assert.deepEqual(retryProgress,[{phase:"verified",receivedBytes:content.length,totalBytes:content.length}]);
   } finally { transfer.server.close(); await rm(root, { recursive: true, force: true }); }
 });
 

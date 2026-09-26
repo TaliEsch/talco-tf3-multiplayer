@@ -134,15 +134,15 @@ export async function startSaveServer({ secret, sessionId, saveFile, bind = DEFA
   return { server, port: server.address().port, bytes: source.size, sha256: saveSha256 };
 }
 
-export async function downloadSave({ secret, sessionId, host = "127.0.0.1", port = DEFAULT_SAVE_PORT, destinationDir }) {
+export async function downloadSave({ secret, sessionId, host = "127.0.0.1", port = DEFAULT_SAVE_PORT, destinationDir, onProgress = () => {} }) {
   validateCommon(secret, sessionId);
+  if (typeof onProgress !== "function") throw new TypeError("save progress callback must be a function");
   if (!path.isAbsolute(destinationDir)) throw new TypeError("save destination must be absolute");
   const destinationInfo = await lstat(destinationDir);
   if (!destinationInfo.isDirectory() || destinationInfo.isSymbolicLink()) throw new TypeError("save destination must be an existing non-linked directory");
   const safeSession = sessionId.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 48);
   const finalPath = path.join(destinationDir, `TF3MP_${safeSession}.sav`);
   const partPath = path.join(destinationDir, `.tf3mp-${randomBytes(16).toString("hex")}.part`);
-  try { await lstat(finalPath); throw new Error("download destination already exists"); } catch (error) { if (error.code !== "ENOENT") throw error; }
   const timestamp = String(Date.now());
   const nonce = randomBytes(16).toString("hex");
   const response = await new Promise((resolve, reject) => {
@@ -162,16 +162,40 @@ export async function downloadSave({ secret, sessionId, host = "127.0.0.1", port
       || typeof metadataAuth !== "string" || !equalHex(metadataAuth, metadataSignature(secret, sessionId, expectedBytes, expectedHash, baseNonceHex))) {
     response.destroy(); throw new Error("invalid save response metadata");
   }
+  // A prelaunch failure may leave the authenticated download intact. Reuse it
+  // only when the current Host's authenticated metadata matches its bytes.
+  try {
+    const existing = await lstat(finalPath);
+    if (!existing.isFile() || existing.isSymbolicLink() || existing.size !== expectedBytes
+      || !equalHex(await sha256File(finalPath), expectedHash))
+      throw new Error("download destination already exists with different content");
+    response.destroy();
+    try { onProgress({ phase: "verified", receivedBytes: expectedBytes, totalBytes: expectedBytes }); } catch {}
+    return { path: finalPath, bytes: expectedBytes, sha256: expectedHash };
+  } catch (error) {
+    if (error.code !== "ENOENT") { response.destroy(); throw error; }
+  }
   const hash = createHash("sha256");
   let receivedBytes = 0;
+  let lastProgressAt = 0;
+  const progress = (phase, force = false) => {
+    const now = Date.now();
+    if (!force && now - lastProgressAt < 250) return;
+    lastProgressAt = now;
+    try { onProgress({ phase, receivedBytes, totalBytes: expectedBytes }); }
+    catch { /* Progress is observational; it cannot change a verified transfer. */ }
+  };
+  progress("downloading", true);
   const plaintext = decryptSaveStream(secret, sessionId, Buffer.from(baseNonceHex, "hex"));
-  plaintext.on("data", (chunk) => { receivedBytes += chunk.length; if (receivedBytes > MAX_SAVE_BYTES) plaintext.destroy(new Error("save exceeds size limit")); else hash.update(chunk); });
+  plaintext.on("data", (chunk) => { receivedBytes += chunk.length; if (receivedBytes > MAX_SAVE_BYTES) plaintext.destroy(new Error("save exceeds size limit")); else { hash.update(chunk); progress("downloading"); } });
   try {
     await pipeline(response, plaintext, createWriteStream(partPath, { flags: "wx", mode: 0o600 }));
+    progress("verifying", true);
     const receivedHash = hash.digest("hex");
     if (receivedBytes !== expectedBytes || !equalHex(receivedHash, expectedHash)) throw new Error("save size/hash verification failed");
     await link(partPath, finalPath);
     await unlink(partPath);
+    progress("verified", true);
     return { path: finalPath, bytes: receivedBytes, sha256: receivedHash };
   } catch (error) {
     try { await unlink(partPath); } catch {}
