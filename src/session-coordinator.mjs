@@ -15,6 +15,7 @@ export class SessionCoordinator {
   #deadline = 0;
   #lastSequence = 0;
   #checkpoint = null;
+  #checkpointSource = null;
   #lastHeartbeat = -Infinity;
   #releaseUpdate = null;
   #resumeSpeed = null;
@@ -62,6 +63,7 @@ export class SessionCoordinator {
         || new Set(players.map(p => p.companyEntity)).size !== players.length
         || players.some(p => typeof p.playerId !== "string" || !uint(p.companyEntity))) throw new ProtocolError("INVALID_ROSTER", "verified companies and 2-4 participants required");
     this.#checkpoint = { updateCount, ...(checkpointHash === undefined ? {} : {checkpointHash}) };
+    this.#checkpointSource = checkpointHash === undefined ? null : { kind: "operator_baseline" };
     this.#round = randomUUID();
     for (const p of players) this.#members.set(p.playerId, { companyEntity: p.companyEntity, updateCount:checkpointHash===undefined?0:updateCount, seen: this.now(), ready: false, prepared: false, applied: null });
     this.#phase = "preparing"; this.#deadline = this.now() + this.timeoutMs;
@@ -84,10 +86,15 @@ export class SessionCoordinator {
       this.#divergence = Object.freeze({ kind: "checkpoint", roundId: this.#round,
         updateCount: p.updateCount, hostSequence: this.#lastSequence, playerId: id,
         companyEntity: member.companyEntity, expectedHash: this.#checkpoint.checkpointHash,
+        expectedSource: this.#checkpointSource.kind,
+        expectedPlayerId: this.#checkpointSource.playerId ?? null,
+        expectedCompanyEntity: this.#checkpointSource.companyEntity ?? null,
         observedHash: p.checkpointHash });
       this.#fail("CHECKPOINT_MISMATCH");
     }
     // First observed digest is a candidate, never release authorization by itself.
+    if (this.#checkpointSource === null)
+      this.#checkpointSource = { kind: "participant", playerId: id, companyEntity: member.companyEntity };
     this.#checkpoint.checkpointHash = p.checkpointHash;
     member.ready = true; member.updateCount=p.updateCount; member.seen = this.now();
     if ([...this.#members.values()].every(m => m.ready)) {
@@ -146,11 +153,14 @@ export class SessionCoordinator {
     if (this.#phase !== "awaiting_applied" || !exact(p, "roundId,hostSequence,updateCount,stateHash")
         || p.hostSequence !== this.#command?.hostSequence || p.updateCount !== this.#command?.scheduledUpdate
         || p.updateCount < member.updateCount || !hash(p.stateHash)) this.#fail("INVALID_APPLIED_ACK");
-    const expected = member.applied ?? [...this.#members.values()].map(m => m.applied).find(h => h !== null);
-    if (expected !== undefined && expected !== p.stateHash) {
+    const expectedEntry = member.applied !== null ? [id, member]
+      : [...this.#members].find(([, candidate]) => candidate.applied !== null);
+    if (expectedEntry && expectedEntry[1].applied !== p.stateHash) {
       this.#divergence = Object.freeze({ kind: "state", roundId: this.#round,
         updateCount: p.updateCount, hostSequence: p.hostSequence, playerId: id,
-        companyEntity: member.companyEntity, expectedHash: expected, observedHash: p.stateHash });
+        companyEntity: member.companyEntity, expectedHash: expectedEntry[1].applied,
+        expectedSource: "participant", expectedPlayerId: expectedEntry[0],
+        expectedCompanyEntity: expectedEntry[1].companyEntity, observedHash: p.stateHash });
       this.#fail("STATE_MISMATCH");
     }
     member.applied = p.stateHash; member.updateCount = p.updateCount; member.seen = this.now();

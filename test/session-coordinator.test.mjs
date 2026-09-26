@@ -46,7 +46,8 @@ test("a valid differing checkpoint keeps bounded immutable evidence before halti
   assert.throws(() => f.c.ready("p0", { roundId, updateCount: 100, checkpointHash: observedHash, companyEntity: 100 }), /CHECKPOINT_MISMATCH/);
   assert.deepEqual(f.c.divergence, { kind: "checkpoint", roundId, updateCount: 100,
     hostSequence: 0, playerId: "p0", companyEntity: 100,
-    expectedHash: checkpointHash, observedHash });
+    expectedHash: checkpointHash, expectedSource: "operator_baseline",
+    expectedPlayerId: null, expectedCompanyEntity: null, observedHash });
   const copy = f.c.divergence; copy.observedHash = checkpointHash;
   assert.equal(f.c.divergence.observedHash, observedHash);
   assert.throws(() => f.c.ready("p1", { roundId, updateCount: 100, checkpointHash, companyEntity: 101 }),
@@ -63,7 +64,8 @@ test("state mismatch after execution halts future commands without claiming roll
   assert.throws(() => f.applied("p1", { stateHash: "c".repeat(64) }), /STATE_MISMATCH/);
   assert.deepEqual(f.c.divergence, { kind: "state", roundId: f.c.roundId,
     updateCount: 160, hostSequence: 1, playerId: "p1", companyEntity: 101,
-    expectedHash: stateHash, observedHash: "c".repeat(64) });
+    expectedHash: stateHash, expectedSource: "participant", expectedPlayerId: "p0",
+    expectedCompanyEntity: 100, observedHash: "c".repeat(64) });
   assert.throws(() => f.c.beforeCommand(160), /new session/);
   assert.equal(f.events.at(-1).kind, "session_halted");
 });

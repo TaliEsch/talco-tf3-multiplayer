@@ -106,7 +106,9 @@ test("different state hashes halt the coordinated socket session", async () => {
     const command = f.clients[0].messages.find(m => m.kind === "command_prepare").payload.command;
     for (const c of f.clients) c.connection.send("command_prepared", { roundId: f.host.coordinator.roundId, hostSequence: command.hostSequence, scheduledUpdate: command.scheduledUpdate, updateCount: 100 });
     await until(() => f.clients.every(c => c.messages.some(m => m.kind === "command_commit")));
-    f.clients.forEach((c, i) => c.connection.send("command_applied", { roundId: f.host.coordinator.roundId, hostSequence: command.hostSequence, updateCount: command.scheduledUpdate, stateHash: i ? "f".repeat(64) : stateHash }));
+    f.clients[0].connection.send("command_applied", { roundId: f.host.coordinator.roundId, hostSequence: command.hostSequence, updateCount: command.scheduledUpdate, stateHash });
+    await until(() => f.events.some(event => event.event === 'peer_command_applied'));
+    f.clients[1].connection.send("command_applied", { roundId: f.host.coordinator.roundId, hostSequence: command.hostSequence, updateCount: command.scheduledUpdate, stateHash: "f".repeat(64) });
     await until(() => f.clients[0].messages.some(m => m.kind === "session_halted"));
     assert.equal(f.host.coordinator.phase, "halted");
     assert.equal(f.clients[0].messages.some(m => m.kind === "command_completed"), false);
@@ -114,6 +116,11 @@ test("different state hashes halt the coordinated socket session", async () => {
     assert.equal(divergence.length,1);
     assert.equal(divergence[0].kind,'state');
     assert.equal(divergence[0].expectedHash,stateHash);
+    assert.equal(divergence[0].expectedSource,'participant');
+    assert.equal(divergence[0].expectedPlayerId,f.clients[0].player.playerId);
+    assert.equal(divergence[0].expectedCompanyEntity,1000);
+    assert.equal(divergence[0].playerId,f.clients[1].player.playerId);
+    assert.equal(divergence[0].companyEntity,1001);
     assert.equal(divergence[0].observedHash,'f'.repeat(64));
     assert.equal(divergence[0].hostSequence,command.hostSequence);
     f.request(2);
