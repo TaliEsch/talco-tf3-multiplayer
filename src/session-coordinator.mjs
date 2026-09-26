@@ -120,7 +120,13 @@ export class SessionCoordinator {
   heartbeat(id, p) {
     const member = this.#member(id, p);
     if (!exact(p, "roundId,updateCount") || !uint(p.updateCount) || p.updateCount < member.updateCount) this.#fail("CLOCK_RESET");
+    // A receipt for a held world is invalidated if that same engine reports
+    // advancing beyond the barrier before all peers have reached it.
+    if (this.#phase === "preparing" && p.updateCount > this.#checkpoint.updateCount)
+      this.#fail("CHECKPOINT_DEADLINE_MISSED");
     if (this.#phase === "awaiting_prepare" && p.updateCount >= this.#command.scheduledUpdate) this.#fail("PREPARE_DEADLINE_MISSED");
+    if (this.#phase === "awaiting_applied" && p.updateCount > this.#command.scheduledUpdate)
+      this.#fail("APPLY_DEADLINE_MISSED");
     member.updateCount = p.updateCount; member.seen = this.now();
   }
   beforeCommand(updateCount) {

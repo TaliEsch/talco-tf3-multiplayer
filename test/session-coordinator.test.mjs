@@ -42,6 +42,29 @@ test("duplicate prepare and applied receipts halt without advancing the barrier"
   assert.equal(applying.c.phase, "halted");
   assert.equal(applying.events.some(e => e.kind === "command_completed"), false);
 });
+for (const count of [2, 4]) test(`${count} participant held barriers reject later progress before peer receipts`, () => {
+  const checkpoint = setup(count);
+  checkpoint.c.ready('p0', { roundId: checkpoint.c.roundId, updateCount: 100,
+    checkpointHash, companyEntity: checkpoint.roster[0].companyEntity });
+  assert.throws(() => checkpoint.c.heartbeat('p0', { roundId: checkpoint.c.roundId, updateCount: 101 }),
+    { code: 'CHECKPOINT_DEADLINE_MISSED' });
+  assert.equal(checkpoint.c.phase, 'halted');
+  assert.equal(checkpoint.events.filter(e => e.kind === 'session_halted').length, 1);
+  assert.equal(checkpoint.events.some(e => e.kind === 'coordination_ready'), false);
+  assert.throws(() => checkpoint.c.ready('p1', { roundId: checkpoint.c.roundId,
+    updateCount: 100, checkpointHash, companyEntity: checkpoint.roster[1].companyEntity }),
+  { code: 'SESSION_HALTED' });
+
+  const command = setup(count); command.ready(); command.c.propose(command.command, 100);
+  for (const member of command.roster) command.prepared(member.playerId);
+  command.applied('p0');
+  assert.throws(() => command.c.heartbeat('p0', { roundId: command.c.roundId, updateCount: 161 }),
+    { code: 'APPLY_DEADLINE_MISSED' });
+  assert.equal(command.c.phase, 'halted');
+  assert.equal(command.events.filter(e => e.kind === 'session_halted').length, 1);
+  assert.equal(command.events.some(e => e.kind === 'command_completed'), false);
+  assert.throws(() => command.applied('p1'), { code: 'SESSION_HALTED' });
+});
 test("unverified companies or duplicate users cannot seal roster", () => {
   for (const roster of [[players[0]], [{ ...players[0], companyEntity: null }, players[1]], [players[0], players[0]]]) {
     const c = new SessionCoordinator(); assert.throws(() => c.prepare(roster, { updateCount: 100, checkpointHash }), /verified companies/);
