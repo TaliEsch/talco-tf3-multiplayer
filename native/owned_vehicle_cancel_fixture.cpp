@@ -48,13 +48,17 @@ struct OwnedAllocation {
 };
 struct OwnedResources {
     std::atomic<int> destructed{0};
+    std::atomic<bool> released{false};
     std::unique_ptr<OwnedAllocation> command;
     std::unique_ptr<OwnedAllocation> callback;
     std::unique_ptr<OwnedAllocation> progress;
     std::unique_ptr<OwnedAllocation> registry;
     OwnedResources() : command(new OwnedAllocation(&destructed)), callback(new OwnedAllocation(&destructed)),
         progress(new OwnedAllocation(&destructed)), registry(new OwnedAllocation(&destructed)) {}
-    void ReleaseOnce() noexcept { command.reset(); callback.reset(); progress.reset(); registry.reset(); }
+    void ReleaseOnce() noexcept {
+        if (released.exchange(true, std::memory_order_acq_rel)) return;
+        command.reset(); callback.reset(); progress.reset(); registry.reset();
+    }
     bool ReleasedExactlyOnce() const noexcept {
         return !command && !callback && !progress && !registry && destructed.load() == 4;
     }
