@@ -148,7 +148,10 @@ for (const mode of ['--fixture-multithread', '--fixture-missing-dr6']) {
     assert.ok(detached.trapHits >= 55, 'requires worker pre/post traps and all iteration boundaries');
     if (mode === '--fixture-missing-dr6') assert.equal(detached.missingDr6Hits, detached.trapHits);
     assert.equal(detached.restoredAndDetached, true);
-    assert.equal(runtime.errors(), '');
+    assert.deepEqual(runtime.errors().trim().split(/\r?\n/), [
+      'teardown_state=detached restoration_readback=true drain_completed=true detach_attempted=true target_alive_after_detach=true error=0',
+      'teardown_state=restoring restoration_readback=true drain_completed=false detach_attempted=true target_alive_after_detach=false error=0',
+    ]);
   });
 }
 
@@ -180,7 +183,10 @@ test('native controller preserves an unowned trap through emergency hold and shu
   assert.deepEqual(events.find(value => value.event === 'controller-unowned-trap-delivered'), {
     event: 'controller-unowned-trap-delivered', handlerDeliveries: 1, exitCode: 0x80000004
   });
-  assert.equal(runtime.errors(), '');
+  assert.deepEqual(runtime.errors().trim().split(/\r?\n/), [
+    'teardown_state=target-exited restoration_readback=true drain_completed=false detach_attempted=false target_alive_after_detach=false error=0',
+    'teardown_state=target-exited restoration_readback=true drain_completed=false detach_attempted=false target_alive_after_detach=false error=0',
+  ]);
 });
 
 test('native controller holds all fixture threads, receives control while held, and releases exactly one real iteration', { skip, timeout: 25000 }, async t => {

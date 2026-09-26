@@ -863,7 +863,9 @@ int ActionFixture(bool depthCap = false) {
     if (WaitForMultipleObjects(static_cast<DWORD>(workers.size()), workers.data(), TRUE, 10000) != WAIT_OBJECT_0) return 93;
     bool passed = true;
     for (HANDLE worker : workers) { DWORD code = 999; passed = GetExitCodeThread(worker, &code) && code == 0 && passed; CloseHandle(worker); }
-    Sleep(300);
+    // Clean needs three quiet 25 ms drains plus a 250 ms survival check.
+    // Keep this owned fixture alive beyond both windows after its workers end.
+    Sleep(1000);
     return passed ? 0 : 94;
 }
 DWORD WINAPI CommandStressWorker(void* startEvent) {
@@ -895,7 +897,9 @@ int CommandStressFixture() {
     for (HANDLE worker : workers) { DWORD code = 999; passed = GetExitCodeThread(worker, &code) && code == 0 && passed; CloseHandle(worker); }
     // Cutoff runs must finish draining and detach while the owned target is
     // still alive; natural process exit is a different outcome.
-    Sleep(300);
+    // The debugger must finish its drain and survival check before this
+    // owned target exits naturally; exit during that check is a test failure.
+    Sleep(1000);
     return passed ? 0 : 94;
 }
 DWORD WINAPI CommandFixtureWorker(void*) {

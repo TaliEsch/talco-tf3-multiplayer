@@ -223,7 +223,10 @@ test('action trace pairs nested mixed calls on four actual threads using matchin
       const handlerEntry = event.kind === 'handler' && event.phase === 'entry';
       assert.equal(event.handlerPayload.present, handlerEntry);
       assert.equal(event.handlerPayload.byteCount, handlerEntry ? 5 : 0);
-      assert.equal(event.remoteBytesAttempted, handlerEntry ? 13 : 8);
+      // The fixture's handler takes depth in RCX; RDX may be zero. A zero
+      // address is rejected before the optional five-byte remote read.
+      assert.equal(event.remoteBytesAttempted, handlerEntry && event.rdx !== '0' ? 13 : 8);
+      if (handlerEntry && event.rdx === '0') assert.equal(event.handlerPayload.readable, false);
       assert.equal(event.commandControlQualified, false);
       assert.equal(event.captureComplete, false);
       assert.equal(event.raxIsCompletion, false);
