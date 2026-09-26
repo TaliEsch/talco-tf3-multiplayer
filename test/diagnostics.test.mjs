@@ -167,6 +167,7 @@ test('divergence diagnostics retain only bounded comparison evidence',()=>{
     kind:'state',roundId:'round-1',playerId:'player-1',companyEntity:7,
     updateCount:160,hostSequence:1,buildHash:'c'.repeat(64),modManifestHash:'d'.repeat(64),
     expectedHash:'a'.repeat(64),observedHash:'b'.repeat(64),
+    expectedSource:'participant',expectedPlayerId:'player-0',expectedCompanyEntity:6,
     rawReceipt:{secret:'private'},path:'C:\\private',nonce:'private'});
   const record=JSON.parse(output);
   assert.equal(record.expectedHash,'a'.repeat(64));
@@ -174,5 +175,19 @@ test('divergence diagnostics retain only bounded comparison evidence',()=>{
   assert.equal(record.roundId,'round-1');
   assert.equal(record.buildHash,'c'.repeat(64));
   assert.equal(record.modManifestHash,'d'.repeat(64));
+  assert.equal(record.expectedSource,'participant');
+  assert.equal(record.expectedPlayerId,'player-0');
+  assert.equal(record.expectedCompanyEntity,6);
   for(const field of ['rawReceipt','path','nonce'])assert.equal(record[field],undefined);
+  let baseline='';
+  diagnosticLogger({write:text=>{baseline+=text;}})({event:'session_divergence',
+    expectedSource:'operator_baseline',expectedPlayerId:null,expectedCompanyEntity:null});
+  assert.equal(JSON.parse(baseline).expectedSource,'operator_baseline');
+  assert.equal(JSON.parse(baseline).expectedPlayerId,null);
+  assert.equal(JSON.parse(baseline).expectedCompanyEntity,null);
+  let invalid='';
+  diagnosticLogger({write:text=>{invalid+=text;}})({event:'session_divergence',
+    expectedSource:'participant',expectedPlayerId:'private/path',expectedCompanyEntity:6});
+  for(const field of ['expectedSource','expectedPlayerId','expectedCompanyEntity'])
+    assert.equal(JSON.parse(invalid)[field],undefined);
 });

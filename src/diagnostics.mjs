@@ -84,9 +84,23 @@ export function diagnosticLogger(stream = process.stdout) {
       'engine_operation_receipt','engine_checkpoint_evidence','engine_execution_evidence',
       'engine_operation_fault','command_proposed','host_action_clock']);
     if(stopEvidenceEvents.has(record.event)){
-      if(record.event==='session_divergence')
+      if(record.event==='session_divergence') {
         for(const field of ['buildHash','modManifestHash'])
           if(typeof record[field]==='string'&&/^[a-f0-9]{64}$/.test(record[field]))safe[field]=record[field];
+        if(record.expectedSource==='operator_baseline'
+          &&record.expectedPlayerId===null&&record.expectedCompanyEntity===null){
+          safe.expectedSource='operator_baseline';
+          safe.expectedPlayerId=null;safe.expectedCompanyEntity=null;
+        }else if(record.expectedSource==='participant'
+          &&typeof record.expectedPlayerId==='string'
+          &&/^[A-Za-z0-9_.:-]{1,128}$/.test(record.expectedPlayerId)
+          &&Number.isSafeInteger(record.expectedCompanyEntity)
+          &&record.expectedCompanyEntity>0&&record.expectedCompanyEntity<=2147483647){
+          safe.expectedSource='participant';
+          safe.expectedPlayerId=record.expectedPlayerId;
+          safe.expectedCompanyEntity=record.expectedCompanyEntity;
+        }
+      }
       for(const field of ['roundId','operationId','role','operation','phase','fault'])
         if(typeof record[field]==='string'&&/^[A-Za-z0-9_.:-]{1,128}$/.test(record[field]))safe[field]=record[field];
       for(const field of ['checkpointHash','stateHash','expectedHash','observedHash'])
