@@ -881,15 +881,30 @@ LONG CALLBACK RejectLeakedSingleStep(PEXCEPTION_POINTERS exception) {
     return EXCEPTION_CONTINUE_SEARCH;
 }
 unsigned actionFixtureDepth = 3;
+HANDLE actionFixtureReleaseEvent = nullptr;
+std::wstring ActionFixtureReleaseName(DWORD pid) {
+    return L"Local\\TF3MP_ActionFixtureRelease_" + std::to_wstring(pid);
+}
+bool ReleaseOwnedActionFixtureWorkers(DWORD pid) {
+    const std::wstring name = ActionFixtureReleaseName(pid);
+    Handle event(OpenEventW(EVENT_MODIFY_STATE, FALSE, name.c_str()));
+    return event.value && SetEvent(event.value);
+}
 DWORD WINAPI ActionFixtureWorker(void* startEvent) {
     if (WaitForSingleObject(startEvent, 5000) != WAIT_OBJECT_0) return 97;
     const ULONG64 expected = (actionFixtureDepth + 1ULL) * (actionFixtureDepth + 2ULL) / 2;
     for (unsigned i = 0; i < 8; ++i) if (ObserverActionFixtureApply(actionFixtureDepth) != expected) return 98;
-    return 0;
+    // Keep the owned trap threads alive until the observer has restored every
+    // debug register and detached. A timeout remains a fixture failure.
+    return WaitForSingleObject(actionFixtureReleaseEvent, 15000) == WAIT_OBJECT_0 ? 0 : 95;
 }
 int ActionFixture(bool depthCap = false) {
     actionFixtureDepth = depthCap ? 40 : 3;
     if (!AddVectoredExceptionHandler(1, RejectLeakedSingleStep)) return 98;
+    const std::wstring releaseName = ActionFixtureReleaseName(GetCurrentProcessId());
+    Handle releaseEvent(CreateEventW(nullptr, TRUE, FALSE, releaseName.c_str()));
+    if (!releaseEvent.value || GetLastError() == ERROR_ALREADY_EXISTS) return 95;
+    actionFixtureReleaseEvent = releaseEvent.value;
     Handle startEvent(CreateEventW(nullptr, TRUE, FALSE, nullptr));
     if (!startEvent.value) return 99;
     std::array<HANDLE, 4> workers{};
@@ -899,11 +914,11 @@ int ActionFixture(bool depthCap = false) {
     }
     Sleep(500);
     if (!SetEvent(startEvent.value)) return 92;
-    if (WaitForMultipleObjects(static_cast<DWORD>(workers.size()), workers.data(), TRUE, 10000) != WAIT_OBJECT_0) return 93;
+    if (WaitForMultipleObjects(static_cast<DWORD>(workers.size()), workers.data(), TRUE, 20000) != WAIT_OBJECT_0) return 93;
     bool passed = true;
     for (HANDLE worker : workers) { DWORD code = 999; passed = GetExitCodeThread(worker, &code) && code == 0 && passed; CloseHandle(worker); }
     // Clean needs three quiet 25 ms drains plus a 250 ms survival check.
-    // Keep this owned fixture alive beyond both windows after its workers end.
+    // Keep this owned fixture alive beyond both windows after worker release.
     Sleep(1000);
     return passed ? 0 : 94;
 }
@@ -1207,11 +1222,17 @@ int Observe(DWORD pid, bool selftest, bool mismatch, unsigned seconds, unsigned 
         if (actionTraceProfile) actionTrace.FlushAll(hits >= maxHits ? "event-cap" : session.exited ? "target-exited" :
             interrupted.load() ? "interrupted" : "duration-cap");
         Require(session.Clean(), "hardware-register restoration or detach failed");
+        if (selftest && actionTraceProfile && !idle)
+            Require(ReleaseOwnedActionFixtureWorkers(pid), "cannot release owned action fixture after detach");
     } catch (...) {
         if (actionTraceProfile) actionTrace.FlushAll("observation-failure");
         const bool clean = session.Clean();
         fprintf(stderr, "cleanup_restored_and_detached=%s\n", clean ? "true" : "false");
         if (selftest) {
+            if (actionTraceProfile && !idle) {
+                if (clean) Require(ReleaseOwnedActionFixtureWorkers(pid), "cannot release owned action fixture after rejection");
+                else TerminateProcess(fixtureProcess.value, 99); // Owned fixture only; never detach an unrestored target.
+            }
             DWORD code = 999;
             const DWORD waited = WaitForSingleObject(fixtureProcess.value, 10000);
             const bool gotCode = GetExitCodeProcess(fixtureProcess.value, &code) != FALSE;
