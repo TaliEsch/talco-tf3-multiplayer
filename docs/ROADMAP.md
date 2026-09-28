@@ -1,5 +1,732 @@
 # TalCo TF3 multiplayer — current delivery plan
 
+## Current priority: playable separate companies — 28 September 2026
+
+The two-instance diagnostic sessions proved one Host-origin ordered Stop
+(run 18) and three matching no-input covered-state checkpoints in one session
+(runs 24 and 25). They did **not** prove a playable Join company. The Join
+currently claims company 55652 in the protocol while TF3's stock UI still
+selects Host company 3141. Do not spend another live run repeating that Stop
+until the local-company presentation gate below is resolved.
+
+1. **Qualify local company control.** Trace exact installed TF3 40408
+   `getPlayer()` initialization/change and find a supported or exact-build
+   qualified way to bind each instance to its assigned company. Finish with
+   source/ABI evidence and a minimal implementation decision. If this is not
+   safely possible, record the precise gap before choosing an alternative.
+2. **Prove the stock UI in one disposable game.** Bind to company 55652;
+   independently read the engine's selected player, balances and owners.
+   TF3's stock finance display must show 55652's balance, and Host vehicle
+   66005 must use the game's existing non-owned vehicle presentation. The
+   Host assets and both wallets must remain unchanged by binding.
+3. **Integrate company authority.** Bind Host and Join before playable
+   admission. Remove the passive-Join exception from that path. Reject a
+   foreign vehicle action at the local capture, Host admission and engine
+   execution boundaries; prove that manager controls and shortcuts cannot
+   mutate a foreign vehicle. Keep unqualified actions disabled.
+4. **Prove two-way play in concurrent games.** Give each company one owned
+   vehicle. Each player must see and control their own vehicle while seeing
+   the other's as non-owned. For one action from each owner, require one Host
+   sequence, distinct game-side execution receipts and fresh postconditions;
+   denied foreign actions must leave both engines unchanged. Retain three
+   matching no-input covered-state checkpoints in the same acceptance run.
+5. **Finish a bounded road economy loop.** For each company, verify depot,
+   stops, line, vehicle purchase/assignment, operation and sale where qualified.
+   Native charge and income receipts must agree with independent engine
+   balances and the stock finance UI; a discrete mutation must not charge the
+   other company.
+6. **Finish session lifecycle.** Verify coordinated speed, pause and failure
+   halt, then save/rejoin and checkpoint-based divergence recovery in real
+   games with exact versions and bounded evidence.
+7. **Finish release acceptance.** Verify up to four assigned companies and
+   direct LAN and port-forwarded Internet on separate machines. Do not call
+   the mod ready or publish a release before these gates pass.
+
+TF2 multiplayer credits Swiss's sequential save-sharing company mod as an
+inspiration; it does not depend on that mod at runtime. TF2's own
+`companies.lua` and foreign-window guards are implementation references for
+concurrent play. Evaluate its asset/wallet swap against TF3's canonical
+company entities and native charges before adapting it. Installed TF3
+40408's stock vehicle UI already branches on ownership; its stock money
+display reads the current player's balance. Use those existing UI paths first.
+
+### Controlled second-company selection — 28 September 2026
+
+In one disposable TF3 40408 load, the exact-build, one-use load-return binder
+changed the loaded selected-player field from 3141 to 55652 before stock game
+UI construction. It reported one four-byte write, readback, restored debug
+registers, detach and a surviving game. The game's bridge independently
+reported `companyEntity=55652`, known balance 0, and advancing updates; the
+stock Account display showed 0. A passive rail construction preview reported
+`ownerCompany=55652`, so at least that stock construction tool received the
+second company. No construction was placed. TF3 quit normally without saving;
+the source save hash remained unchanged. The fixed attempt journal prevents
+repeating this exact save/company assignment. Private bounded evidence is in
+`reports/company-selection-20260928` and the profile's TF3 log.
+
+This is a **single-game selection result**, not a playable Join or a complete
+company switch. Foreign vehicle 66005's stock non-owned panel, unchanged
+Host ownership and both wallet values after binding, Host/Join integration,
+and two-instance company authority remain open. The second-company target
+was previously observed in the same save under build 40396; this run provides
+the first exact-40408 game-side selected-company and balance readback.
+
+## Latest PC ordered Stop — 27 September 2026
+
+On exact installed TF3 40408, one guarded GUI Stop for owned moving vehicle
+66005/company 3141 was cancelled by native invocation 1. The separate owner
+readback still had Stop flag 0 at update 3098. Host ordered sequence 1 for
+update 3163; the held engine receipt reported Stopped there, then the release
+completed. A fresh game-side owner readback had Stop flag 1 at update 3169,
+and the TF3 vehicle panel displayed Stopped. The bounded private trace is
+`reports/ordered-stop-40408-20260927-run12/host.jsonl`. The source disposable
+save SHA-256 remained `ccbf4beb740e53323e06d20890fd029c8e174d3e85efb06801a8b4275c762fb5`;
+TF3 is closed. This requalifies the complete ordered Stop in **one PC game**.
+The prior run 11 exposed a release/readback race; production now waits for
+the released running game clock before the final inspection. Focused tests
+passed 20/20. The full serial isolated suite passed 1,260/1,261 with zero
+failures and the existing Windows symlink skip. Two-device baseline and
+matching Stop receipts remain open;
+automatic Join save loading and initial checkpoint save are not established by
+this Stop run.
+
+## Phase 8 checkpoint-save boundary — 26 September 2026
+
+Installed TF3 40408 declares GUI `app.saveGame(name, callback, isMapEditor,
+skipSetName?)` in `api/tealdef/app.d.tl:83-88`; its callback has no success
+value. The opt-in `--initial-held-save true` Host path now retains the initial
+checkpoint after all participant receipts, issues one nonce-bound GUI save,
+checks the callback's before/after update and reads the resulting disposable
+`.sav` bytes independently before releasing. Focused socket/bridge/coordinator
+tests pass; no TF3 save run has verified the GUI call or resulting bytes yet.
+This is an initial held checkpoint, not mid-session recovery. The saved
+coordination nonce and watchdog lease still reject fresh binding after reload;
+their lifecycle needs exact reload evidence before recovery is enabled.
+Automatic Join loading through the native DLL also remains unqualified: the
+stock menu load and Start Game lifecycle needs a build-specific, safe trigger.
+The installed 40408 GUI source places the stock load closure in `MainPage`
+and calls it on `ProgressPage`'s second step; Start Game separately waits for
+ready state. A hash-pinned read-only native review found the main-menu
+`ScriptComponentRoot` and GUI deferred-step registration, but did not prove
+that the `--script` worker shares its Lua state or can install a recipe before
+the menu closes replacement registration. These RVAs are observations, not
+approved hook sites. Finish the GUI VM ownership/callback lifetime chain before
+an automatic load experiment.
+
+## Latest PC run — 26 September 2026
+
+The next disposable 40408 game reached Start Game and loaded the source save,
+but `START_HOST` was sent after the native runtime's three-minute no-client
+lease expired. The Host saw `NATIVE_RUNTIME_CONNECT_FAILED:connect ENOENT`;
+no Stop was armed or executed (`reports/ordered-stop-40408-20260926-rebuild-run6`).
+Connect the Host promptly after the next announced launch, then gather one
+bounded action trace. The user closed TF3 after the run.
+
+## Current PC ordered Stop follow-up — 26 September 2026
+
+The rebuilt `ordered-stop-40408` runtime and reviewed mod were staged and
+loaded in TF3 40408 on the disposable source save. The fresh Host connected,
+confirmed ownership of moving vehicle 66005, and released its capture barrier.
+Two one-use cancellation attempts then expired before the operator clicked
+Stop: native claimed-invocation and callback deltas were zero, and Host halted
+without ordering an action. Their private traces are
+`reports/ordered-stop-40408-20260926-rebuild-run2` and
+`reports/ordered-stop-40408-20260926-rebuild-run5`. The save remained at SHA-256
+`ccbf4beb740e53323e06d20890fd029c8e174d3e85efb06801a8b4275c762fb5`.
+These timing failures do not negate the successful single-game ordered Stop
+recorded below from 25 September. Review the arm-receipt-to-click timing before
+another live run; preserve the one-use permit and unknown-outcome halt.
+
+## Service income qualification boundary — 26 September 2026
+
+The installed TF3 declarations distinguish net vehicle balance from income
+and maintenance categories, but do not define whether a maintenance-filtered
+balance includes income or how interval endpoints are counted. The existing
+collector's five values therefore cannot certify company revenue or expense.
+At the next disposable service run, compare those bounded raw values with
+stock account-chart Revenue/Expenses and both companies' finance categories
+at the same paused endpoints, including a naturally posted running cost and
+paying unload. Record chart bin coordinates and ownership; derive no credit
+or gameplay pass until the readings agree. TF2 journal semantics are a
+reference for questions to measure, not TF3 proof.
+
+## Join Load Game instruction timing — 26 September 2026
+
+After the authenticated save is prepared and TF3 launch is requested, Join
+now switches from transfer progress to the explicit Load Game page. Its
+company-claim button stays disabled until the production helper reports
+`session_ready` after connecting to the loaded game's bridge. This avoids an
+indeterminate transfer spinner at TF3's expected main menu. Launcher source
+compiles as a temporary library and 18 focused launcher/Join/save tests pass.
+The two canonical launcher processes remain running, so the executable was
+not replaced. Neither Load Game visibility nor loaded-save identity has been
+verified in TF3.
+
+## PC-only service interval correlation — 26 September 2026
+
+The Phase 2 service setup report now checks whether its two bounded raw
+endpoint reads refer to one advancing, entity-matched interval. It records
+whether the visited-stop mask or stop index changed. Twelve focused verifier,
+file-bridge and guided-report tests pass; independent source review found no
+overclaim in the new fields. The report still marks completed trip, company
+income and continuous ownership unverified. The TF3 meanings of the raw
+vehicle finance counters and a real sustained service remain untested.
+
+## PC-only native observer cleanup correction — 26 September 2026
+
+The debugger event's thread handle does not guarantee query or synchronization
+rights. Each observed thread now retains a separate handle with those rights.
+Cleanup treats a signaled handle as confirmed terminated and otherwise still
+requires register restoration and independent readback before detach. The
+observer and controller both close that handle on ordinary thread exit.
+Unknown wait/suspend results remain fail-closed with bounded diagnostics.
+The rebuilt observer/controller focused suite passes 30/30. The permitted
+full integration suite passes 1,238/1,239 with zero failures and the existing
+Windows symlink skip; private log:
+`C:\Users\olihf\Downloads\Temp\tf3mp-full-suite-20260926-native-exit-handle.log`.
+This fixes a rights and exited-thread accounting defect in owned-process
+cleanup; it is not evidence that TF3 Stop or Join loaded the revised build.
+
+## Earlier native observer cleanup diagnosis — 26 September 2026
+
+At this point the intermittent owned action-trace cleanup failure was unresolved.
+Read-only review found a worker-exit race and an unchecked exit-query failure
+as plausible causes; the failing log did not distinguish them. Cleanup now
+records the query result, pending debug event and actual suspend error, and
+the test prints the failing mode plus a bounded stdout tail. Four abandoned
+`--fixture-action-trace` child processes from prior tests were confirmed by
+their command lines and stopped so the native test binaries could be rebuilt.
+The observer and controller then compiled, and their owned-process focused
+suite passed 30/30. This is diagnostic and fixture evidence, not a native
+cleanup fix or TF3 qualification; retain fail-closed teardown on unknown state.
+
+## PC-only Phase 7 four-company receipt hashes — 26 September 2026
+
+Held depot builds and vehicle purchases now carry sorted before/after balances
+for every authenticated company in their game-side receipts. The production
+decoders require exact target debit, unchanged non-target balances and a
+complete 2–4 company roster; their state hashes include that roster. The
+local diagnostic run accepts the revised state scope. Focused Lua, mailbox,
+decoder and local-driver tests pass 47/47; controlled mod review passes 52
+content files at manifest SHA-256
+`4eb7ac50dbfe08e2ebd0b98b06f259a823c1d7ddcec897ce8f52fbd8a1be2388`.
+The permitted full suite passed 1,237/1,239 with one existing Windows symlink
+skip and one native observer fixture cleanup failure (`restore_suspend_failed`,
+Win32 5); the entire 18-test observer file then passed alone. Private logs:
+`C:\Users\olihf\Downloads\Temp\tf3mp-full-suite-20260926-roster-digest-escalated.log`.
+The full integration gate remains open. The running TF3 and launcher still use
+older staged content; no new game-side debit or four-company comparison was
+verified in TF3.
+
+## PC-only Join profile selection — 26 September 2026
+
+When multiple TF3 Steam save folders are present, Join now requires an
+explicit selection from their profile IDs and paths, with no most-recently
+modified default. The chosen folder is still checked against the discovered
+TF3 profile set before any copy. Launcher source compiles and 13 focused
+launcher/save tests pass. The currently running canonical launcher has not
+been replaced; neither Load Game visibility nor loaded-save identity has been
+verified in TF3.
+
+## PC-only Phase 8 baseline divergence evidence — 26 September 2026
+
+A valid held checkpoint that differs from the operator's expected baseline
+still causes an immediate local halt and disconnect, with no readiness or
+release. The participant now retains the bounded expected/observed hashes,
+round, company and update before that halt; the production adapter emits a
+redacted `engine_checkpoint_divergence` diagnostic. Focused participant,
+adapter and diagnostic tests pass 91/91, including malformed and late receipt
+cases. The Host currently sees a disconnect rather than a paired divergence
+record, so the affected game machine's diagnostic is required for recovery
+analysis. The full suite passes 1,238/1,239 with zero failures and the existing
+Windows symlink skip; private log:
+`C:\Users\olihf\Downloads\Temp\tf3mp-full-suite-20260926-baseline-divergence.log`.
+This path has not run in TF3 or across two devices.
+
+## PC-only Phase 7 native action-bar restriction — 26 September 2026
+
+The native-control latch now checks every existing action-bar click and value
+change callback at invocation time. Unsupported buttons stay held after
+acquisition or helper failure; only the exact Start/Stop tag retains its narrow
+one-use Stop permit. Focused callback and review tests pass 6/6; controlled
+mod review passes at manifest SHA-256
+`161031bc11fd790a2a5b47f5b45bfc8228d54c4ad164ea12b0ce640dbdc2fd99`.
+The full suite passes 1,235/1,236 with zero failures and the existing Windows
+symlink skip; private log:
+`C:\Users\olihf\Downloads\Temp\tf3mp-full-suite-20260926-actionbar.log`.
+This closes a concrete GUI callback escape, not all native TF3 mutation routes.
+The currently running game has older staged mod content. No TF3 run verified
+the new restriction.
+
+Installed TF3 UI source also confirms that Load Game builds its tile label
+from the save filename's parsed group name (`gui/menu/savegame_react_util.tl`),
+so the Join launcher can direct the user to its stable disposable filename.
+This source inspection does not prove the copy appears in the correct Steam
+profile or that TF3 loaded it; those still need a disposable PC game check.
+
+## PC-only Phase 8 initial rollback preparation — 26 September 2026
+
+The new `prepare-recovery` CLI verifies the original Host save bytes against
+an exported initial checkpoint agreement plus the supplied executable and
+staged mod. It atomically publishes a separate `tf3mp_rollback_*.sav` copy and
+a non-overwriting agreement file for a **fresh** Host session. It does not
+start TF3, issue a startup-load request, clear old latches, or retry an unknown
+action. Focused module, CLI, agreement and diagnostic tests pass 19/19. This
+prepares rollback to the original pre-binding save only: the agreement is not
+a newly saved mid-session world. A manual Load Game, fresh native binding and
+matching game-side checkpoint still require controlled TF3 evidence. The
+current non-disposable game process was not touched.
+The first 26 September full suite exposed a concurrent release race in an
+owned native fixture. After a one-use resource-release fix and recovery
+publication correction, focused tests pass 22/22 and the full suite passes
+1,234/1,235 with zero failures and the existing Windows symlink skip. Private
+log: `C:\Users\olihf\Downloads\Temp\tf3mp-full-suite-20260926-recovery-final.log`.
+This remains source/owned-process evidence; no TF3 or laptop run occurred.
+
+## Phase 7 owner-selected action correction — 26 September 2026
+
+The held line create, empty-line remove and vehicle line assignment paths now
+accept the instance whose selected company owns the action, while retaining
+the authenticated player mapping, lease and live ownership checks. Their
+unknown execution receipts carry an integer update count so the GUI can
+forward a correlated failure immediately. Line removal also requires the
+post-action line set to equal the prior set minus its target. Focused Lua
+tests pass 22/22, the mod review passes with manifest SHA-256
+`4959744b5bbd14d7291dbcaf95c78a00dca22014ff9dd621cc5c027e1d2f8601`,
+and the full suite passes 1,220/1,221 with zero failures and the existing
+Windows symlink skip. Private full-suite log:
+`C:\Users\olihf\Downloads\Temp\tf3mp-full-suite-20260926-phase7-approved.log`.
+These are source/model checks. The running TF3 and launcher still use older
+staged content. The purchase and depot owner-selected work below was added
+after this particular suite run.
+
+## Phase 7 owner-selected native charges — 26 September 2026
+
+An independent review found that purchase and depot command builders rejected
+the paying company when selected locally, and that ordered readback wrongly
+required the selected company's balance to stay unchanged. Ordered prepare now
+permits that selection; the older local diagnostic execute still requires two
+different companies. Both held ordered paths snapshot the 2–4 company roster,
+verify the target's exact native debit and preserve every other balance. Vehicle
+purchase chooses the same non-target reference company on every instance so
+its state hash does not depend on the local selection. Focused preparation,
+executor, third-company-drift and actual factory tests pass. Mod review passes
+with manifest SHA-256
+`011b8d983fbc89f0ca41d0d5af6e445ebde7c7befe0637d2d7f450a51b9f645d`.
+The first full run found an unrelated asynchronous test-event race, which was
+fixed and passed in isolation. The rerun passed 1,227/1,229 with one existing
+Windows symlink skip and one intermittent native observer fixture cleanup
+failure (`restore_suspend_failed`, Win32 5); that entire 18-test observer file
+then passed alone. Private full-run log:
+`C:\Users\olihf\Downloads\Temp\tf3mp-full-suite-20260926-owner-actions-final.log`.
+The full integration gate is therefore still open. No TF3 process or laptop
+run has verified these new native charges.
+
+## Current PC 40408 offline qualification — 26 September 2026
+
+Read-only checks confirm the running PC `TransportFever3.exe` still hashes to
+`de1daad3a13f3b7e9f79903361bb43769cf4f15e59271a263aefe1f075f23ef2`.
+Both installed native DLLs match their `ordered-stop-40408` manifest. The
+newer native source builds separately and its owned-process smoke test passes;
+27 focused native tests pass against the rebuilt output. That output has not
+replaced the DLLs used by the running non-disposable TF3 process, and these
+offline checks do not extend the earlier real single-game Stop result.
+
+## Passive Join save-name evidence — 26 September 2026
+
+The existing GUI default-save-name hint is now consumed by the Join bridge as
+bounded, nonce-correlated diagnostic evidence. It reports only whether the
+hint matches the prepared disposable filename; the raw name and hex are not
+logged. A match does not prove which file TF3 loaded and never authorizes
+admission or recovery. Focused parser, bridge and diagnostic tests pass,
+including a changed-name result. The full integration suite passes
+1,216/1,217 with zero failures and the existing Windows symlink skip; private
+log: `C:\Users\olihf\Downloads\Temp\tf3mp-full-suite-20260926-join-hint.log`.
+No TF3 run has qualified this hint.
+
+## Join terminal-state correction — 26 September 2026
+
+When the Join helper exits, the launcher now retires its Load Game spinner and
+claim instructions. It shows a stopped-session page, keeps a bounded startup
+or engine-verification failure reason, and leaves Debug available. This stops
+an ended session from looking like an active manual-load wait. Launcher source
+compilation and 18 focused launcher/Join tests pass. The two running canonical
+launcher processes were not replaced, and no TF3 or laptop run tested this UI.
+
+## PC-only Phase 8 divergence provenance — 26 September 2026
+
+The Host's bounded diagnostic writer now retains the checkpoint or state
+digest's source, player and company from a disagreement record. It accepts
+only a coherent operator-baseline or authenticated-participant source shape;
+malformed values are omitted. Focused diagnostics/coordinator tests pass
+29/29. This improves evidence for a later recovery decision; it does not
+authorize reload or establish loaded-save identity.
+
+## PC-only Phase 7 action admission repair — 26 September 2026
+
+Production prepare and execute requests use distinct operation IDs. The sale,
+line removal, line assignment and line creation game paths now bind the saved
+prepare receipt to its own ID while keeping the later execute ID on the one-use
+barrier. A fixture using distinct IDs exposed the prior live-arm rejection.
+The sale receipt also snapshots all 2–4 authenticated companies and rejects
+any non-selling company balance change before accepting native credit. Focused
+action and mod-review tests pass 50/50; the full integration suite passes
+1,213/1,214 with zero failures and one existing Windows symlink skip. Private
+log: `C:\Users\olihf\Downloads\Temp\tf3mp-full-suite-20260926-phase7-integration-v2.log`.
+This remains source/model evidence.
+The running non-disposable TF3 world and launcher were not changed. The revised
+launcher source compiles, while its running executable remains older. A fresh
+disposable TF3 test must still verify the sale credit and these action paths.
+
+## Join Steam-profile save-folder guard — 26 September 2026
+
+The launcher now discovers TF3 save folders from both the game library and
+Steam's registered installation. Join refuses an arbitrary folder when no TF3
+profile save folder exists, so a verified copy cannot silently be placed where
+Load Game will never list it. Its Host status says the file was verified on
+disk, without claiming a loaded world. The launcher source compiled as a
+temporary library; the running canonical executable was not replaced. This
+has not yet been tested through TF3's Load Game menu.
+
+The normal Host launcher now requests the initial checkpoint agreement export
+to a session-specific private path under the user's local app data. It reports
+success only after all game-side checkpoint receipts agree and the file was
+published; an export error is visible. The updated source compiles, while the
+running launcher still needs replacement before this can be tested in TF3.
+
+## PC-only initial checkpoint agreement export — 26 September 2026
+
+After unanimous initial checkpoint receipts from 2–4 participants, the Host
+retains the exact round, update, digest and authenticated company roster. A
+Host-only option can publish a bounded `initial_checkpoint_agreement` JSON
+file once, without overwriting an existing file. A fresh Host session may use
+that record as an exact save/build/mod/roster/digest admission constraint via
+`--expected-baseline`. It explicitly carries `saveLoadVerified: false` and
+cannot reload TF3 or reset a consumed native binding. Focused coordinator,
+socket and file tests pass 58/58; the full suite passes 1,210/1,211, with zero
+failures and the existing Windows symlink skip. Private log:
+`C:\Users\olihf\Downloads\Temp\tf3mp-full-suite-20260926-initial-agreement.log`.
+This is PC-only model/socket evidence. The current non-disposable TF3 world was
+left untouched. A qualified loaded-save receipt and two-machine test remain
+open for the morning.
+
+## PC-only road receipt logging repair — 26 September 2026
+
+The accepted execution diagnostic now handles sale, line create/remove and
+line assignment state shapes without assuming a vehicle Stop field. This
+prevents logging from interrupting the post-receipt path. Focused adapter and
+sale tests pass 24/24; no new TF3 sale or line run occurred. The installed
+TF3 GUI uses `api.engine.util.vehicle.getDepreciatedValue` as a candidate
+refund quote, but current evidence does not establish equality with the
+native sale credit. Record both values in a future disposable-game test before
+using the quote as an exact sale gate.
+
+The sale execution receipt now carries that candidate quote's availability,
+value and equality with the observed native credit as diagnostic fields.
+These fields are logged with the correlated sale execution but excluded from
+the authoritative post-sale state hash. A missing getter does not change the
+one-use send or turn an unknown native result into success. Focused tests pass
+41/41, mod review passes 52 content files, and the full integration suite
+passes 1,204/1,205 with zero failures and the existing Windows symlink skip.
+Private test log:
+`C:\Users\olihf\Downloads\Temp\tf3mp-full-suite-20260926-sale-quote.log`.
+Actual TF3 quote-versus-credit equality remains untested.
+
+## PC-only Join instructions and held-clock guard — 26 September 2026
+
+The Join launcher now states that TF3 opens at its main menu and gives the
+exact disposable save name to choose under Load Game. Its post-transfer screen
+distinguishes a verified file on disk from the unverified identity of the
+loaded TF3 world. It displays the destination Steam save folder and asks for
+an explicit profile choice if more than one is found. The launcher source
+compiles; two running canonical launcher
+processes prevent replacing their executable in place. The current PC TF3
+world is not a disposable test save and remains untouched.
+
+The Host now halts if an authenticated heartbeat advances beyond a pending
+held checkpoint or an applied command's scheduled update before all peer
+receipts arrive. Two- and four-participant model tests and an authenticated
+socket test pass. The full suite passes 1,201/1,202 with zero failures and one
+existing Windows symlink skip; private log:
+`C:\Users\olihf\Downloads\Temp\tf3mp-full-suite-20260926-clock-guard.log`.
+The coordinator fix is committed and pushed as `debb4ff`. These are offline
+and network checks; the loaded-save identity and two-game barriers remain
+unverified. Keep laptop testing paused until morning.
+
+The Host's periodic PC game-clock observation now enforces the same held
+checkpoint and applied-command limits; a missing or advanced clock halts before
+release. Focused coordinator, participant and socket suites pass 117/117 after
+this extension, committed and pushed as `62fd6ee`. The full suite above ran
+before this small follow-up; no additional TF3 run was made.
+
+## PC-only owner-selected sale repair — 26 September 2026
+
+The opt-in vehicle-sale order no longer rejects the instance where the local
+player selected the selling company. All engines choose the same unaffected
+reference company from the authenticated roster, freeze it during preparation,
+and include its entity in the held execution receipt and canonical state hash.
+Signed reference and target balances survive the bounded userdata parser.
+Focused Lua, mailbox, IPC and mod-review tests pass; the full serial suite
+passes 1,197/1,198 with zero failures and the existing Windows symlink skip.
+The private full-suite log is
+`C:\Users\olihf\Downloads\Temp\tf3mp-full-suite-20260926-sale-reference.log`.
+Native sale credit semantics and the full road economy remain unverified in
+disposable TF3; this source repair does not enable general gameplay.
+
+## PC-only divergence source attribution — 26 September 2026
+
+The command barrier now treats each participant's prepare and applied receipt
+as one-use. A duplicate halts before command commit or completion; focused
+coordinator/socket tests pass 25/25. This is offline receipt-policy evidence,
+not a second-game delivery result.
+
+Checkpoint and post-command mismatch records now identify both the differing
+participant and the source of the expected digest. An explicit expected
+baseline is labeled `operator_baseline`; a digest learned during capture or
+execution names its supplying player and company. The two- and four-participant
+model cases and the two-participant socket mismatch case pass 32 focused tests.
+The full serial integration suite passes 1,191/1,192 (zero failures, one
+existing Windows symlink skip); its private output is in
+`C:\Users\olihf\Downloads\Temp\tf3mp-full-suite-20260926-phase8.log`.
+This improves failure evidence only; no new TF3 or second-machine result was
+obtained.
+
+## PC-only expected-baseline admission — 26 September 2026
+
+An explicit Host `--expected-baseline` path now accepts a bounded local JSON
+record for a fresh session from a pre-binding disposable save. Before launch,
+the wrapper checks its save bytes/hash and exact game/mod hashes. At roster
+capture, the Host requires the observed paused update, Host company and full
+company set to match the record, then uses the existing expected-hash
+checkpoint protocol instead of accepting the first observed digest. Both
+deferred adapters attach on `coordination_prepare`. The two- and four-player
+model cases and an authenticated socket case halt on an agreed wrong digest
+without release; focused tests pass. Empty, Join-side and solo Stop option
+combinations fail closed. This does not reload a game or prove the selected
+save was loaded. A saved native binding remains a hard rejection; mid-session
+checkpoint recovery still needs a separately qualified game lifecycle. The
+full serial integration rerun passes 1,191/1,192, with zero failures and the
+existing Windows symlink skip. An initial run had one failure whose test name
+was lost to truncated output; the captured rerun is green and its private log
+is `C:\Users\olihf\Downloads\Temp\tf3mp-full-suite-20260926.log`.
+
+Manual Join preparation now copies through a private temporary file, verifies
+its bytes, and atomically publishes the stable Load Game name. Cancellation
+before publication cannot leave a partial file under that name. Focused save
+tests pass; the current TF3 and launcher processes remain untouched.
+
+## Join preparation and second-device gate — 26 September 2026
+
+PC-only Join cancellation now reaches the authenticated save download before
+TF3 launch. A stalled preparation helper receives Stop, aborts its HTTP request,
+removes its partial file and cannot proceed to native handoff or game launch.
+The focused stalled-request and transfer cleanup tests pass. The control-frame
+decoder now bounds each incoming frame before copying bytes, including when a
+large network read contains many small frames. The full serial suite passes
+1,178/1,179 with zero failures and the existing Windows symlink skip. These
+are source/process tests; no new TF3 or laptop run was performed. The current
+launcher processes and non-disposable TF3 world remain untouched.
+
+Further PC-only Join correction: manual Load Game may take more than five
+minutes, so production Host/Join now waits for live bridge telemetry while the
+exact native gate remains healthy and the helper remains cancellable. A fixed
+five-minute timeout could previously strand a correct late load. Startup
+failures now run shutdown cleanup, including releasing the exclusive bridge
+lock, and exit nonzero. A disposable diagnostic-only subprocess proved lock
+removal after a post-bridge startup failure; focused Join/bridge suites pass
+57/57. The full serial suite now passes 1,175/1,176 with zero failures and the
+existing Windows symlink skip. The current PC TF3 process loaded `comp.sav`,
+so it was not used for a disposable-save mutation. The canonical launcher is
+still running and has not been replaced in place; laptop Join remains untested.
+
+PC-only Phase 8 follow-up: structurally valid checkpoint and post-command
+digest disagreements now retain one bounded Host-local comparison record
+(expected/observed hash, participant, company, round, update and sequence)
+before the permanent session halt. The Host diagnostic log includes the
+build/mod identity; it does not send the record to peers or authorize reload.
+The composed 2- and 4-participant offline test now delivers the halt frame to
+each participant, observes one typed halt request each, no release, and an
+unknown halt state when no receipt arrives. Focused suites pass 39/39; the
+full integration suite passes 1,171/1,172 with no failures and the existing
+Windows symlink skip. This is model/socket evidence, not two-game divergence
+or checkpoint-reload proof. Phase 7 road-service and checkpoint focused tests
+pass 29/29; their unqualified game actions remain pending. Keep laptop tests
+paused until morning.
+
+PC-only integration follow-up: authenticated Join and Host-local adapter
+attachment now fence a terminal session frame before or during asynchronous
+adapter construction. Join bootstrap also subscribes before its save/provider
+awaits and refuses a late `save_ready` after a Host halt or socket close.
+Focused attachment, bootstrap and network suites pass 39/39. This is offline
+race evidence; it does not qualify a second game or the laptop's native load.
+The integration suite now passes 1,169/1,170 tests with zero failures and one
+symlink test skipped because this Windows environment cannot create the link.
+Owned native fixture review corrected a target-lifetime race in the debugger
+tests; it did not change the exact-build TF3 hook policy.
+Production CLI shutdown now awaits Host/Join adapter closure before closing
+the native runtime gate. Attachment teardown starts adapter closure while an
+earlier poll is pending, so the adapter can request its typed native halt
+without first waiting for a game receipt. Focused Host/Join attachment and
+network tests pass 34/34; the full suite also covers the shutdown change.
+This is source/network evidence, not a TF3 halt receipt for the new ordering.
+The launcher source compile check passes, but the two running canonical
+launcher processes prevent replacing the executable in place. The current TF3
+world is active and was not treated as a disposable save, so no further game
+mutation was attempted. Keep two-device testing paused until morning.
+
+The laptop received and verified the authenticated Host save, but its TF3
+process stayed at the main menu and the native Join pipe did not start. The
+native startup trace reached the 40408 boundary and rejected its mitigation
+check; the laptop's owned, non-game checker reports a successful CFG query and
+`ERROR_NOT_SUPPORTED` (50) for the user shadow-stack policy query on ARM64.
+The current native source now accepts that missing query only for an AMD64
+image on an ARM64 host when Windows separately reports user CET unavailable;
+all EH continuation, unwind, CFG and XSTATE checks remain. This revision has
+passed the PC owned harness and runtime build, not the laptop's TF3 process.
+
+Join preparation now produces a stable, hash-verified disposable save and the
+launcher instructs the player to load its exact name through TF3's ordinary
+Load Game menu. Automatic loading had not been qualified and is not part of
+this Join route. Focused save-transfer/preparation tests pass. Second-device
+testing is paused until the next morning at the user's request. Continue road
+service, economy, recovery and Host/Join work that can be verified offline or
+in one disposable PC game; retain two-game agreement as an open gate.
+
+## Current ordered Stop result — 25 September 2026
+
+Build 40408 passed the single-game Host-ordered Stop slice on the disposable
+save. The Host acquired the control lock, opened the existing one-use GUI Stop
+permit, cancelled the original native Stop, admitted sequence 1 at update 3672,
+and held one game-side application until update 3732. An execution receipt for
+vehicle 66005/company 3141 and a separate game readback both show Stopped at
+3732; the TF3 panel also showed Stopped. See
+`reports/ordered-stop-40408-20260925-run9` and the current completion audit.
+This is one TF3 process, not two-instance synchronization proof. Next complete
+the Stage 7 synchronized baseline and cross-machine Stop comparison when the
+second PC is available, then continue road gameplay, economy and recovery.
+
+## Current 40408 result — 25 September 2026
+
+The controlled passive probe now captured one complete normal Stop result:
+one factory/admission/send/dispatch/processor completion chain, then a
+deferred validated callback and marshaler returning 1 for vehicle 66005/Stop
+1 on the admission storage and thread. Independent bridge readback changed
+stop flag 0→1. A native hold/release/detach also passed. The unrelated raw
+tag-27 trap is excluded. The game is closed and diagnostics unstaged; the
+source disposable save hash is unchanged. This qualifies the observed normal
+result path on 40408, not production cancellation or ordered replay. Next:
+offline qualify the one-use cancellation and cleanup against the exact 40408
+result path, then run one guarded cancelled Stop, Host sequence and held
+application with a separate stopped readback. Do not retry unknown outcomes.
+Two-machine verification remains deferred by the user. Private evidence:
+`reports/probe-40408-passive-stop-run2-20260925`.
+
+## Current exact build: 40408 — 25 September 2026
+
+40408 replaced 40405 before the Host-ordered Stop test. Its passive-only Stop
+profile and boundary were qualified offline against the new executable hash,
+but no 40408 TF3 run has occurred. The next controlled disposable-save run
+must correlate one normal Stop's factory/admission/send, dispatch and
+completion, callback/marshaler result and independent vehicle state. Only a
+validated full tuple permits a guarded one-use cancellation attempt, followed
+by Host ordering and one held replay. The 40408 probe staging was cleaned up
+before launch while the user uses TF3. Two-machine verification remains
+deferred by the user.
+
+The first 40408 passive launch reached both native observer starts, but the
+one-use pipe expired after 180 seconds while UI selection was in progress.
+No Stop was clicked. Connect as soon as the disposable save loads, then select
+the vehicle after the checker announces that the probe is attached.
+
+## Build 40405 Stop result boundary — 25 September 2026
+
+One normal, uncancelled Stop on disposable vehicle 66005/company 3141 reached
+factory, admission, send return and post-send cleanup once. Exact-build passive
+traps saw the same admission storage at dispatch and processor completion, each
+with result 1 on thread 20964. Independent game readback changed stop flag
+0→1; the UI showed Stopped. Deferred generic delivery and validated callback
+counters rose after two observed updates, but the trace did not retain the
+matched callback's full tuple; a later raw tag 27 remains ambiguous. The held simulation stayed
+at one tick/update for eight pings, then one release advanced both by one.
+This qualifies observation of the normal result path, **not** cancellation,
+Host ordering or replay. A paused-save preflight was rejected before any click;
+the next run used normal speed. The game is closed, hash-matched diagnostic DLLs
+are unstaged, and the source save hash is unchanged. Next: offline qualify the
+40405 failure completion/cancellation path, then one controlled cancelled Stop,
+then Host order and one held replay. No laptop test until that single-game path
+passes. Private trace: `reports/probe-40405-dispatch-completion-run2-20260925`.
+
+## Build 40405 generic callback delivery probe — 25 September 2026
+
+The exact-build passive site at RVA `0x9D2EC2` was added with full instruction
+qualification and an owned emulation fixture. In one controlled Stop run,
+generic delivery hits rose 1→2 but deliveries matching the selected Stop's
+admission storage stayed 0. Factory/admission/correlation/send/cleanup each
+rose once, and independent readback confirmed `stopFlag` 0→1. The old callback
+tail again had no validated vehicle hit. This generic delivery candidate is
+also uncorrelated with the Stop; no cancellation or Host order ran. Continue
+offline through the 40405 dispatcher/result path, including RVA `0x9E26B7`,
+before the next game run. The source save was unchanged and native diagnostics
+were unstaged. Private evidence:
+`reports/probe-40405-generic-delivery-20260925`.
+
+## Build 40405 callback reason result — 25 September 2026
+
+The next one-use disposable-save Stop separated the raw callback trap from
+the admitted action. Factory, admission, correlation, send return and normal
+post-send cleanup each advanced once for vehicle 66005; the bridge confirmed
+`stopFlag` 0→1. Raw callback-tail traps rose 1→2, but the latest parse reason
+was **tag mismatch** (`27`, not vehicle tag `0x32`) and its storage did not
+match the latest Stop admission both before and after the click. Validated
+vehicle callback and raw marshaler return remained 0. This raw trap is an
+unrelated command, not evidence of a Stop callback. Find the updated 40405
+Stop callback or result path from the exact adapter/send flow before another
+game run or any cancellation/order attempt. The diagnostic was unstaged and
+the source save hash was unchanged. Private evidence:
+`reports/probe-40405-parse-reason-20260925`.
+
+## Build 40405 raw callback probe — 25 September 2026
+
+One fresh, one-use Stop click on disposable vehicle 66005/company 3141 was
+4.684 seconds after the diagnostic click signal. The native factory, admission,
+correlation, send return and post-send body each advanced once, with no dropped
+candidate. Raw callback-tail traps advanced from 1 to 2, but the validated
+vehicle callback stayed at 0; raw marshaler-return traps stayed at 0. The
+independent bridge read changed the vehicle stop flag from 0 to 1. Thus a
+40405 callback-tail trap occurred in the action window, but it was not
+correlated to this Stop; the marshaler site was not reached. This is not
+a cancellation or ordered replay receipt. The run failed closed, the exact
+diagnostic process and hash-matched staged DLLs were removed, and the source
+save hash was unchanged. Inspect the exact callback ABI before another game
+run. Private evidence: `reports/probe-40405-raw-callback-20260925`.
+
+## Build 40405 timed vehicle Stop observation — 25 September 2026
+
+A one-use diagnostic on the exact 40405 build now reached a real UI Stop on
+vehicle 66005/company 3141. The single click landed 8.479 seconds after
+authorization, inside the 30-second observation window. Factory, admission,
+correlation, send return and post-send body each advanced once with no dropped
+candidate; the payload and adapter identity matched the selected Stop.
+Independent bridge readback showed `stopFlag=1` and advancing tick/update.
+However callback and marshaler-return counters stayed zero. This is partial
+40405 native capture only: cancellation, Host ordering and replay remain
+unqualified. Next inspect the exact 40405 callback/marshaler path, then run
+one guarded cancellation and Host-ordered Stop with correlated receipts.
+Private evidence: `reports/probe-40405-timed-stop-20260925`.
+
+## Build gate changed during ordered Stop launch — 25 September 2026
+
+Steam replaced the executable during the planned combined 40401 Stop run. The
+main menu displayed build 40405 and the new executable SHA-256 is
+`e4608a12c94e2e6a5592ed112f462b019271cf1012c6a83312092204c52c369f`.
+The exact-40401 combined route rejected the image before any patch or Host
+admission (`order-40401-start 4 0`, cleanup `3 0`, runtime result 6). The runner
+also detected the hash change and stopped before a save load or vehicle click.
+TF3 exited, the source disposable save hash stayed unchanged, and the
+hash-matched staged DLLs were removed. Requalify the 40405 vehicle and boundary
+sites from that build before another live action; the separate 40401 cancellation
+and boundary evidence cannot certify 40405.
+
 ## Current build gate — 25 September 2026
 
 The exact-40401 **single-game Stop cancellation** check has passed on the
