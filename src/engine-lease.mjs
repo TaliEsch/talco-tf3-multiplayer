@@ -28,7 +28,8 @@ export function createEngineLease({nonce,publish,observe,healthy,onFailure,
     }
     // A held TF3 world can keep its engine tick fixed while the game-side
     // observation producer continues publishing fresh, monotonic samples.
-    if(lastCounter===undefined||s.counter>lastCounter||s.tickCount>lastTick) freshAt=now();
+    if(lastCounter===undefined||s.tickCount>lastTick
+      ||s.speedup===0&&s.counter>lastCounter) freshAt=now();
     if(now()-freshAt>=staleMs) {fail('ENGINE_OBSERVATION_STALE');return;}
     lastCounter=s.counter;lastTick=s.tickCount;lastUpdate=s.updateCount;lastSpeed=s.speedup;
     return s;

@@ -51,6 +51,12 @@ test('held lease rejects an observation counter reversal',()=>{
   f.s.counter=1;f.lease.poll();
   assert.equal(f.lease.phase,'failed');assert.deepEqual(f.failures,['ENGINE_OBSERVATION_LOST']);
 });
+test('running lease still fails when only GUI observation counters advance',()=>{
+  const f=fixture();f.lease.start();assert.equal(f.lease.receive(f.receipt()),true);
+  f.time(2000);f.s.counter=2;f.lease.poll();assert.equal(f.lease.phase,'active');
+  f.time(3000);f.s.counter=3;f.lease.poll();
+  assert.equal(f.lease.phase,'failed');assert.deepEqual(f.failures,['ENGINE_OBSERVATION_STALE']);
+});
 test('pending renewal never extends confirmed expiry or accepts a stale arm acknowledgment',()=>{
   const f=fixture();f.lease.start();const old=f.receipt();f.lease.receive(old);
   f.s.tickCount=140;f.lease.poll();assert.equal(f.lease.receive(old),false);
