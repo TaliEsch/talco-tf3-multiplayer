@@ -127,6 +127,12 @@ local function copyButtons(source : {EntityWindowUtil.ActionBarButton}) : {Entit
         if not labelOk then stopClickDiagnostic = "label_error"; return end
         if blocked and permitted and isStop then
           stopClickDiagnostic = "reading_vehicle"
+          local ownerOk, owned = pcall(function() : boolean
+            local player = api.engine.util.getPlayer()
+            local component = api.engine.getComponent(stopEntity, api.type.ComponentType.PLAYER_OWNED)
+            return type(player) == "number" and player > 0 and component ~= nil and component.player == player
+          end)
+          if not ownerOk or not owned then stopClickDiagnostic = "vehicle_not_owned"; return end
           local vehicleOk, vehicle = pcall(function() : any
             return api.engine.getComponent(stopEntity, api.type.ComponentType.TRANSPORT_VEHICLE) as Engine.Component.TransportVehicle
           end)
