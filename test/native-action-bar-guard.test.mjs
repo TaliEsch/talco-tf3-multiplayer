@@ -10,6 +10,13 @@ test('retained action-bar callbacks block unsupported clicks and changes until e
   const start=source.indexOf('local function copyButtons(');
   const end=source.indexOf('\nlocal OriginalVehicle =',start);
   assert.ok(start>=0&&end>start);
+  const windowStart=source.indexOf('local function soleTargetWindow()');
+  const windowEnd=source.indexOf('\nlocal function stopPermitCurrent()',windowStart);
+  assert.ok(windowStart>=0&&windowEnd>windowStart);
+  const windowFunctions=source.slice(windowStart,windowEnd)
+    .replace('soleTargetWindow() : boolean','soleTargetWindow()')
+    .replace('soleVehicleWindowEntity() : integer','soleVehicleWindowEntity()')
+    .replaceAll(' : integer','');
   // Strip only the Teal annotations in this actual callback implementation.
   const implementation=source.slice(start,end)
     .replace('source : {EntityWindowUtil.ActionBarButton}) : {EntityWindowUtil.ActionBarButton}','source)')
@@ -25,6 +32,8 @@ test('retained action-bar callbacks block unsupported clicks and changes until e
   const script=`local blocked=false
 local stopClickDiagnostic="none"
 local stopEntity=9
+local activeVehicleWindows={[9]=1}
+local vehicleWindowGeneration=1
 local stopUsed=false
 local stopEverUsed=false
 local stopReady=true
@@ -38,6 +47,7 @@ local api={engine={util={getPlayer=function() return selectedCompany end},
     return {userStopped=false}
   end},type={ComponentType={TRANSPORT_VEHICLE=1,PLAYER_OWNED=2}}}
 local permit=false
+${windowFunctions}
 local function stopPermitCurrent() return permit end
 ${implementation}
 local clicks,changes,stops=0,0,0
@@ -64,6 +74,23 @@ vehicleOwner=7; selectedCompany=8; buttons[2].onClick()
 assert(stops==1 and not stopUsed)
 selectedCompany=7; buttons[2].onClick()
 assert(clicks==1 and stops==2 and stopUsed and stopEverUsed)
+activeVehicleWindows[9]=0; vehicleWindowGeneration=vehicleWindowGeneration+1
+activeVehicleWindows[10]=1; vehicleWindowGeneration=vehicleWindowGeneration+1
+stopEntity=0; stopUsed=false; stopEverUsed=false
+local bStops=0
+local bButton=copyButtons({{tag="entityWindow.vehicle.startStop",description="Stop",
+  onClick=function() bStops=bStops+1 end}})[1]
+stopEntity=10
+buttons[2].onClick()
+assert(stops==2 and bStops==0 and not stopUsed and not stopEverUsed
+  and stopClickDiagnostic=="window_changed")
+bButton.onClick()
+assert(stops==2 and bStops==1 and stopUsed and stopEverUsed)
+activeVehicleWindows[10]=0; vehicleWindowGeneration=vehicleWindowGeneration+1
+activeVehicleWindows[10]=1; vehicleWindowGeneration=vehicleWindowGeneration+1
+stopUsed=false; stopEverUsed=false
+bButton.onClick()
+assert(bStops==1 and not stopUsed and stopClickDiagnostic=="window_changed")
 blocked=false
 buttons[1].onClick(); buttons[1].onValueChange(true)
 assert(clicks==2 and changes==2)`;

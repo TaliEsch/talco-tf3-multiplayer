@@ -21,6 +21,7 @@ local stopUsed = false
 local stopEverUsed = false
 local stopClickDiagnostic = "none"
 local activeVehicleWindows : {integer : integer} = {}
+local vehicleWindowGeneration : integer = 0
 local function clearStopPermit() : nil
   stopEntity = 0
   stopDeadlineUnix = 0
@@ -46,6 +47,18 @@ local function soleTargetWindow() : boolean
     end
   end
   return total == 1
+end
+local function soleVehicleWindowEntity() : integer
+  local result : integer = 0
+  local total : integer = 0
+  for entity, count in pairs(activeVehicleWindows) do
+    if count > 0 then
+      total = total + count
+      if total > 1 then return 0 end
+      result = entity
+    end
+  end
+  return total == 1 and result or 0
 end
 local function stopPermitCurrent() : boolean
   return blocked and stopEntity > 0 and stopReady and not stopUsed and not stopEverUsed
@@ -105,6 +118,8 @@ end
 
 local function copyButtons(source : {EntityWindowUtil.ActionBarButton}) : {EntityWindowUtil.ActionBarButton}
   local result : {EntityWindowUtil.ActionBarButton} = {}
+  local callbackEntity = soleVehicleWindowEntity()
+  local callbackGeneration = vehicleWindowGeneration
   for _, button in ipairs(source or {}) do
     local fields : table = {}
     for key, value in pairs(button as table) do fields[key] = value end
@@ -118,6 +133,10 @@ local function copyButtons(source : {EntityWindowUtil.ActionBarButton}) : {Entit
         if not blocked then onClick(); return end
         if button.tag ~= "entityWindow.vehicle.startStop" then return end
         if blocked then stopClickDiagnostic = "guarded_click" end
+        if callbackEntity == 0 or callbackEntity ~= stopEntity
+          or callbackGeneration ~= vehicleWindowGeneration or not soleTargetWindow() then
+          stopClickDiagnostic = "window_changed"; return
+        end
         local permitOk, permitted = pcall(stopPermitCurrent)
         if not permitOk then stopClickDiagnostic = "permit_error"; return end
         if blocked then stopClickDiagnostic = permitted and "permit_yes" or "permit_no" end
@@ -129,12 +148,12 @@ local function copyButtons(source : {EntityWindowUtil.ActionBarButton}) : {Entit
           stopClickDiagnostic = "reading_vehicle"
           local ownerOk, owned = pcall(function() : boolean
             local player = api.engine.util.getPlayer()
-            local component = api.engine.getComponent(stopEntity, api.type.ComponentType.PLAYER_OWNED)
+            local component = api.engine.getComponent(callbackEntity, api.type.ComponentType.PLAYER_OWNED)
             return type(player) == "number" and player > 0 and component ~= nil and component.player == player
           end)
           if not ownerOk or not owned then stopClickDiagnostic = "vehicle_not_owned"; return end
           local vehicleOk, vehicle = pcall(function() : any
-            return api.engine.getComponent(stopEntity, api.type.ComponentType.TRANSPORT_VEHICLE) as Engine.Component.TransportVehicle
+            return api.engine.getComponent(callbackEntity, api.type.ComponentType.TRANSPORT_VEHICLE) as Engine.Component.TransportVehicle
           end)
           if not vehicleOk then stopClickDiagnostic = "vehicle_read_error"; return end
           if vehicle and not vehicle.userStopped then
@@ -160,12 +179,14 @@ local OriginalVehicle = react.RegisterRecipe("Tf3MpOriginalVehicle", function(pa
   local entity = params.keyEntity
   local tracked = react.useRefLazy(function() : boolean
     activeVehicleWindows[entity] = (activeVehicleWindows[entity] or 0) + 1
+    vehicleWindowGeneration = vehicleWindowGeneration + 1
     return true
   end) as ReactRefT<boolean>
   react.onUnmount(function()
     if tracked:get() then
       tracked:set(false)
       activeVehicleWindows[entity] = math.max(0, (activeVehicleWindows[entity] or 1) - 1) as integer
+      vehicleWindowGeneration = vehicleWindowGeneration + 1
     end
   end)
   return builtin.BoxLayout { children = { react.CallOriginalRecipe(vehicle_window, params) } }
