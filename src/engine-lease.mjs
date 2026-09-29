@@ -7,11 +7,12 @@ const uint=n=>Number.isSafeInteger(n)&&n>=0&&n<=2147483647;
 // and session health, not socket existence. Losing either is terminal. Stopping
 // renewal is NOT a claim that TF3 has stopped; require separate halt evidence.
 export function createEngineLease({nonce,publish,observe,healthy,onFailure,
-  now=()=>performance.now(),ackTimeoutMs=3000,staleMs=3000}) {
+  allowHeldArm=false,now=()=>performance.now(),ackTimeoutMs=3000,staleMs=3000}) {
   if(typeof nonce!=='string'||!/^[a-f0-9]{32}$/.test(nonce)
     ||![publish,observe,healthy,onFailure,now].every(f=>typeof f==='function')
+    ||typeof allowHeldArm!=='boolean'
     ||![ackTimeoutMs,staleMs].every(n=>Number.isFinite(n)&&n>0)) throw new TypeError('INVALID_LEASE_OPTIONS');
-  let phase='idle',request,confirmed,deadline,lastTick,lastUpdate,lastSpeed,freshAt,company;
+  let phase='idle',request,confirmed,deadline,lastTick,lastCounter,lastUpdate,lastSpeed,freshAt,company;
   function fail(reason) {
     if(phase==='failed'||phase==='closed') return;
     phase='failed';onFailure(reason);
@@ -19,15 +20,17 @@ export function createEngineLease({nonce,publish,observe,healthy,onFailure,
   function sample() {
     if(healthy()!==true) {fail('SESSION_UNHEALTHY');return;}
     const observation=observe(),s=observation?.sample;
-    if(!observation?.available||!s||![s.companyEntity,s.tickCount,s.updateCount,s.speedup].every(uint)
+    if(!observation?.available||!s||![s.companyEntity,s.counter,s.tickCount,s.updateCount,s.speedup].every(uint)
       ||!uint(s.tickCount+100)||company!==undefined&&s.companyEntity!==company
-      ||lastTick!==undefined&&(s.tickCount<lastTick||s.updateCount<lastUpdate
+      ||lastTick!==undefined&&(s.counter<lastCounter||s.tickCount<lastTick||s.updateCount<lastUpdate
         ||s.tickCount===lastTick&&(s.updateCount!==lastUpdate||s.speedup!==lastSpeed))) {
       fail('ENGINE_OBSERVATION_LOST');return;
     }
-    if(lastTick===undefined||s.tickCount>lastTick) freshAt=now();
+    // A held TF3 world can keep its engine tick fixed while the game-side
+    // observation producer continues publishing fresh, monotonic samples.
+    if(lastCounter===undefined||s.counter>lastCounter||s.tickCount>lastTick) freshAt=now();
     if(now()-freshAt>=staleMs) {fail('ENGINE_OBSERVATION_STALE');return;}
-    lastTick=s.tickCount;lastUpdate=s.updateCount;lastSpeed=s.speedup;
+    lastCounter=s.counter;lastTick=s.tickCount;lastUpdate=s.updateCount;lastSpeed=s.speedup;
     return s;
   }
   function issue(s,operation) {
@@ -54,8 +57,8 @@ export function createEngineLease({nonce,publish,observe,healthy,onFailure,
     start() {
       if(phase!=='idle') throw new Error('LEASE_ALREADY_USED');
       const s=sample();if(!s)return;
-      if(s.speedup!==1){fail('RUNNING_ENGINE_REQUIRED');return;}
-      company=s.companyEntity;issue(s,'arm');
+      if(s.speedup!==1&&!(allowHeldArm&&s.speedup===0)){fail('RUNNING_ENGINE_REQUIRED');return;}
+      company=s.companyEntity;issue(s,s.speedup===0?'arm_held':'arm');
     },
     poll() {
       if(!['active','awaiting_receipt'].includes(phase))return;
