@@ -18,4 +18,5 @@ test('owned common-exit fixture preserves its instruction and frame for zero and
     assert.equal(report[field],true,field);
   for(const field of ['fullXstateQualified','chainedUnwindQualified','livePauseCadenceQualified','ownerParkingQualified'])
     assert.equal(report[field],false,field);
+  assert.equal(report.actualGameChainedUnwindQualified,false,'the default fixture does not inspect the game image');
 });

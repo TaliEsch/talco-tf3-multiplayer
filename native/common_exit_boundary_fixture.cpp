@@ -3,6 +3,8 @@
 #include <cstdint>
 #include <cstring>
 #include <iostream>
+#include <cwchar>
+#include "common_exit_image_unwind.h"
 
 extern "C" {
 std::uint64_t CommonExitFixtureStep(std::uint64_t steps);
@@ -64,19 +66,25 @@ LONG CALLBACK Handler(EXCEPTION_POINTERS* p) noexcept {
     return EXCEPTION_CONTINUE_EXECUTION;
 }
 }
-int main() {
+int wmain(int argc,wchar_t** argv) {
+    const bool image_requested=argc==3 && std::wcscmp(argv[1],L"--image")==0;
+    if (argc!=1 && !image_requested) return 3;
+    const bool image_unwind=image_requested && tf3boundary::Qualify40408CommonExitUnwind(argv[2]);
     auto handler=AddVectoredExceptionHandler(1,Handler);
     if (!handler) return 1;
     const bool zero=CommonExitFixtureSeededStep(0)==0 && hits==1;
     const bool positive=CommonExitFixtureSeededStep(3)==3 && hits==2;
     const bool removed=RemoveVectoredExceptionHandler(handler)!=0;
-    const bool passed=zero && positive && instruction_preserved && unwind_preserved && loop_registers_restored && removed;
+    const bool passed=zero && positive && instruction_preserved && unwind_preserved && loop_registers_restored && removed &&
+        (!image_requested || image_unwind);
     std::cout << std::boolalpha
       << "{\"scope\":\"common-exit-instruction-frame-owned\",\"activationPermitted\":false,\"tf3Qualified\":false,\"passed\":" << passed
       << ",\"zeroStepReached\":" << zero << ",\"positiveStepReached\":" << positive
       << ",\"instructionPreserved\":" << instruction_preserved
       << ",\"unwindPreserved\":" << unwind_preserved
       << ",\"loopRegistersRestored\":" << loop_registers_restored
-      << ",\"fullXstateQualified\":false,\"chainedUnwindQualified\":false,\"livePauseCadenceQualified\":false,\"ownerParkingQualified\":false}\n";
+      << ",\"actualGameChainedUnwindQualified\":" << image_unwind
+      << ",\"fullXstateQualified\":false,\"chainedUnwindQualified\":" << image_unwind
+      << ",\"livePauseCadenceQualified\":false,\"ownerParkingQualified\":false}\n";
     return passed ? 0 : 2;
 }
