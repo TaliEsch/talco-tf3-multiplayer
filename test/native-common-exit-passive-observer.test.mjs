@@ -1,0 +1,19 @@
+import assert from 'node:assert/strict';
+import {existsSync} from 'node:fs';
+import {spawnSync} from 'node:child_process';
+import {fileURLToPath} from 'node:url';
+import test from 'node:test';
+
+const exe=fileURLToPath(new URL('../dist/common-exit-passive-observer/TF3CommonExitPassiveObserverFixture.exe',import.meta.url));
+test('passive common-exit samples preserve inputs and reject unsafe stack reads',{
+  skip:process.platform!=='win32'||!existsSync(exe),timeout:15000,
+},()=>{
+  const result=spawnSync(exe,[],{encoding:'utf8',timeout:10000,windowsHide:true});
+  assert.equal(result.error,undefined,result.error?.message);
+  assert.equal(result.status,0,result.stderr||result.stdout);
+  const report=JSON.parse(result.stdout.trim());
+  assert.equal(report.scope,'common-exit-passive-observer-owned');
+  assert.equal(report.passed,true);
+  assert.equal(report.activationPermitted,false);
+  assert.equal(report.tf3Qualified,false);
+});
