@@ -8,7 +8,8 @@ import {isAbsolute} from 'node:path';
 
 const [input, output, ...symbols] = process.argv.slice(2);
 const approved = new Set(['OwnedCrossGate', 'OwnedCrossResume', 'OwnedIntegratedResume',
-  'OwnedIntegratedFaultPark', 'ProductionBoundaryFaultPark', 'ProductionHarnessResume']);
+  'OwnedIntegratedFaultPark', 'ProductionBoundaryFaultPark', 'ProductionHarnessResume',
+  'CommonExitFixtureResume']);
 if (!input || !output || !isAbsolute(input) || !isAbsolute(output) ||
     !input.endsWith('.obj') || !output.endsWith('.obj') || input === output || symbols.length<1 ||
     symbols.some(symbol=>!approved.has(symbol)) || new Set(symbols).size!==symbols.length) {
