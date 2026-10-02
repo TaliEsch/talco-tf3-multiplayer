@@ -45,16 +45,29 @@ Historical entries are not current claims.
   only needed context, a clear deliverable and non-overlapping file ownership;
   skip trivial handoffs whose setup costs more than doing the work. The main
   agent reads the source, integrates and verifies concise, evidence-linked results.
+- At a milestone or context reset, hand off only the current build/branch,
+  verified result, failing gate, next action and evidence links; do not retell
+  the project history or create a separate handoff system.
 - Run focused tests while developing. Run the full suite at integration
   milestones, not after every small edit. Build the launcher if launcher source
   changes; run `node src/cli.mjs review --path mod` if mod source changes.
   Distinguish model-tested, single-game and multi-instance results, and report
   failures and unperformed checks.
-- Treat each TF3 run as an expensive experiment: define its question and
-  required evidence before launch, then capture a bounded private trace of
-  build/save identity, stage timing, correlated clocks and receipts, observed
-  postconditions, and failure context. Batch safe read-only checks; use offline
-  tests before retrying an unchanged failure.
+- Full system access is available for deliberate TF3 testing; do not defer
+  necessary live checks to avoid interrupting the user or request routine launch
+  approval. This does not extend authority to unrelated files, applications or
+  remote devices. Use live tests promptly when engine behavior is the unresolved
+  question; use focused offline checks for logic that does not need the game.
+- Before a TF3 run, define the question and required evidence briefly. Batch
+  compatible checks and reuse a healthy session when it preserves isolation;
+  use fresh processes, epochs or disposable saves when the test requires them.
+  Capture bounded private traces of build/save identity, clocks, receipts,
+  postconditions and failures. Prefer machine-readable evidence; inspect the UI
+  when presentation or interaction is relevant. Keep raw logs out of agent
+  context and report concise findings with evidence links. Never repeat an
+  unchanged failed live test: inspect the evidence and revise the hypothesis
+  first. If the same gate fails twice, review it before another live attempt
+  (Astra for hard native issues), while independent work continues.
 - The repository `TaliEsch/talco-tf3-multiplayer` must remain private. Commit
   coherent verified work and push only when authorized. Never commit game
   assets, saves, credentials or generated distributions; never publish a
