@@ -5,6 +5,17 @@
 struct lua_State;
 namespace tf3loanlua {
 using CFunction = int (*)(lua_State*);
+enum class RegistrationStage : unsigned {
+    initial, stock_call, stock_false, invalid_state, incomplete_api, gettop,
+    invalid_top, checkstack, checkstack_failed, push_closure, protected_call,
+    restore_stack, protected_error, success
+};
+// Scalar diagnostics only; no retained VM strings, allocation or authority.
+struct RegistrationReport {
+    RegistrationStage stage = RegistrationStage::initial;
+    int lua_status = 0, saved_top = -1;
+    bool exception = false;
+};
 // Lua 5.2 continuation ABI: ctx is int, not intptr_t. These declarations
 // follow the official public API; exact TF3 function binding remains separate.
 struct Api {
@@ -70,14 +81,26 @@ template<class Binding, CFunction ConsumerFunction = &Consumer<Binding>> int Reg
 // Failure can leave an earlier global closure installed: the integration must
 // independently disable native Claim/arming and halt, not infer revocation from
 // Register(false). Code remains pinned while any Lua closure may retain it.
-template<class Binding, CFunction ConsumerFunction = &Consumer<Binding>> bool Register(lua_State* state) {
+template<class Binding, CFunction ConsumerFunction = &Consumer<Binding>> bool Register(lua_State* state,
+    RegistrationReport* report = nullptr) {
+    auto stage = [&](RegistrationStage value) noexcept { if (report) report->stage = value; };
     const auto& api = Binding::Functions();
-    if (!state || !api.Complete()) return false;
+    if (!state) { stage(RegistrationStage::invalid_state); return false; }
+    if (!api.Complete()) { stage(RegistrationStage::incomplete_api); return false; }
+    stage(RegistrationStage::gettop);
     const int saved_top = api.gettop(state);
-    if (saved_top < 0 || !api.checkstack(state, 4)) return false;
+    if (report) report->saved_top = saved_top;
+    if (saved_top < 0) { stage(RegistrationStage::invalid_top); return false; }
+    stage(RegistrationStage::checkstack);
+    if (!api.checkstack(state, 4)) { stage(RegistrationStage::checkstack_failed); return false; }
+    stage(RegistrationStage::push_closure);
     api.pushcclosure(state, &RegistrationThunk<Binding, ConsumerFunction>, 0);
+    stage(RegistrationStage::protected_call);
     const int status = api.pcallk(state, 0, 0, 0, 0, nullptr);
+    if (report) report->lua_status = status;
+    stage(RegistrationStage::restore_stack);
     api.settop(state, saved_top);
+    stage(status == 0 ? RegistrationStage::success : RegistrationStage::protected_error);
     return status == 0;
 }
 }

@@ -149,6 +149,14 @@ int main(int argc, char**) {
         Require(state != nullptr, "owned C++ Lua state");
         fprintf(stderr, "owned_stage=register\n");
         lua_pushinteger(state, 42); const auto base = lua_gettop(state);
+        tf3loanlua::RegistrationReport registration_report{};
+        Require(tf3loanlua::Register<Binding>(state, &registration_report) &&
+            registration_report.stage == tf3loanlua::RegistrationStage::success &&
+            registration_report.saved_top == base && registration_report.lua_status == 0,
+            "registration diagnostic records successful protected boundary");
+        Require(!tf3loanlua::Register<Binding>(nullptr, &registration_report) &&
+            registration_report.stage == tf3loanlua::RegistrationStage::invalid_state,
+            "null VM registration diagnosed without Lua call");
         Require(tf3loanlua::Register<Binding>(state) && lua_gettop(state) == base &&
             lua_tointeger(state, 1) == 42, "protected registration preserves stack");
         Require(tf3loanlua::Register<Binding, &CustomConsumer>(state) && lua_gettop(state) == base,
@@ -208,6 +216,11 @@ int main(int argc, char**) {
         active_owned_call = nullptr; require_witness = false;
         force_registration_error = true;
         fprintf(stderr, "owned_stage=protected_error\n");
+        Require(!tf3loanlua::Register<Binding>(state, &registration_report) &&
+            registration_report.stage == tf3loanlua::RegistrationStage::protected_error &&
+            registration_report.lua_status != 0 && registration_report.saved_top == base &&
+            lua_gettop(state) == base,
+            "protected Lua failure distinguished with restored stack");
         Require(!tf3loanlua::Register<Binding>(state) && lua_gettop(state) == base &&
             lua_tointeger(state, 1) == 42, "C++ Lua registration error crosses DLL and restores stack");
         force_registration_error = false;
@@ -218,8 +231,13 @@ int main(int argc, char**) {
         Require(LoanOwnedStockRegistration(state, stock_expected_function, stock_expected_name) &&
             stock_calls == 1 && lua_gettop(state) == base, "ordinary stock bridge original true return");
         stock_result = false;
+        Require(!tf3loanlua::StockRegistrationBridge<Binding>(state, stock_expected_function,
+            stock_expected_name, &registration_report) &&
+            registration_report.stage == tf3loanlua::RegistrationStage::stock_false &&
+            !registration_report.exception && native_disabled,
+            "stock rejection distinguished from protected Lua failure");
         Require(!LoanOwnedStockRegistration(state, stock_expected_function, stock_expected_name) &&
-            stock_calls == 2 && native_disabled && lua_gettop(state) == base,
+            stock_calls == 3 && native_disabled && lua_gettop(state) == base,
             "ordinary stock bridge original false return disables native permission");
         stock_result = true; Arm(); force_registration_error = true;
         Require(LoanOwnedStockRegistration(state, stock_expected_function, stock_expected_name) &&
@@ -232,6 +250,14 @@ int main(int argc, char**) {
         throw_stock = false;
         Require(propagated && native_disabled && !Invoke(state, nonce, digest) && lua_gettop(state) == base,
             "stock C++ error unwinds owned ASM and revokes native permission");
+        Arm(); throw_stock = true; propagated = false;
+        try { tf3loanlua::StockRegistrationBridge<Binding>(state, stock_expected_function,
+            stock_expected_name, &registration_report); }
+        catch (const OwnedStockError&) { propagated = true; }
+        throw_stock = false;
+        Require(propagated && native_disabled && registration_report.exception &&
+            registration_report.stage == tf3loanlua::RegistrationStage::stock_call,
+            "escaping stock exception diagnosed without changing propagation");
         // Use a fresh VM so the global's name must allocate/intern for the first
         // time. Allocation failure remains inside the protected registration.
         auto* allocation_state = lua_newstate(Allocator, nullptr);
