@@ -1,0 +1,100 @@
+# Loan callback registration: exact 40408 static evidence
+
+Status: offline discovery, **no activation permission and no callable adapter
+qualification**. This is the next path after the real GUI-to-Loan and
+status-to-Loan module-sharing experiments failed. Do not repeat those experiments
+or treat a saved Lua marker as a fresh one-use authorization.
+
+## Image and private evidence
+
+Executable SHA-256:
+`de1daad3a13f3b7e9f79903361bb43769cf4f15e59271a263aefe1f075f23ef2`.
+All addresses below are RVAs for that image, not portable addresses.
+
+Root's private `.run/loan-lua-static-40408-20261003.mjs` checks the whole image
+hash, bounded PE mappings, function ranges and function hashes, and RTTI
+complete-object locator identity. Its JSON contains metadata, not game bytes.
+RIP string and E8 call scans are candidates until decoded from real function
+boundaries; a byte-pattern match alone does not qualify an instruction.
+The executable has 119 inspected exports and no Lua-named exports. A `Lua 5.2`
+string is supporting evidence, not proof of every ABI or configuration.
+
+Root decoded these bounded private files:
+
+- `loan-lua-loader-helper-register-40408-20261003.txt`
+- `loan-lua-callee-2fbe030-40408-20261003.txt`
+- `loan-lua-callee-2fbe610-40408-20261003.txt`
+- `loan-lua-callee-2fbef90-40408-20261003.txt`
+- `loan-lua-callee-2fbe9f0-40408-20261003.txt`
+- `loan-lua-callee-2fbe960-40408-20261003.txt`
+- `loan-lua-callee-2faf4b0-40408-20261003.txt`
+- `loan-lua-callee-2faf5b0-40408-20261003.txt`
+- `loan-lua-api-window-40408-20261003.txt`
+- `loan-lua-first-closure-caller-40408-20261003.txt`
+- `loan-lua-provider-usefn-40408-20261003.txt`
+
+## Actual event route and registration arguments
+
+Astra's exact-image review traced non-GUI `HandleEvent`:
+`F43AB0 -> F45240 -> F3F7A0 -> F40F80 -> 2B75540`.
+RTTI for vtable `3741350` identifies HandleEvent; `F43ED0` is PostUpdate,
+not an event boundary. Do not reuse that earlier tentative identification.
+
+`F41025` receives the provider's pair. `F4109B` loads its first member,
+the `lua::State` wrapper; `F4109F` dereferences wrapper field zero;
+`F410A2` passes that raw VM state to registration routine `9B4D90`.
+Constructor `2FAF4B0` stores the allocator-created state at wrapper zero;
+destructor `2FAF5B0` closes that same field.
+
+The decoded registration routine passes raw state in RCX, a function object
+in RDX and name in R8. It allocates userdata, looks up its registry metatable,
+validates type 5, installs the metatable, clones the callback and publishes the
+userdata by name. This uses TF3's C++ function-object machinery; its layout
+must not be copied into a new adapter without independent qualification.
+
+Comparison with the official Lua 5.2 `lapi.c` implementation supports these
+API identities: `2FBE030` newuserdata, `2FBE610` rawgetp, `2FBEF90` type,
+`2FBE9F0` setmetatable and `2FBE960` setglobal. Root corroborated their decoded
+stack and type operations. Reference: https://www.lua.org/source/5.2/lapi.c.html
+No Lua implementation code was copied.
+
+The independently decoded `2FBE1F0..2FBE2B2` matches pushcclosure:
+RCX raw state, RDX function pointer, R8D upvalue count. Its zero-upvalue branch
+writes function/tag `0x16` and advances the top by 16 bytes. The other branch
+allocates a closure, copies upvalues and writes tag `0x66`.
+Actual decoded calls at `C6D3F0` and `C6D447` pass zero upvalues and native
+function pointers. This establishes a concrete candidate for avoiding copied
+C++ callback layouts, but does not establish safe registration timing,
+script visibility, callback lifetime, exception behavior or unload safety.
+
+## Resource and lifecycle constraints
+
+Astra traced provider lookup to `MSVCP140.dll!_Thrd_id`: the state is per-thread,
+not Loan-exclusive. An authorization consumer must check the active Loan
+resource/context, session, operation digest and current world generation;
+matching a VM pointer is insufficient. Other scripts must not consume it.
+
+Root independently corroborated RTTI and provider branches:
+
+- `+C8`: StateProvider Reload, vtable `385CE00`; discovered callers include
+  debug resource reload. Actual world Load Game linkage is unproved.
+- `+C9`: ForceCollectLuaGarbage, vtable `385CEE0`; replacement is not proof
+  of world reload.
+- `+CA`: InvalidateCache, vtable `385CE38`; another distinct operation.
+
+More importantly, actual HandleEvent supplies a Boolean that skips the pending
+`+C8` replacement branch. Provider `2FB7FD0/2FB7FD8` checks that argument and
+branches to `2FB805E`. These flags cannot authorize a fresh world generation.
+The existing `32DE88` load-return observer remains observation only; it does
+not invalidate permissions before load or prove safe same-address reuse.
+
+## Next required proof
+
+Trace the actual Loan resource context at callback invocation and real world
+load begin/teardown before implementing registration. Then qualify a dormant
+adapter in an owned process: balanced stack, exact return convention, denied
+foreign context, one-use consumption, lifetime/cleanup and reload invalidation.
+Only after those checks should a disposable TF3 run test positive consumption
+and rejection of duplicates/stale evidence. The production ordinary-loan
+resume gate stays false. No new loan execution, installment, reload acceptance
+or gameplay readiness follows from this static evidence.
