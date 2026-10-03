@@ -16,6 +16,14 @@ bool ChangedHeaderRead(HANDLE process, uint64_t address, void* output, SIZE_T si
     if (address == changed_header && ++header_reads == 2) static_cast<unsigned char*>(output)[0] ^= 1;
     return true;
 }
+uint64_t changed_identity = 0;
+unsigned identity_reads = 0;
+bool ChangedIdentityRead(HANDLE process, uint64_t address, void* output, SIZE_T size) {
+    if (!SafeReadSpan(process, address, output, size)) return false;
+    if (address == changed_identity && ++identity_reads == 2)
+        static_cast<unsigned char*>(output)[0] ^= 1;
+    return true;
+}
 void Require(bool value, const char* label) { if (!value) throw Error(label); }
 struct Owned {
     std::array<uint64_t, 7> descriptor{};
@@ -48,6 +56,8 @@ int main() {
         Owned owned; Snapshot output{};
         Require(Capture(GetCurrentProcess(), owned.context, SafeReadSpan, &output), "valid capture");
         Require(output.entity == 3141 && output.raw_state == reinterpret_cast<uint64_t>(&owned.raw), "frame chain");
+        Require(output.state_helper_slot == reinterpret_cast<uint64_t>(&owned.helper_slot) &&
+            output.state_helper == reinterpret_cast<uint64_t>(owned.helper.data()), "active state receiver");
         Require(output.string_bytes[0] == 1 && output.string_bytes[1] == owned.path.size() + 1 &&
             memcmp(output.strings[1].data(), owned.path.c_str(), owned.path.size() + 1) == 0, "string data");
         Require(EmitLoanResource(GetCurrentProcess(), GetCurrentProcessId(), GetCurrentThreadId(), owned.context, 1),
@@ -78,6 +88,18 @@ int main() {
         }
         changed_header = reinterpret_cast<uint64_t>(owned.resource.data()); header_reads = 0;
         Require(!Capture(GetCurrentProcess(), owned.context, ChangedHeaderRead, &output), "changed header rejected");
+        const uint64_t identities[] = {
+            reinterpret_cast<uint64_t>(owned.descriptor.data()),
+            reinterpret_cast<uint64_t>(&owned.helper_slot),
+            reinterpret_cast<uint64_t>(owned.helper.data()),
+            reinterpret_cast<uint64_t>(owned.helper.data()) + 0x10,
+        };
+        for (const auto address : identities) {
+            changed_identity = address; identity_reads = 0;
+            memset(&output, 0xa5, sizeof output); const Snapshot sentinel = output;
+            Require(!Capture(GetCurrentProcess(), owned.context, ChangedIdentityRead, &output) &&
+                memcmp(&output, &sentinel, sizeof output) == 0, "changed callback identity rejected without publication");
+        }
         const uint64_t too_long = 257; memcpy(owned.resource.data() + 48, &too_long, 8);
         Require(!Capture(GetCurrentProcess(), owned.context, SafeReadSpan, &output), "oversized string rejected");
         SYSTEM_INFO info{}; GetSystemInfo(&info);
@@ -99,7 +121,7 @@ int main() {
         Require(VirtualFree(pages, 0, MEM_RELEASE) != FALSE, "owned page cleanup");
         Require(!SafeReadSpan(GetCurrentProcess(), UINT64_MAX - 1, scratch.data(), 8), "overflow rejected");
         printf("{\"scope\":\"loan-resource-readback-owned\",\"passed\":true,\"readsFaultInjected\":%u,"
-            "\"guardPreserved\":true,\"partialPublicationRejected\":true,\"activationPermitted\":false,\"tf3Qualified\":false}\n", total);
+            "\"guardPreserved\":true,\"partialPublicationRejected\":true,\"changedIdentityCases\":4,\"activationPermitted\":false,\"tf3Qualified\":false}\n", total);
         return 0;
     } catch (const std::exception& error) { fprintf(stderr, "owned resource readback failed: %s\n", error.what()); return 1; }
 }

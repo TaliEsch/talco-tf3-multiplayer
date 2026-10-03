@@ -11,6 +11,9 @@ namespace tf3loanresourceobservation {
 using ReadSpan = bool(*)(HANDLE, std::uint64_t, void*, SIZE_T);
 struct Snapshot {
     std::uint64_t script_rep, script_ref, resource, wrapper, raw_state, engine;
+    // Active callback state receiver. script_ref+0x40 is params, not state.
+    // Observation only: these addresses must not outlive the callback.
+    std::uint64_t state_helper_slot, state_helper;
     std::int32_t entity;
     std::array<unsigned char, 64> header;
     std::array<std::array<unsigned char, 257>, 2> strings;
@@ -31,14 +34,15 @@ inline bool Capture(HANDLE process, const CONTEXT& context, ReadSpan read, Snaps
     if (!read(process, context.R13, descriptor.data(), sizeof descriptor)) return false;
     result.script_rep = descriptor[0]; result.script_ref = descriptor[1];
     result.resource = descriptor[2];
-    std::uint64_t helper = 0;
+    result.state_helper_slot = descriptor[6];
     if (!result.script_rep || !result.script_ref || !result.resource ||
         !read(process, context.Rbp - 0x80, &result.wrapper, sizeof result.wrapper) ||
         !read(process, result.wrapper, &result.raw_state, sizeof result.raw_state) ||
-        !result.raw_state || !read(process, descriptor[6], &helper, sizeof helper)) return false;
+        !result.raw_state || !read(process, result.state_helper_slot,
+            &result.state_helper, sizeof result.state_helper)) return false;
     std::uint64_t entity_address = 0;
-    if (!Add(helper, 0x10, &entity_address) ||
-        !read(process, helper, &result.engine, sizeof result.engine) || !result.engine ||
+    if (!Add(result.state_helper, 0x10, &entity_address) ||
+        !read(process, result.state_helper, &result.engine, sizeof result.engine) || !result.engine ||
         !read(process, entity_address, &result.entity, sizeof result.entity) ||
         !read(process, result.resource, result.header.data(), result.header.size())) return false;
     for (std::size_t i = 0; i < 2; ++i) {
@@ -61,6 +65,17 @@ inline bool Capture(HANDLE process, const CONTEXT& context, ReadSpan read, Snaps
     }
     std::array<unsigned char, 64> fresh{};
     if (!read(process, result.resource, fresh.data(), fresh.size()) || fresh != result.header) return false;
+    std::array<std::uint64_t, 7> fresh_descriptor{};
+    std::uint64_t fresh_helper = 0, fresh_engine = 0;
+    std::int32_t fresh_entity = 0;
+    if (!read(process, context.R13, fresh_descriptor.data(), sizeof fresh_descriptor) ||
+        fresh_descriptor != descriptor ||
+        !read(process, result.state_helper_slot, &fresh_helper, sizeof fresh_helper) ||
+        fresh_helper != result.state_helper ||
+        !read(process, result.state_helper, &fresh_engine, sizeof fresh_engine) ||
+        fresh_engine != result.engine ||
+        !read(process, entity_address, &fresh_entity, sizeof fresh_entity) ||
+        fresh_entity != result.entity) return false;
     // Publish only after every read passes. A header reread detects some
     // changes; it does not replace the pending-debug-event lifetime contract.
     *output = result; return true;
