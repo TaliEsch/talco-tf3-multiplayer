@@ -40,6 +40,35 @@ permission, a consumer waiting beyond its deadline, and invalidation before
 publication. Its injectable clock and synchronization barriers belong to the
 owned fixture. They do not prove actual TF3 lifecycle behavior.
 
+## Protected Lua registration and consumer
+
+`native/loan_lua_consumer.h` uses the [public Lua 5.2 API](https://www.lua.org/source/5.2/lua.h.html)
+with a zero-upvalue registration thunk inside `pcallk`, balanced original stack,
+exact string/hex validation and one Boolean return. Native Claim is required
+at compile time to be nonthrowing. Registration must permit C++ unwinding;
+Lua's [C++ error path](https://www.lua.org/source/5.2/ldo.c.html) cannot cross
+`noexcept` or a broad exception-suppression bridge.
+
+`Build-LoanLuaConsumerOwned.ps1` passes 52 checks using unchanged Lua 5.2.4
+compiled as a C++ DLL. These cover protected registration, growing-allocation
+failure, a Lua C++ error crossing the DLL boundary, malformed/extra arguments,
+non-string rejection without conversion, duplicate consumption and actual
+Lua-to-native stack traversal through the owned invocation fixture. A shared
+VM without an invocation, a foreign owned resource and mismatched raw state
+are denied. Resource and borrower observations in this fixture are synthetic;
+they do not qualify TF3's layout or world lifecycle.
+
+The root fixture is built with `/EHs` so C linkage on the owned ASM callbacks
+does not imply they are nonthrowing. The upstream runtime uses its normal C++
+API exports. All 58 upstream C/header files are compared with a freshly
+extracted hash-pinned official archive before building. Upstream code and its
+copyright/license remain in private test/build directories, not game packages.
+
+A registration failure can leave an earlier global closure installed. The
+actual adapter must independently disable Claim/arming and halt on failure;
+returning false from registration is not revocation. Code stays pinned while
+Lua can retain a callback pointer.
+
 ## Remaining integration gates
 
 - A fresh process/session epoch from authenticated native ingress; never reuse

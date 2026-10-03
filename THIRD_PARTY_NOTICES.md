@@ -9,6 +9,14 @@ includes the complete licence. Exact development dependency versions and
 integrity hashes are recorded in package-lock.json; transitive test dependencies
 are readline-sync, sprintf-js and tmp, with their licences in node_modules.
 
+Owned native registration tests additionally compile unchanged Lua 5.2.4 from
+https://www.lua.org/ftp/lua-5.2.4.tar.gz as a private C++ test DLL. Copyright
+1994–2015 Lua.org, PUC-Rio; MIT licence: https://www.lua.org/license.html.
+The original source notices and complete licence in `doc/readme.html` remain
+with the downloaded and verified test source. This test DLL is not included
+in the launcher or game mod; no upstream Lua implementation is copied into
+the project source.
+
 `TF3MP-Launcher.exe` is original project code compiled against the Microsoft
 .NET Framework already supplied by Windows. No .NET runtime or compiler binary
 is redistributed with this project.
