@@ -36,7 +36,21 @@ function rvaBytes(rva, size) {
   }
   throw new Error('PIN_OUTSIDE_RAW_IMAGE');
 }
+function rvaSection(rva, size) {
+  assert.ok(Number.isSafeInteger(rva) && Number.isSafeInteger(size) && rva > 0 && size > 0);
+  for (let i = 0; i < sections; ++i) {
+    const entry = sectionStart + i * 40;
+    const base = image.readUInt32LE(entry + 12);
+    const rawSize = image.readUInt32LE(entry + 16);
+    if (rva >= base && rva - base < rawSize && size <= rawSize - (rva - base)) {
+      const rawName = image.subarray(entry, entry + 8).toString('ascii');
+      return { name: rawName.split('\0', 1)[0], characteristics: image.readUInt32LE(entry + 36) };
+    }
+  }
+  throw new Error('PIN_OUTSIDE_RAW_IMAGE');
+}
 const pins = [];
+const imageDataPins = [];
 function pin(rva, size, sha256) {
   rva = Number(rva);
   assert.match(sha256, /^[a-f0-9]{64}$/);
@@ -72,6 +86,17 @@ if (stateGetterPath) {
   assert.ok(Array.isArray(stateGetter.functions) && stateGetter.functions.length > 0);
   assert.ok(Array.isArray(stateGetter.supportFunctions) && stateGetter.supportFunctions.length > 0);
   assert.ok(Array.isArray(stateGetter.dataPins));
+  const mutableDataNames = new Map([
+    ['UserdataPtrRttiTypeName', 0x3f2afd0],
+    ['mutableClassRegistryKeyCell', 0x3cbf490],
+    ['constClassRegistryKeyCell', 0x3cbf668]
+  ]);
+  const foundMutableData = new Set();
+  const mutableDataSizes = new Map([
+    ['UserdataPtrRttiTypeName', 35],
+    ['mutableClassRegistryKeyCell', 8],
+    ['constClassRegistryKeyCell', 8]
+  ]);
   const admittedFunctions = new Set();
   for (const fn of [...stateGetter.functions, ...stateGetter.supportFunctions]) {
     assert.ok(fn && typeof fn.name === 'string' && !admittedFunctions.has(fn.name), 'DUPLICATE_STATE_GETTER_FUNCTION');
@@ -88,9 +113,27 @@ if (stateGetterPath) {
   // direct file bytes solely for spans with no DIR64 relocations; do not mask.
   for (const row of stateGetter.dataPins) {
     assert.ok(row && typeof row.name === 'string' && Array.isArray(row.baseRelocationRvas));
+    const rva = Number(row.rva);
+    const section = rvaSection(rva, row.byteLength);
+    const writable = (section.characteristics & 0x80000000) !== 0;
+    if (writable) {
+      assert.equal(section.name, '.data', `WRITABLE_DATA_SECTION_${row.name}`);
+      assert.equal(section.characteristics, 0xc0000040, `WRITABLE_DATA_FLAGS_${row.name}`);
+      assert.equal(mutableDataNames.get(row.name), rva, `UNEXPECTED_MUTABLE_DATA_PIN_${row.name}`);
+      assert.equal(row.byteLength, mutableDataSizes.get(row.name), `MUTABLE_DATA_PIN_SIZE_${row.name}`);
+      assert.equal(foundMutableData.has(row.name), false, `DUPLICATE_MUTABLE_DATA_PIN_${row.name}`);
+      assert.equal(row.baseRelocationRvas.length, 0, `RELOCATED_MUTABLE_DATA_${row.name}`);
+      assert.match(row.sha256, /^[a-f0-9]{64}$/);
+      assert.equal(digest(rvaBytes(rva, row.byteLength)), row.sha256);
+      imageDataPins.push({ rva, size: row.byteLength, sha256: row.sha256 });
+      foundMutableData.add(row.name);
+      continue;
+    }
+    assert.equal(mutableDataNames.has(row.name), false, `EXPECTED_MUTABLE_DATA_NOT_WRITABLE_${row.name}`);
     if (row.baseRelocationRvas.length) continue;
     pin(row.rva, row.byteLength, row.sha256);
   }
+  assert.deepEqual([...foundMutableData].sort(), [...mutableDataNames.keys()].sort(), 'MUTABLE_DATA_PIN_SET');
   assert.equal(stateGetter.closureLayout?.expectedFunctionRva != null, true);
   assert.equal(stateGetter.receiverLayout?.vtableRva != null, true);
   assert.equal(stateGetter.classLookup?.keyCellRva != null, true);
@@ -121,7 +164,7 @@ if (relocationSize) {
       if (!kind) continue;
       assert.equal(kind, 10);
       const address = page + (entry & 0xfff);
-      assert.ok(pins.every(p => address + 8 <= p.rva || address >= p.rva + p.size), 'RELOCATED_PIN');
+      assert.ok([...pins, ...imageDataPins].every(p => address + 8 <= p.rva || address >= p.rva + p.size), 'RELOCATED_PIN');
     }
     offset += bytes;
   }
@@ -147,10 +190,11 @@ const text = `#pragma once\n#include <array>\n#include <cstdint>\nnamespace tf3l
       `inline constexpr std::uint32_t ${name} = ${Number(rva)};\n`).join('');
     return apiConstants + structuralConstants;
   })() : '') +
+  (stateGetter ? `inline constexpr Pin image_data_pins[] = {\n${imageDataPins.map(p => `{${p.rva},${p.size},${cppDigest(p.sha256)}}`).join(',\n')}\n};\n` : '') +
   `inline constexpr Pin pins[] = {\n${pins.map(p => `{${p.rva},${p.size},${cppDigest(p.sha256)}}`).join(',\n')}\n};\n}\n`;
 await writeFile(outputPath, text);
 console.log(JSON.stringify(stateGetter
   ? { scope: 'inert-loan-diagnostic-pins', pins: pins.length, imageSha256: expected,
-      stateGetterEvidence: true, activationPermitted: false }
+      stateGetterEvidence: true, imageDataPins: imageDataPins.length, activationPermitted: false }
   : { scope: 'inert-loan-diagnostic-pins', pins: pins.length, imageSha256: expected,
       activationPermitted: false }));
