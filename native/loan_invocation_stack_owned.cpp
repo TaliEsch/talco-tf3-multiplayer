@@ -17,6 +17,7 @@ bool nested_case = false;
 bool missing_metadata_case = false;
 bool simulation_case = false;
 bool simulation_expected = true;
+std::uint64_t simulation_game = 0;
 bool deny_simulation_read = false;
 unsigned nesting = 0;
 void Require(bool value, const char* label) { if (!value) throw std::runtime_error(label); }
@@ -51,8 +52,18 @@ extern "C" __declspec(noinline) void LoanOwnedCallback() {
     if (simulation_case) {
         Require(tf3loansimulation::MatchesCurrent(site, ReadOwned) == simulation_expected,
             "owned simulation identity result"); ++cases;
+        tf3loansimulation::Snapshot snapshot{};
+        snapshot.game = 0xabcdef;
+        Require(tf3loansimulation::CaptureCurrent(site, ReadOwned, &snapshot) == simulation_expected,
+            "owned simulation snapshot result"); ++cases;
+        Require(simulation_expected ? snapshot.game == simulation_game && snapshot.manager != 0 &&
+            snapshot.thread_id == GetCurrentThreadId() : snapshot.game == 0xabcdef,
+            "simulation snapshot publishes only verified same-manager identity"); ++cases;
         deny_simulation_read = true;
         Require(!tf3loansimulation::MatchesCurrent(site, ReadOwned), "failed simulation read denied"); ++cases;
+        snapshot.game = 0xabcdef;
+        Require(!tf3loansimulation::CaptureCurrent(site, ReadOwned, &snapshot) && snapshot.game == 0xabcdef,
+            "failed read publishes no simulation identity"); ++cases;
         deny_simulation_read = false;
         Require(!tf3loansimulation::MatchesCurrent(site, nullptr), "missing simulation reader denied"); ++cases;
         return;
@@ -105,6 +116,7 @@ int main(int argc, char**) {
         std::memcpy(game.data() + 0x1f0, &manager_pointer, sizeof manager_pointer);
         std::memcpy(manager.data() + 0xa8, &thread_id, sizeof thread_id);
         simulation_case = true;
+        simulation_game = reinterpret_cast<std::uint64_t>(game.data());
         LoanOwnedInvocation(reinterpret_cast<std::uint64_t>(game.data()), expected_wrapper);
         simulation_expected = false;
         thread_id = 0;
