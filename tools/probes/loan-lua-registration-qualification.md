@@ -69,6 +69,35 @@ script visibility, callback lifetime, exception behavior or unload safety.
 
 ## Resource and lifecycle constraints
 
+Follow-up decoded the subscription selector `AAE550`: it invokes the registered
+callback inline with the selected ResName and resolved script Entity. It does
+not establish the Update worker's TLS context. Existing TLS is therefore not
+an event identity check.
+
+At post-registration NOP `F410A7`, R13 retains the invocation descriptor:
+ScriptRep at `+0`, ScriptRef at `+8`, ResName pointer at `+0x10`, helper-slot
+pointer at `+0x30`. Dereference the helper slot to obtain the live helper;
+its Engine is at `+0` and Entity at `+0x10`. Recover the Lua wrapper from
+`[RBP-0x80]`, then raw state from wrapper `+0`. RCX is volatile after the
+registration call and must not be treated as the raw state at this NOP.
+These are static operands, not qualified runtime pointer reads.
+
+Root independently decoded comparator `9FF30..9FFB3`, which compares two
+string fields at ResName `+0` and `+0x20`, selecting inline storage when
+capacity is below 16 and pointer storage otherwise. The bounded observation
+decoder `loan-resource-readback-40408.mjs` rejects invalid lengths, pointer
+overflow, failed/partial reads and malformed strings. Seven focused tests pass;
+they are synthetic layout tests, not owned native callback or TF3 evidence.
+The actual Loan resource pair still needs correlated live readback.
+
+Any passive observation must copy while this temporary invocation remains
+alive. Saving pointers and reading them later on a worker is insufficient.
+ReadProcessMemory inside VEH is not qualified by its ordinary API contract;
+do not transplant the existing out-of-VEH trampoline from a different frame.
+Before enabling this site, qualify bounded POD capture, nested read faults,
+publication contention, exact NOP continuation and lifetime/cleanup in an owned
+process. Decode and log the completed copy outside VEH. No observer is enabled.
+
 Astra traced provider lookup to `MSVCP140.dll!_Thrd_id`: the state is per-thread,
 not Loan-exclusive. An authorization consumer must check the active Loan
 resource/context, session, operation digest and current world generation;
@@ -87,6 +116,31 @@ More importantly, actual HandleEvent supplies a Boolean that skips the pending
 branches to `2FB805E`. These flags cannot authorize a fresh world generation.
 The existing `32DE88` load-return observer remains observation only; it does
 not invalidate permissions before load or prove safe same-address reuse.
+
+## Actual world lifecycle found
+
+A separate Astra review traced StartSavegame through StopGame to LoadGame.
+Root independently checked the exact-image StartSavegame entry, simulation stop
+and CGame destructor disassembly, including their `.pdata` ranges and hashes.
+
+| Range | Static identity and scope |
+| --- | --- |
+| `6A6BB0..6A6D64` | CMenuUI StartSavegame; tests busy state then queues work. This is a request entry, not completed load. |
+| `6A6D70..6A76D7` | CMenuUI StopGame; current CGame at UI `+0x6B0`; calls simulation stop before clearing that field. |
+| `11F510..11F64F` | Stops actual CGame simulation thread and joins via `121EB0`. |
+| `6900C0..690109` | Detached destruction thread; calls CGame destructor on the retained old game. |
+| `11AD60..11B0C8` | CGame destructor; clears/destroys GameSim `+0x88/+0x90` and GameState `+0x78/+0x80` in its manager. |
+
+StartSavegame's queued lambda calls StopGame at `69903D`, then preparation and
+EnterGameAsynchronously before LoadGame `32B450`. LoadGame constructs a new
+CGame and routes its primary GameState to the deserializer observed at
+`32DE88`. These are actual world lifecycle links, unlike provider cache flags.
+
+Destruction alone is too late for a request-time permission fence: StopGame
+clears its CGame and starts a detached destruction thread. Also, a prevalidation
+failure can bypass StartSavegame. Actual Loan ordering, cancellation and other
+replacement paths remain unqualified. No live thread or ordering witness has
+been collected; this discovery does not permit installation of a lifecycle hook.
 
 ## Next required proof
 
