@@ -18,10 +18,39 @@ export const NATIVE_RUNTIME_CAPABILITIES=Object.freeze({
   passiveVehicleActionDiagnostics:'diagnostic.passive-vehicle-action.v1',
   vehiclePrepare:'vehicle.prepare.v1',
   vehicleExecute:'vehicle.execute.v1',
+  ordinaryLoanResumeArm:'experiment.ordinary-loan-resume-arm.v1',
   vehicleCancelArm:'vehicle.cancel-arm.v1',
   vehicleCancelArmDiagnostics:'diagnostic.vehicle-cancel-arm.v1',
 });
 const uint64Text=value=>typeof value==='string'&&/^(?:0|[1-9][0-9]{0,19})$/.test(value)&&BigInt(value)<=0xffffffffffffffffn;
+const nonzeroHex=(value,length)=>typeof value==='string'&&value.length===length
+  &&/^[a-f0-9]+$/.test(value)&&!/^0+$/.test(value);
+export const validateOrdinaryLoanWorld=value=>{
+  if(value===null)return null;
+  if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).length!==2
+    ||!nonzeroHex(value.epoch,32)||!uint64Text(value.generation)||value.generation==='0')
+    throw new Error('INVALID_NATIVE_ORDINARY_LOAN_WORLD');
+  return Object.freeze({epoch:value.epoch,generation:value.generation});
+};
+export const validateOrdinaryLoanResumeArmRequest=request=>{
+  const fields=['nonce','digest','owner','loanId','epoch','generation','ttlMs'];
+  if(!request||typeof request!=='object'||Array.isArray(request)
+    ||Object.keys(request).length!==fields.length||fields.some(key=>!Object.hasOwn(request,key))
+    ||!nonzeroHex(request.nonce,32)||!nonzeroHex(request.digest,64)
+    ||!Number.isInteger(request.owner)||request.owner<1||request.owner>2147483647
+    ||!Number.isInteger(request.loanId)||request.loanId<0||request.loanId>=2147483647
+    ||!Number.isInteger(request.ttlMs)||request.ttlMs<1||request.ttlMs>5000)
+    throw new TypeError('INVALID_NATIVE_ORDINARY_LOAN_ARM_REQUEST');
+  validateOrdinaryLoanWorld({epoch:request.epoch,generation:request.generation});
+  // Field order is the exact bounded native parser contract.
+  return Object.freeze(Object.fromEntries(fields.map(key=>[key,request[key]])));
+};
+export const validateOrdinaryLoanResumeArmReceipt=receipt=>{
+  if(!receipt||typeof receipt!=='object'||Array.isArray(receipt)||Object.keys(receipt).length!==2
+    ||receipt.status!=='armed'||receipt.control!=='armOrdinaryLoanResume')
+    throw new Error('INVALID_NATIVE_ORDINARY_LOAN_ARM_RECEIPT');
+  return Object.freeze({...receipt});
+};
 export const validateVehicleCancelArmRequest=request=>{
   if(!request||typeof request!=='object'||Array.isArray(request)||Object.keys(request).some(key=>!['entity','stopped','ttlMs'].includes(key))
     ||!Number.isInteger(request.entity)||request.entity < -2147483648||request.entity > 2147483647
@@ -145,6 +174,7 @@ const encode=(type,id,session,payload)=>{
 export const createRuntimeIpcCredentials=()=>Object.freeze({pipe:`tf3mp_${randomBytes(12).toString('hex')}`,token:randomBytes(32).toString('hex')});
 
 export class NativeRuntimeClient extends EventEmitter {
+  #loanResumeArmAttempted=false;
   #socket;#buffer=Buffer.alloc(0);#session=Buffer.alloc(16);#pending=new Map();#next=1n;#closed=false;#disconnectNotified=false;#connected=false;#bound=false;#binding=null;
   constructor({pipe,token,timeoutMs=3000}){super();if(!safePipe(pipe)||!safeToken(token)||!Number.isInteger(timeoutMs)||timeoutMs<50||timeoutMs>30000)throw new TypeError('INVALID_NATIVE_RUNTIME_IPC_OPTIONS');this.pipe=pipe;this.token=token;this.timeoutMs=timeoutMs;}
   static async connect(options){const c=new NativeRuntimeClient(options);try{await c.#connect();return c;}catch(error){c.close();throw error;}}
@@ -167,6 +197,26 @@ export class NativeRuntimeClient extends EventEmitter {
   #request(type,payload,sessionRequired=true){if(this.#closed)return Promise.reject(new Error('NATIVE_RUNTIME_IPC_CLOSED'));const id=this.#next++;if(id===0n||id>0xffffffffffffffffn)return Promise.reject(new Error('NATIVE_RUNTIME_IPC_ID_EXHAUSTED'));return new Promise((resolve,reject)=>{const timer=setTimeout(()=>{this.#pending.delete(id.toString());this.emit('unknownOutcome',Object.freeze({id,reason:'timeout'}));reject(new Error('NATIVE_RUNTIME_IPC_TIMEOUT'));},this.timeoutMs);this.#pending.set(id.toString(),{resolve,reject,timer});try{this.#socket.write(encode(type,id,sessionRequired?this.#session:Buffer.alloc(16),payload));}catch(error){clearTimeout(timer);this.#pending.delete(id.toString());reject(error);}});}
   async control(control){if(!this.#connected)throw new Error('NATIVE_RUNTIME_IPC_NOT_CONNECTED');if(!['ping','hold','release','halt','shutdown'].includes(control))throw new TypeError('INVALID_NATIVE_RUNTIME_CONTROL');const reply=await this.#request(TYPES.control,{control});if(reply.type===TYPES.error)throw new Error(`NATIVE_RUNTIME_IPC_${reply.payload?.code??'ERROR'}`);if(reply.type!==TYPES.receipt||reply.payload?.status!=='accepted')throw new Error('NATIVE_RUNTIME_IPC_INVALID_RECEIPT');return Object.freeze(reply.payload);}
   passiveVehicleActionObservation(receipt){this.requireCapability(NATIVE_RUNTIME_CAPABILITIES.passiveVehicleActionDiagnostics);return validatePassiveVehicleActionObservation(receipt);}
+  async ordinaryLoanWorld(){
+    this.requireCapability(NATIVE_RUNTIME_CAPABILITIES.ordinaryLoanResumeArm);
+    if(!this.#bound)throw new Error('NATIVE_RUNTIME_SESSION_NOT_BOUND');
+    const receipt=await this.control('ping');
+    if(!Object.hasOwn(receipt,'ordinaryLoanWorld'))throw new Error('NATIVE_ORDINARY_LOAN_WORLD_MISSING');
+    return validateOrdinaryLoanWorld(receipt.ordinaryLoanWorld);
+  }
+  async armOrdinaryLoanResume(request){
+    if(!this.#connected)throw new Error('NATIVE_RUNTIME_IPC_NOT_CONNECTED');
+    const command=validateOrdinaryLoanResumeArmRequest(request);
+    this.requireCapability(NATIVE_RUNTIME_CAPABILITIES.ordinaryLoanResumeArm);
+    if(!this.#bound||!['host','participant'].includes(this.#binding?.role))
+      throw new Error('NATIVE_RUNTIME_SESSION_NOT_BOUND');
+    if(this.#loanResumeArmAttempted)throw new Error('NATIVE_ORDINARY_LOAN_ARM_ALREADY_ATTEMPTED');
+    this.#loanResumeArmAttempted=true;
+    const reply=await this.#request(TYPES.control,{control:'armOrdinaryLoanResume',...command});
+    if(reply.type===TYPES.error)throw new Error(`NATIVE_RUNTIME_IPC_${reply.payload?.code??'ERROR'}`);
+    if(reply.type!==TYPES.receipt)throw new Error('NATIVE_ORDINARY_LOAN_ARM_RECEIPT_MISSING');
+    return validateOrdinaryLoanResumeArmReceipt(reply.payload);
+  }
   vehicleCancelArmObservation(receipt){this.requireCapability(NATIVE_RUNTIME_CAPABILITIES.vehicleCancelArmDiagnostics);return validateVehicleCancelArmObservation(receipt);}
   async armVehicleCancel(request){
     if(!this.#connected)throw new Error('NATIVE_RUNTIME_IPC_NOT_CONNECTED');
