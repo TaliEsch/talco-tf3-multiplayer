@@ -1,4 +1,5 @@
-// External, read-only TF3 40408 loaded-game return probe. No target writes.
+// External TF3 40408 diagnostic. No target memory writes; hardware debug
+// registers are temporarily set, verified and restored before detach.
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <bcrypt.h>
@@ -11,12 +12,15 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include "loan_event_resource_readback.h"
 #pragma comment(lib, "bcrypt.lib")
 #pragma comment(lib, "psapi.lib")
 
 namespace {
 constexpr DWORD kRva = 0x32de88;
 constexpr std::array<BYTE, 3> kBytes{0x45, 0x33, 0xf6};
+constexpr DWORD kLoanResourceRva = 0xf410a7;
+constexpr std::array<BYTE, 3> kLoanResourceBytes{0x90, 0x48, 0x8b};
 constexpr char kHash[] = "de1daad3a13f3b7e9f79903361bb43769cf4f15e59271a263aefe1f075f23ef2";
 constexpr DWORD kLoadTimeoutMs = 120000;
 struct Error : std::runtime_error { using runtime_error::runtime_error; };
@@ -64,7 +68,7 @@ template<class T> T At(const std::vector<BYTE>& bytes, size_t offset) {
     Check(offset <= bytes.size() && sizeof(T) <= bytes.size() - offset, "invalid PE offset");
     T value{}; memcpy(&value, bytes.data() + offset, sizeof value); return value;
 }
-void ValidateFileSite(const std::vector<BYTE>& bytes) {
+void ValidateFileSite(const std::vector<BYTE>& bytes, DWORD rva = kRva, const std::array<BYTE, 3>& expected = kBytes) {
     const auto dos = At<IMAGE_DOS_HEADER>(bytes, 0);
     Check(dos.e_magic == IMAGE_DOS_SIGNATURE && dos.e_lfanew > 0, "invalid DOS header");
     const size_t ntOffset = static_cast<size_t>(dos.e_lfanew);
@@ -76,12 +80,12 @@ void ValidateFileSite(const std::vector<BYTE>& bytes) {
     unsigned matches = 0;
     for (WORD i = 0; i < nt.FileHeader.NumberOfSections; ++i) {
         const auto section = At<IMAGE_SECTION_HEADER>(bytes, ntOffset + sizeof nt + i * sizeof(IMAGE_SECTION_HEADER));
-        if (!(section.Characteristics & IMAGE_SCN_MEM_EXECUTE) || kRva < section.VirtualAddress) continue;
-        const size_t delta = kRva - section.VirtualAddress;
-        if (delta > section.SizeOfRawData || kBytes.size() > section.SizeOfRawData - delta) continue;
+        if (!(section.Characteristics & IMAGE_SCN_MEM_EXECUTE) || rva < section.VirtualAddress) continue;
+        const size_t delta = rva - section.VirtualAddress;
+        if (delta > section.SizeOfRawData || expected.size() > section.SizeOfRawData - delta) continue;
         const size_t offset = static_cast<size_t>(section.PointerToRawData) + delta;
-        Check(offset <= bytes.size() && kBytes.size() <= bytes.size() - offset, "PE section outside file");
-        Check(memcmp(bytes.data() + offset, kBytes.data(), kBytes.size()) == 0, "file instruction mismatch");
+        Check(offset <= bytes.size() && expected.size() <= bytes.size() - offset, "PE section outside file");
+        Check(memcmp(bytes.data() + offset, expected.data(), expected.size()) == 0, "file instruction mismatch");
         ++matches;
     }
     Check(matches == 1, "site is not uniquely file-backed executable code");
@@ -101,9 +105,9 @@ bool MappedInstructionMatches(HANDLE process, uint64_t address, const std::array
     std::array<BYTE, 3> mapped{};
     return Read(process, address, mapped.data(), mapped.size()) && mapped == expected;
 }
-bool SafeReadInt(HANDLE process, uint64_t address, int32_t& value) {
-    if (!address || address > UINT64_MAX - sizeof value) return false;
-    const uint64_t end = address + sizeof value;
+bool SafeReadSpan(HANDLE process, uint64_t address, void* output, SIZE_T size) {
+    if (!output || !size || size > 512 || !address || address > UINT64_MAX - size) return false;
+    const uint64_t end = address + size;
     for (uint64_t cursor = address; cursor < end;) {
         MEMORY_BASIC_INFORMATION page{};
         if (VirtualQueryEx(process, reinterpret_cast<void*>(cursor), &page, sizeof page) != sizeof page ||
@@ -115,7 +119,10 @@ bool SafeReadInt(HANDLE process, uint64_t address, int32_t& value) {
         if (start > UINT64_MAX - page.RegionSize || start + page.RegionSize <= cursor) return false;
         cursor = start + page.RegionSize;
     }
-    return Read(process, address, &value, sizeof value);
+    return Read(process, address, output, size);
+}
+bool SafeReadInt(HANDLE process, uint64_t address, int32_t& value) {
+    return SafeReadSpan(process, address, &value, sizeof value);
 }
 bool AttachBreak(HANDLE process, const EXCEPTION_RECORD& exception) {
     if (exception.ExceptionCode != EXCEPTION_BREAKPOINT) return false;
@@ -347,7 +354,50 @@ DWORD ParsePid(const wchar_t* value) {
     if (!number) throw Error("PID zero is invalid");
     return static_cast<DWORD>(number);
 }
-int Observe(DWORD pid) {
+void RequireSeparateDiagnosticProcess(HANDLE process) {
+    std::array<HMODULE, 1024> modules{}; DWORD bytes = 0;
+    Check(EnumProcessModulesEx(process, modules.data(), static_cast<DWORD>(sizeof modules), &bytes, LIST_MODULES_ALL) &&
+        bytes <= sizeof modules, "diagnostic module inventory unavailable");
+    for (size_t i = 0; i < bytes / sizeof(HMODULE); ++i) {
+        wchar_t name[MAX_PATH]{};
+        Check(GetModuleBaseNameW(process, modules[i], name, MAX_PATH) != 0, "diagnostic module identity unavailable");
+        Check(_wcsicmp(name, L"TF3InProcessRuntime.dll") && _wcsicmp(name, L"TF3NativeProbe.dll"),
+            "loan resource diagnostic cannot accompany multiplayer native runtime");
+    }
+}
+std::string HexBytes(const unsigned char* bytes, size_t count) {
+    std::string result; result.reserve(count * 2);
+    constexpr char hex[] = "0123456789abcdef";
+    for (size_t i = 0; i < count; ++i) { result += hex[bytes[i] >> 4]; result += hex[bytes[i] & 15]; }
+    return result;
+}
+bool EmitLoanResource(HANDLE process, DWORD pid, DWORD thread, const CONTEXT& context, unsigned ordinal) {
+    tf3loanresourceobservation::Snapshot snapshot{};
+    const bool readable = tf3loanresourceobservation::Capture(process, context, &SafeReadSpan, &snapshot);
+    bool candidate = false;
+    if (readable) {
+        for (size_t i = 0; i < 2; ++i) {
+            const std::string value(reinterpret_cast<const char*>(snapshot.strings[i].data()), snapshot.string_bytes[i] - 1);
+            candidate = candidate || value.find("/game_mechanics/finance/loan") != std::string::npos;
+        }
+    }
+    printf("{\"event\":\"loan-event-resource-hit\",\"diagnosticOnly\":true,\"activationPermitted\":false,"
+        "\"pid\":%lu,\"threadId\":%lu,\"ordinal\":%u,\"readable\":%s,\"loanCandidate\":%s",
+        pid, thread, ordinal, readable ? "true" : "false", candidate ? "true" : "false");
+    if (readable) {
+        const auto header = HexBytes(snapshot.header.data(), snapshot.header.size());
+        const auto first = HexBytes(snapshot.strings[0].data(), snapshot.string_bytes[0]);
+        const auto second = HexBytes(snapshot.strings[1].data(), snapshot.string_bytes[1]);
+        printf(",\"scriptRep\":\"%llx\",\"scriptRef\":\"%llx\",\"resource\":\"%llx\",\"wrapper\":\"%llx\","
+            "\"rawState\":\"%llx\",\"engine\":\"%llx\",\"entity\":%ld,\"entityValid\":%s,\"headerHex\":\"%s\",\"stringsHex\":[\"%s\",\"%s\"]",
+            snapshot.script_rep, snapshot.script_ref, snapshot.resource, snapshot.wrapper,
+            snapshot.raw_state, snapshot.engine, snapshot.entity, snapshot.entity > 0 ? "true" : "false", header.c_str(), first.c_str(), second.c_str());
+    }
+    printf("}\n"); fflush(stdout); return candidate;
+}
+int Observe(DWORD pid, bool loanResource = false) {
+    const DWORD rva = loanResource ? kLoanResourceRva : kRva;
+    const auto& expected = loanResource ? kLoanResourceBytes : kBytes;
     Handle process(OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ | SYNCHRONIZE, FALSE, pid));
     Check(process.h != nullptr, "cannot open explicit PID");
     const std::wstring path = ProcessPath(process.h);
@@ -356,7 +406,8 @@ int Observe(DWORD pid) {
         "target executable name mismatch");
     const auto bytes = FileBytes(path);
     Check(Sha256(bytes) == kHash, "target executable hash mismatch");
-    ValidateFileSite(bytes);
+    ValidateFileSite(bytes, rva, expected);
+    if (loanResource) RequireSeparateDiagnosticProcess(process.h);
     FILETIME before{}, exit{}, kernel{}, user{};
     Check(GetProcessTimes(process.h, &before, &exit, &kernel, &user), "target creation time unavailable");
     Check(WaitForSingleObject(process.h, 0) == WAIT_TIMEOUT, "target already exited");
@@ -367,7 +418,7 @@ int Observe(DWORD pid) {
     try {
         Check(DebugSetProcessKillOnExit(TRUE) != FALSE, "cannot set fail-stop debugger policy");
         const uint64_t start = GetTickCount64();
-        bool hit = false;
+        bool hit = false; unsigned samples = 0;
         while (GetTickCount64() - start < kLoadTimeoutMs && !session.exited && !hit) {
             if (!WaitForDebugEvent(&session.event, 100)) {
                 Check(GetLastError() == ERROR_SEM_TIMEOUT, "debug event wait failed");
@@ -387,9 +438,9 @@ int Observe(DWORD pid) {
                     CompareFileTime(&before, &actual) == 0 && ProcessPath(created.hProcess) == path,
                     "debugged process identity mismatch");
                 const uint64_t base = reinterpret_cast<uint64_t>(created.lpBaseOfImage);
-                Check(base && base <= UINT64_MAX - kRva, "invalid mapped image base");
-                session.site = base + kRva;
-                Check(MappedInstructionMatches(process.h, session.site, kBytes, base), "mapped instruction mismatch or unsafe mapping");
+                Check(base && base <= UINT64_MAX - rva, "invalid mapped image base");
+                session.site = base + rva;
+                Check(MappedInstructionMatches(process.h, session.site, expected, base), "mapped instruction mismatch or unsafe mapping");
                 session.AddThread(event.dwThreadId, created.hThread);
                 break;
             }
@@ -401,7 +452,10 @@ int Observe(DWORD pid) {
                 if (handle != session.debugThreads.end()) { CloseHandle(handle->second); session.debugThreads.erase(handle); }
                 break;
             }
-            case LOAD_DLL_DEBUG_EVENT: if (event.u.LoadDll.hFile) CloseHandle(event.u.LoadDll.hFile); break;
+            case LOAD_DLL_DEBUG_EVENT:
+                if (event.u.LoadDll.hFile) CloseHandle(event.u.LoadDll.hFile);
+                if (loanResource) RequireSeparateDiagnosticProcess(process.h);
+                break;
             case EXCEPTION_DEBUG_EVENT: {
                 const auto& exception = event.u.Exception;
                 session.disposition = DBG_EXCEPTION_NOT_HANDLED;
@@ -409,8 +463,8 @@ int Observe(DWORD pid) {
                     session.attachBreakSeen = true;
                     Check(!session.threads.empty(), "no initial thread armed");
                     for (const auto& [id, thread] : session.threads) Check(thread.armed, "initial thread not armed");
-                    printf("{\"event\":\"ready\",\"pid\":%lu,\"sha256\":\"%s\",\"rva\":\"32de88\",\"armedThreads\":%zu}\n",
-                        pid, kHash, session.threads.size()); fflush(stdout);
+                    printf("{\"event\":\"ready\",\"pid\":%lu,\"sha256\":\"%s\",\"rva\":\"%lx\",\"armedThreads\":%zu}\n",
+                        pid, kHash, rva, session.threads.size()); fflush(stdout);
                     session.disposition = DBG_CONTINUE;
                 } else if (exception.ExceptionRecord.ExceptionCode == EXCEPTION_SINGLE_STEP) {
                     auto found = session.threads.find(event.dwThreadId);
@@ -426,6 +480,11 @@ int Observe(DWORD pid) {
                         resume.EFlags |= 0x10000; resume.Dr6 = 0;
                         Check(SetThreadContext(found->second.contextHandle, &resume), "cannot set resume flag");
                         Check(session.attachBreakSeen, "owned hit arrived before all initial threads were armed");
+                        if (loanResource) {
+                            hit = EmitLoanResource(process.h, pid, event.dwThreadId, context, ++samples);
+                            Check(samples <= 32 && (samples < 32 || hit), "loan resource observation limit reached");
+                            break;
+                        }
                         int32_t player = 0;
                         const bool readable = context.R14 <= UINT64_MAX - 0x20c &&
                             SafeReadInt(process.h, context.R14 + 0x20c, player);
@@ -453,7 +512,7 @@ int Observe(DWORD pid) {
         printf("{\"event\":\"teardown\",\"restorationVerified\":%s,\"drained\":%s,\"detached\":%s,\"targetAlive\":%s}\n",
             session.cleanupVerified ? "true" : "false", session.drained ? "true" : "false",
             session.detached ? "true" : "false", session.survived ? "true" : "false"); fflush(stdout);
-        if (!hit) throw Error(session.exited ? "target exited before loaded-game hit" : "loaded-game timeout");
+        if (!hit) throw Error(session.exited ? "target exited before qualified diagnostic hit" : "diagnostic timeout");
         return 0;
     } catch (...) {
         if (session.attached) {
@@ -468,7 +527,9 @@ int Observe(DWORD pid) {
 }
 int wmain(int argc, wchar_t** argv) {
     try {
-        if (argc != 3 || wcscmp(argv[1], L"--pid")) throw Error("usage: ExternalHardwareLoadProbe.exe --pid <explicit-PID>");
-        return Observe(ParsePid(argv[2]));
+        if ((argc != 3 && argc != 4) || wcscmp(argv[1], L"--pid") ||
+            (argc == 4 && wcscmp(argv[3], L"--loan-resource")))
+            throw Error("usage: ExternalHardwareLoadProbe.exe --pid <explicit-PID> [--loan-resource]");
+        return Observe(ParsePid(argv[2]), argc == 4);
     } catch (const std::exception& error) { fprintf(stderr, "probe_failed: %s\n", error.what()); return 1; }
 }

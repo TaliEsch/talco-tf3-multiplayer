@@ -98,6 +98,36 @@ Before enabling this site, qualify bounded POD capture, nested read faults,
 publication contention, exact NOP continuation and lifetime/cleanup in an owned
 process. Decode and log the completed copy outside VEH. No observer is enabled.
 
+Implemented a separate external diagnostic in the existing
+`ExternalHardwareLoadProbe.exe --pid <explicit-PID> --loan-resource` tool.
+It checks the exact image and mapped bytes at `F410A7`, holds the matching debug
+event pending while copying, and leaves the original NOP to execute naturally
+with RF. It never writes target memory or calls Lua. It temporarily modifies
+hardware debug registers using the existing verified restoration/drain/detach
+path. This mode refuses a target with the multiplayer native runtime or native
+probe DLL loaded; it must not accompany the qualified multiplayer runtime.
+
+`native/loan_event_resource_readback.h` copies the temporary frame's bounded
+resource bytes before continuing the event. `native/loan_event_resource_readback_owned.cpp`
+passed nine injected read failures with no partial publication, changed-header
+rejection, guard/cross-page/no-access rejection, guard preservation, and pointer
+overflow rejection. Sentinel Entity values remain observable and explicitly
+invalid for identity, rather than hiding the diagnostic. The native JSON receipt
+passed a round trip through the JS decoder. Nine focused JS tests pass; existing
+debugger and company-assignment owned fixtures still pass. These are owned-process
+and synthetic results, not TF3 resource or consumer qualification.
+
+`Build-LoanResourceDebugOwned.ps1` builds and runs the reproducible owned-child
+debugger fixture. Root independently ran both cases: two same-thread callbacks
+(non-Loan then Loan), and 32 non-Loan callbacks ending at the sampling limit.
+The cases verified 34 armed DR0/DR7/RF readbacks, normal continuation between
+hits, restoration of original debug registers after detach, pending-event drain,
+target survival and zero child exit codes. All 34 native copied-byte receipts
+decoded through the JS helper. The fixture accepts no external target PID.
+Private root evidence: `.run/loan-resource-debug-owned-root-20261003.log`.
+These results permit the next bounded external observation attempt, not Lua
+registration, actual Loan identity qualification or installment execution.
+
 Astra traced provider lookup to `MSVCP140.dll!_Thrd_id`: the state is per-thread,
 not Loan-exclusive. An authorization consumer must check the active Loan
 resource/context, session, operation digest and current world generation;

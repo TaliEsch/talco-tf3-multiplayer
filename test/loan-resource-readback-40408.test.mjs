@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {decodeLoanResourceObservation40408 as decode} from '../tools/probes/loan-resource-readback-40408.mjs';
+import {decodeLoanResourceObservation40408 as decode, decodeExternalLoanResourceHit40408 as decodeHit} from '../tools/probes/loan-resource-readback-40408.mjs';
 
 function inline(value, offset, header) {
   const bytes = Buffer.from(value);
@@ -66,4 +66,24 @@ test('truncated headers and asynchronous readers are rejected', () => {
   assert.throws(() => decode(Buffer.alloc(63), () => Buffer.alloc(1)), /RESOURCE_READBACK_HEADER/);
   const {header, path} = fixture();
   assert.throws(() => decode(header, async () => path), /RESOURCE_READBACK_READ_FAILED/);
+});
+function receipt() {
+  const {header, path} = fixture();
+  return {event: 'loan-event-resource-hit', diagnosticOnly: true, activationPermitted: false,
+    readable: true, loanCandidate: true, entity: 3141, entityValid: true,
+    headerHex: header.toString('hex'), stringsHex: [Buffer.from('::\0').toString('hex'), path.toString('hex')]};
+}
+test('external receipt is decoded from copied bytes without trusting a candidate flag', () => {
+  const result = decodeHit(receipt());
+  assert.equal(result.strings[1].value, '/game_mechanics/finance/loan.gs.lua');
+  assert.equal(result.loanIdentityQualified, false);
+  const sentinel = {...receipt(), entity: -1, entityValid: false};
+  assert.equal(decodeHit(sentinel).entity, -1);
+});
+test('external receipt rejects corrupted copies and inconsistent validity', () => {
+  for (const mutation of [
+    {readable: false}, {activationPermitted: true}, {entity: -1},
+    {headerHex: 'zz'.repeat(64)}, {stringsHex: ['ff', '00']},
+    {stringsHex: ['616200', receipt().stringsHex[1]]},
+  ]) assert.throws(() => decodeHit({...receipt(), ...mutation}), /RESOURCE_READBACK_/);
 });
