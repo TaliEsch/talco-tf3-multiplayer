@@ -1,4 +1,6 @@
 #include "loan_invocation_stack.h"
+#include "loan_simulation_witness.h"
+#include <array>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -13,8 +15,23 @@ std::uint64_t expected_descriptor = 0, expected_wrapper = 0;
 unsigned cases = 0;
 bool nested_case = false;
 bool missing_metadata_case = false;
+bool simulation_case = false;
+bool simulation_expected = true;
+bool deny_simulation_read = false;
 unsigned nesting = 0;
 void Require(bool value, const char* label) { if (!value) throw std::runtime_error(label); }
+bool ReadOwned(std::uint64_t address, void* output, std::size_t bytes) noexcept {
+    if (deny_simulation_read) return false;
+    MEMORY_BASIC_INFORMATION region{};
+    if (!bytes || VirtualQuery(reinterpret_cast<const void*>(address), &region, sizeof region) != sizeof region ||
+        region.State != MEM_COMMIT || (region.Protect & (PAGE_GUARD | PAGE_NOACCESS))) return false;
+    const auto begin = reinterpret_cast<std::uint64_t>(region.BaseAddress);
+    if (address < begin || address - begin >= region.RegionSize || bytes > region.RegionSize - (address - begin))
+        return false;
+    SIZE_T copied = 0;
+    return ReadProcessMemory(GetCurrentProcess(), reinterpret_cast<const void*>(address), output, bytes, &copied) &&
+        copied == bytes;
+}
 __declspec(noinline) void CaptureNested() {
     CONTEXT output{};
     const auto result = tf3loaninvocation::CaptureCurrent(site, &output);
@@ -31,6 +48,15 @@ __declspec(noinline) void CaptureNested() {
 }
 }
 extern "C" __declspec(noinline) void LoanOwnedCallback() {
+    if (simulation_case) {
+        Require(tf3loansimulation::MatchesCurrent(site, ReadOwned) == simulation_expected,
+            "owned simulation identity result"); ++cases;
+        deny_simulation_read = true;
+        Require(!tf3loansimulation::MatchesCurrent(site, ReadOwned), "failed simulation read denied"); ++cases;
+        deny_simulation_read = false;
+        Require(!tf3loansimulation::MatchesCurrent(site, nullptr), "missing simulation reader denied"); ++cases;
+        return;
+    }
     if (missing_metadata_case) { LoanOwnedUnregistered(); return; }
     if (nested_case && nesting == 0) {
         const auto outer_descriptor = expected_descriptor, outer_wrapper = expected_wrapper;
@@ -71,6 +97,31 @@ int main(int argc, char**) {
         missing_metadata_case = true;
         LoanOwnedInvocation(expected_descriptor, expected_wrapper);
         missing_metadata_case = false;
+        // Owned layout only: this does not qualify a TF3 CGame or manager.
+        std::array<unsigned char, 0x200> game{};
+        std::array<unsigned char, 0xb0> manager{};
+        const auto manager_pointer = reinterpret_cast<std::uint64_t>(manager.data());
+        auto thread_id = GetCurrentThreadId();
+        std::memcpy(game.data() + 0x1f0, &manager_pointer, sizeof manager_pointer);
+        std::memcpy(manager.data() + 0xa8, &thread_id, sizeof thread_id);
+        simulation_case = true;
+        LoanOwnedInvocation(reinterpret_cast<std::uint64_t>(game.data()), expected_wrapper);
+        simulation_expected = false;
+        thread_id = 0;
+        std::memcpy(manager.data() + 0xa8, &thread_id, sizeof thread_id);
+        LoanOwnedInvocation(reinterpret_cast<std::uint64_t>(game.data()), expected_wrapper);
+        thread_id = GetCurrentThreadId() ^ 0x40000000;
+        std::memcpy(manager.data() + 0xa8, &thread_id, sizeof thread_id);
+        LoanOwnedInvocation(reinterpret_cast<std::uint64_t>(game.data()), expected_wrapper);
+        std::memset(game.data() + 0x1f0, 0, sizeof manager_pointer);
+        LoanOwnedInvocation(reinterpret_cast<std::uint64_t>(game.data()), expected_wrapper);
+        simulation_case = false;
+        Require(!tf3loansimulation::MatchesCurrent(site, ReadOwned), "simulation witness absent after return"); ++cases;
+        std::uint64_t field = 0;
+        Require(!tf3loansimulation::Field(0, 0x1f0, 8, &field) &&
+            !tf3loansimulation::Field(0x7fffffffffffULL, 0x1f0, 8, &field) &&
+            !tf3loansimulation::Field(0x7ffffffffffeULL, 0, 8, &field),
+            "simulation address bounds reject null and overflow"); ++cases;
         CONTEXT output{}; output.R13 = 0xabcdef;
         Require(tf3loaninvocation::CaptureCurrent(site, &output) == tf3loaninvocation::Result::missing &&
             output.R13 == 0xabcdef, "returned callback is absent"); ++cases;

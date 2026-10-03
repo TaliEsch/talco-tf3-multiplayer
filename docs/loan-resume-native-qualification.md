@@ -76,6 +76,39 @@ actual adapter must independently disable Claim/arming and halt on failure;
 returning false from registration is not revocation. Code stays pinned while
 Lua can retain a callback pointer.
 
+## Owned call-site installation
+
+`Build-LoanRegistrationPatchOwned.ps1` passes five cases in exact spawned
+children of its own hash-checked executable. Installation and restoration
+occur with a debugger event pending, all child threads stopped, checked thread
+instruction pointers, exact five-byte ownership, readback, restored page
+protection and instruction-cache flush. The normal case records 161 stock
+calls and 81 wrapper calls across four threads per phase, with unchanged
+arguments, Boolean results and all eight nonvolatile general registers.
+Restoration also occurs while an earlier wrapper invocation is outstanding.
+
+The fault cases cover a real changed strict-prefix write, failed protection,
+refusal of the required flush after writing, and foreign instruction bytes.
+Each terminates the exact owned child while the debug event is pending;
+uncertain execution is not continued without a successful termination request.
+This fixture does not qualify TF3 installation, XMM register preservation,
+mitigation compatibility or production recovery from a failed installation.
+
+Exact-build static review additionally identifies the simulation ancestor
+`Site {image_base, 0x11E210, 0x11EE92, 0x11EB9B}`. Its recovered R13 is CGame;
+`[CGame+0x1F0]` points to the manager and `[manager+0xA8]` is a 32-bit thread ID.
+The inert live diagnostic must correlate that ancestor and current thread ID
+with the active Loan invocation at F411B7. Static metadata alone does not prove
+that a particular live callback belongs to this joined simulation worker.
+
+`native/loan_simulation_witness.h` now implements this immediate current-thread
+prerequisite with an adapter-supplied exact Site and bounded reader. It retains
+no engine pointers and grants no authority. The expanded invocation fixture
+passes 26 checks, including an owned matching manager/thread, missing frame,
+zero/foreign thread IDs, null manager, failed reads and address overflow. Its
+objects are synthetic; the next inert TF3 observation must supply the actual
+resource and simulation witnesses before payment permission is considered.
+
 ## Remaining integration gates
 
 - A fresh process/session epoch from authenticated native ingress; never reuse
