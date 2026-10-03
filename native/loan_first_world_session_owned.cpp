@@ -127,9 +127,71 @@ int main() {
             Check(!session.Arm(Permission(first)) && !session.CurrentWorld(&first),
                 "post-close publication denied");
         }
+        {
+            Authority authority; Session session(authority); World world{};
+            const Identity current{0x100000,0x200000,GetCurrentThreadId()};
+            Check(!session.Consume(current,{}, {},12,100),"unbound consume cannot open");
+            Check(session.Bind(Authenticated()) && session.ObserveLoan(current,&world),
+                "current-thread consume fixture opens");
+            const auto grant=Permission(world);
+            Check(!session.Consume(current,grant.nonce,grant.digest,grant.owner,grant.loan),
+                "unarmed callback cannot consume");
+            Check(session.Arm(grant),"consume fixture arms");
+            Check(!session.Consume(current,grant.nonce,grant.digest,grant.owner+1,grant.loan),
+                "wrong observed borrower denied");
+            Check(!session.Consume(current,grant.nonce,grant.digest,grant.owner,grant.loan+1),
+                "wrong observed loan denied");
+            Check(session.Consume(current,grant.nonce,grant.digest,grant.owner,grant.loan),
+                "current qualified identity consumes once");
+            Check(!session.Consume(current,grant.nonce,grant.digest,grant.owner,grant.loan)
+                && !session.Arm(grant),"consumed cannot repeat or rearm");
+            session.Close();
+            Check(!session.Consume(current,grant.nonce,grant.digest,grant.owner,grant.loan),
+                "completed close denies consumption");
+        }
+        for (unsigned field=0;field<4;++field) {
+            Authority authority; Session session(authority); World world{};
+            Identity current{0x100000,0x200000,GetCurrentThreadId()};
+            // Last case admits a non-current identity then tries to reuse it;
+            // Session must independently check the actual invoking thread.
+            if(field==3)++current.thread;
+            Check(session.Bind(Authenticated()) && session.ObserveLoan(current,&world),
+                "identity denial fixture opens");
+            const auto grant=Permission(world);Check(session.Arm(grant),"identity denial fixture arms");
+            auto changed=current;
+            if(field==0)++changed.game;
+            if(field==1)++changed.manager;
+            if(field==2)++changed.thread;
+            Check(!session.Consume(changed,grant.nonce,grant.digest,grant.owner,grant.loan)
+                && !session.CurrentWorld(&world),"changed or non-current identity permanently closes");
+            Check(!session.Consume(current,grant.nonce,grant.digest,grant.owner,grant.loan),
+                "identity failure cannot retry");
+        }
+        for(unsigned i=0;i<32;++i){
+            Authority authority;Session session(authority);
+            std::atomic<bool> ready{false},start{false},closed{false};
+            bool opened=false,armed=false,consumed=false,afterClose=true;
+            std::thread worker([&]{
+                const Identity current{0x100000,0x200000,GetCurrentThreadId()};World world{};
+                opened=session.Bind(Authenticated())&&session.ObserveLoan(current,&world);
+                const auto grant=Permission(world);armed=session.Arm(grant);ready=true;
+                while(!start.load())std::this_thread::yield();
+                consumed=session.Consume(current,grant.nonce,grant.digest,grant.owner,grant.loan);
+                while(!closed.load())std::this_thread::yield();
+                afterClose=session.Consume(current,grant.nonce,grant.digest,grant.owner,grant.loan);
+            });
+            while(!ready.load())std::this_thread::yield();
+            start=true;
+            if(i%3==0)session.OnJoin();
+            else if(i%3==1)session.OnIpcFailure();
+            else session.OnRegistrationFailure();
+            closed=true;worker.join();
+            Check(opened&&armed&&!afterClose,"serialized close always fences subsequent consume");
+            (void)consumed; // Either race winner is valid; later success is not.
+        }
         std::printf("{\"scope\":\"loan-first-world-session-owned\",\"checks\":%u,"
             "\"concurrentOpens\":32,\"passed\":true,\"tf3Qualified\":false,"
-            "\"consumeExposed\":false}\n", checks);
+            "\"consumeExposed\":true,\"consumeCloseRaces\":32}\n", checks);
         return 0;
     } catch (const std::exception& error) {
         std::fprintf(stderr, "loan_first_world_session_failed: %s\n", error.what()); return 1;

@@ -17,7 +17,8 @@ struct Identity {
 // Every method takes lifecycle_ before any Authority lock. Never call these
 // methods from VEH, recursively, or while holding an Authority lock. Release
 // all locks before Lua, engine mutation, stock Join, or other callbacks.
-// This component deliberately has no Consume, Lua, or IPC permission surface.
+// It exposes no Lua or IPC permission surface. Consume accepts only detached
+// facts from an independently revalidated current native Loan invocation.
 class Session final {
     tf3loanresume::Authority& authority_;
     SRWLOCK lifecycle_ = SRWLOCK_INIT;
@@ -90,6 +91,20 @@ public:
     bool Arm(const tf3loanresume::Grant& grant) noexcept {
         Lock guard(&lifecycle_);
         return phase_ == Phase::open && Same(grant.world, world_) && authority_.Arm(grant);
+    }
+    // This serializes permission consumption with native lifecycle revocation.
+    // It does not retain locks or pointers across the following Lua continuation
+    // and does not itself prove engine lifetime or persisted origin/history.
+    bool Consume(const Identity& freshly_observed,
+        const tf3loanresume::Nonce& nonce, const tf3loanresume::Digest& digest,
+        std::int32_t observed_owner, std::uint32_t observed_loan) noexcept {
+        Lock guard(&lifecycle_);
+        if (phase_ != Phase::open) return false;
+        if (!Valid(freshly_observed) || !Same(identity_, freshly_observed) ||
+            freshly_observed.thread != GetCurrentThreadId()) {
+            CloseLocked(); return false;
+        }
+        return authority_.Consume(world_, nonce, digest, observed_owner, observed_loan);
     }
     // Call from join, IPC failure, registration failure, or any inability to
     // prove the callback identity. Invalidation completes before lock release.
