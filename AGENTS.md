@@ -68,7 +68,7 @@ Historical entries are not current claims.
   unchanged failed live test: inspect the evidence and revise the hypothesis
   first. If the same gate fails twice, review it before another live attempt
   (Astra for hard native issues), while independent work continues.
-- The repository `TaliEsch/talco-tf3-multiplayer` must remain private. Commit
+- The repository `TaliEsch/talco-tf3-multiplayer` is public by user request. Commit
   coherent verified work and push only when authorized. Never commit game
   assets, saves, credentials or generated distributions; never publish a
   release or change visibility without explicit approval.
