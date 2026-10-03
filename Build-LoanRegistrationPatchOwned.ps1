@@ -13,7 +13,7 @@ $asm = Join-Path $PSScriptRoot 'native\loan_registration_patch_owned.asm'
 $cppObject = Join-Path $output 'loan_registration_patch_owned.obj'
 $asmObject = Join-Path $output 'loan_registration_patch_owned_asm.obj'
 $exe = Join-Path $output 'LoanRegistrationPatchOwned.exe'
-$command = 'ml64.exe /nologo /c /Fo"{0}" "{1}" && cl.exe /nologo /std:c++17 /W4 /WX /EHs /O2 /Fo"{2}" /Fe"{3}" "{4}" "{0}" bcrypt.lib psapi.lib' -f $asmObject,$asm,$cppObject,$exe,$cpp
+$command = 'ml64.exe /nologo /c /Fo"{0}" "{1}" && cl.exe /nologo /std:c++17 /W4 /WX /EHs /O2 /guard:cf /Fo"{2}" /Fe"{3}" "{4}" "{0}" bcrypt.lib psapi.lib /link /guard:cf' -f $asmObject,$asm,$cppObject,$exe,$cpp
 & cmd.exe /d /s /c ('call "{0}" && {1}' -f $vcvars,$command)
 if ($LASTEXITCODE -ne 0) { throw "Owned registration patch build failed: $LASTEXITCODE" }
 & $exe

@@ -19,6 +19,7 @@ extern "C" unsigned char LoanPatchOwnedCallsite;
 extern "C" bool LoanPatchOwnedTestCall(void*, void*, const char*);
 extern "C" void LoanPatchOwnedBreak();
 extern "C" bool LoanPatchOwnedWrapper(void*, void*, const char*);
+extern "C" void* __guard_dispatch_icall_fptr;
 struct Shared {
     volatile LONG phase;
     volatile LONG breakpointEntered;
@@ -27,6 +28,10 @@ struct Shared {
     volatile LONG wrapperCalls;
     volatile LONG badArgs;
     volatile LONG badResult;
+    volatile LONG exceptionCase;
+    volatile LONG exceptionCaught;
+    volatile LONG negativeGuard;
+    volatile LONG suppressedCalls;
 };
 static Shared* g_shared = nullptr;
 static int g_token = 7;
@@ -34,6 +39,7 @@ static constexpr char kName[] = "owned-loan";
 extern "C" __declspec(noinline) bool LoanPatchOwnedOriginal(void* state, void* fn, const char* name) {
     if (state != g_shared || fn != &g_token || name != kName) InterlockedIncrement(&g_shared->badArgs);
     InterlockedIncrement(&g_shared->originalCalls);
+    if (g_shared->phase == 4) throw std::runtime_error("owned relay unwind");
     return true;
 }
 extern "C" __declspec(noinline) bool LoanPatchOwnedWrapperBody(void* state, void* fn, const char* name) {
@@ -48,8 +54,14 @@ extern "C" __declspec(noinline) bool LoanPatchOwnedWrapperBody(void* state, void
     (void)keepFrame;
     return result;
 }
+extern "C" __declspec(noinline) __declspec(guard(suppress)) bool LoanPatchOwnedSuppressed(
+    void*, void*, const char*) {
+    InterlockedIncrement(&g_shared->suppressedCalls);
+    return true;
+}
 
-struct Ready { DWORD magic; DWORD siteRva; DWORD originalRva; DWORD wrapperRva; DWORD breakRva; DWORD imageSize; };
+struct Ready { DWORD magic; DWORD siteRva; DWORD originalRva; DWORD wrapperRva; DWORD breakRva;
+    DWORD suppressedRva; DWORD dispatchSlotRva; DWORD imageSize; };
 static constexpr DWORD kMagic = 0x504c4f41;
 static void Require(bool okay, const char* why) { if (!okay) throw std::runtime_error(why); }
 struct Handle {
@@ -104,7 +116,9 @@ static int Child(uint64_t writeHandle, uint64_t gateHandle, uint64_t mapHandle) 
     Ready ready{kMagic, static_cast<DWORD>(Ptr(&LoanPatchOwnedCallsite) - base),
         static_cast<DWORD>(Ptr(&LoanPatchOwnedOriginal) - base),
         static_cast<DWORD>(Ptr(&LoanPatchOwnedWrapper) - base),
-        static_cast<DWORD>(Ptr(&LoanPatchOwnedBreak) - base), 0};
+        static_cast<DWORD>(Ptr(&LoanPatchOwnedBreak) - base),
+        static_cast<DWORD>(Ptr(&LoanPatchOwnedSuppressed) - base),
+        static_cast<DWORD>(Ptr(&__guard_dispatch_icall_fptr) - base), 0};
     auto dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
     auto nt = reinterpret_cast<const IMAGE_NT_HEADERS64*>(base + dos->e_lfanew);
     ready.imageSize = nt->OptionalHeader.SizeOfImage;
@@ -113,17 +127,81 @@ static int Child(uint64_t writeHandle, uint64_t gateHandle, uint64_t mapHandle) 
         "owned ready metadata write failed");
     CloseHandle(reinterpret_cast<HANDLE>(writeHandle));
     Require(WaitForSingleObject(reinterpret_cast<HANDLE>(gateHandle), 15000) == WAIT_OBJECT_0, "owned start gate timed out");
+    if (g_shared->negativeGuard) {
+        (void)LoanPatchOwnedTestCall(g_shared, &g_token, kName);
+        return 12; // A functioning CFG dispatcher must fast-fail first.
+    }
     InterlockedExchange(&g_shared->phase, 1);
     RunWorkers();
+    if (g_shared->exceptionCase) {
+        InterlockedExchange(&g_shared->phase, 4);
+        try { (void)LoanPatchOwnedTestCall(g_shared, &g_token, kName); }
+        catch (const std::runtime_error& error) {
+            if (std::strcmp(error.what(), "owned relay unwind") == 0)
+                InterlockedExchange(&g_shared->exceptionCaught, 1);
+        }
+        Require(g_shared->exceptionCaught == 1, "owned relay C++ unwind not caught");
+    }
     InterlockedExchange(&g_shared->phase, 2);
     if (!LoanPatchOwnedTestCall(g_shared, &g_token, kName)) InterlockedIncrement(&g_shared->badResult);
     InterlockedExchange(&g_shared->phase, 3);
     RunWorkers();
-    return g_shared->originalCalls == 161 && g_shared->wrapperCalls == 81 &&
+    const LONG expectedOriginal = g_shared->exceptionCase ? 162 : 161;
+    const LONG expectedWrapper = g_shared->exceptionCase ? 82 : 81;
+    return g_shared->originalCalls == expectedOriginal && g_shared->wrapperCalls == expectedWrapper &&
         g_shared->breakpointEntered == 1 && !g_shared->badArgs && !g_shared->badResult ? 0 : 9;
 }
 static bool ReadExact(HANDLE process, uint64_t address, void* data, SIZE_T size) {
     SIZE_T got = 0; return ReadProcessMemory(process, reinterpret_cast<void*>(address), data, size, &got) && got == size;
+}
+static void ValidateOwnedGfids(HANDLE process, uint64_t base, const Ready& ready) {
+    IMAGE_DOS_HEADER dos{};
+    Require(ReadExact(process, base, &dos, sizeof dos) && dos.e_magic == IMAGE_DOS_SIGNATURE &&
+        dos.e_lfanew > 0 && dos.e_lfanew < 0x1000, "owned CFG DOS invalid");
+    IMAGE_NT_HEADERS64 nt{};
+    Require(ReadExact(process, base + dos.e_lfanew, &nt, sizeof nt) &&
+        nt.Signature == IMAGE_NT_SIGNATURE && nt.OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC,
+        "owned CFG NT invalid");
+    const auto dir = nt.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_LOAD_CONFIG];
+    Require(dir.VirtualAddress && dir.Size >= offsetof(IMAGE_LOAD_CONFIG_DIRECTORY64, GuardFlags) + sizeof(DWORD) &&
+        dir.VirtualAddress < ready.imageSize && dir.Size <= ready.imageSize - dir.VirtualAddress,
+        "owned CFG load directory invalid");
+    IMAGE_LOAD_CONFIG_DIRECTORY64 config{};
+    const SIZE_T bytes = (std::min)(static_cast<SIZE_T>(dir.Size), sizeof config);
+    Require(ReadExact(process, base + dir.VirtualAddress, &config, bytes) &&
+        config.Size >= offsetof(IMAGE_LOAD_CONFIG_DIRECTORY64, GuardFlags) + sizeof(DWORD) &&
+        (config.GuardFlags & IMAGE_GUARD_CF_INSTRUMENTED) &&
+        (config.GuardFlags & IMAGE_GUARD_CF_FUNCTION_TABLE_PRESENT) &&
+        !(config.GuardFlags & IMAGE_GUARD_XFG_ENABLED) &&
+        config.GuardCFDispatchFunctionPointer == base + ready.dispatchSlotRva &&
+        config.GuardCFFunctionCount > 0 && config.GuardCFFunctionCount <= 4096,
+        "owned CFG metadata invalid");
+    const unsigned extra = (config.GuardFlags & IMAGE_GUARD_CF_FUNCTION_TABLE_SIZE_MASK) >>
+        IMAGE_GUARD_CF_FUNCTION_TABLE_SIZE_SHIFT;
+    Require(extra <= 1, "owned GFID stride unsupported");
+    const SIZE_T stride = sizeof(DWORD) + extra;
+    const SIZE_T span = static_cast<SIZE_T>(config.GuardCFFunctionCount) * stride;
+    const uint64_t table = config.GuardCFFunctionTable;
+    Require(table >= base && table - base < ready.imageSize && span <= ready.imageSize - (table - base),
+        "owned GFID table outside image");
+    std::vector<BYTE> entries(span);
+    Require(ReadExact(process, table, entries.data(), entries.size()), "owned GFID table read failed");
+    bool wrapperFound = false, suppressedFound = false;
+    DWORD previous = 0;
+    for (SIZE_T i = 0; i < config.GuardCFFunctionCount; ++i) {
+        DWORD rva = 0; std::memcpy(&rva, entries.data() + i * stride, sizeof rva);
+        Require(i == 0 || rva > previous, "owned GFID table unsorted"); previous = rva;
+        const BYTE flags = extra ? entries[i * stride + sizeof(DWORD)] : 0;
+        if (rva == ready.wrapperRva) {
+            Require(!(flags & (IMAGE_GUARD_FLAG_FID_SUPPRESSED | IMAGE_GUARD_FLAG_EXPORT_SUPPRESSED)),
+                "owned wrapper GFID suppressed"); wrapperFound = true;
+        }
+        if (rva == ready.suppressedRva) {
+            Require(flags & IMAGE_GUARD_FLAG_FID_SUPPRESSED, "owned negative GFID not suppressed");
+            suppressedFound = true;
+        }
+    }
+    Require(wrapperFound && suppressedFound, "owned wrapper/suppressed GFID absent");
 }
 static std::array<BYTE, 5> ReadSite(HANDLE process, uint64_t site) {
     std::array<BYTE, 5> bytes{}; Require(ReadExact(process, site, bytes.data(), bytes.size()), "callsite read failed"); return bytes;
@@ -153,6 +231,69 @@ static DWORD SiteProtection(HANDLE process, uint64_t site, uint64_t base) {
         "callsite mapping/protection mismatch");
     Require(Ptr(info.BaseAddress) <= site && site + 5 <= Ptr(info.BaseAddress) + info.RegionSize,
         "callsite crosses page region"); return info.Protect;
+}
+static uint64_t AllocateNear(HANDLE process, uint64_t site) {
+    SYSTEM_INFO system{}; GetSystemInfo(&system);
+    const uint64_t unit = system.dwAllocationGranularity;
+    Require(unit && (unit & (unit - 1)) == 0, "allocation granularity invalid");
+    const uint64_t anchor = site & ~(unit - 1);
+    for (uint64_t step = 1; step <= static_cast<uint64_t>(INT32_MAX) / unit; ++step) {
+        for (int direction : {1, -1}) {
+            if (direction == 1 && anchor > UINT64_MAX - step * unit) continue;
+            if (direction == -1 && anchor < step * unit) continue;
+            const uint64_t candidate = direction == 1 ? anchor + step * unit : anchor - step * unit;
+            const int64_t delta = static_cast<int64_t>(candidate) - static_cast<int64_t>(site + 5);
+            if (delta < INT32_MIN || delta > INT32_MAX) continue;
+            void* allocated = VirtualAllocEx(process, reinterpret_cast<void*>(candidate), 4096,
+                MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+            if (allocated == reinterpret_cast<void*>(candidate)) return candidate;
+        }
+    }
+    throw std::runtime_error("no reachable owned relay page");
+}
+static uint64_t WriteRelay(HANDLE process, uint64_t site, uint64_t wrapper, uint64_t dispatchSlot) {
+    PROCESS_MITIGATION_CONTROL_FLOW_GUARD_POLICY cfg{};
+    Require(GetProcessMitigationPolicy(process, ProcessControlFlowGuardPolicy, &cfg, sizeof cfg) &&
+        cfg.EnableControlFlowGuard, "owned CFG policy not enabled");
+    MEMORY_BASIC_INFORMATION slotPage{};
+    Require(VirtualQueryEx(process, reinterpret_cast<void*>(dispatchSlot), &slotPage, sizeof slotPage) == sizeof slotPage &&
+        slotPage.State == MEM_COMMIT && slotPage.Type == MEM_IMAGE &&
+        (slotPage.Protect & 0xff) == PAGE_READONLY, "owned dispatch slot not read-only image data");
+    uint64_t dispatcher = 0;
+    Require(ReadExact(process, dispatchSlot, &dispatcher, sizeof dispatcher) && dispatcher,
+        "owned dispatch pointer unavailable");
+    MEMORY_BASIC_INFORMATION dispatcherPage{};
+    Require(VirtualQueryEx(process, reinterpret_cast<void*>(dispatcher), &dispatcherPage,
+        sizeof dispatcherPage) == sizeof dispatcherPage && dispatcherPage.State == MEM_COMMIT &&
+        dispatcherPage.Type == MEM_IMAGE && (dispatcherPage.Protect & 0xff) == PAGE_EXECUTE_READ,
+        "owned CFG dispatcher mapping invalid");
+    wchar_t dispatcherPath[32768]{};
+    Require(GetMappedFileNameW(process, dispatcherPage.AllocationBase, dispatcherPath, 32768) != 0,
+        "owned CFG dispatcher path unavailable");
+    const wchar_t* dispatcherLeaf = wcsrchr(dispatcherPath, L'\\');
+    Require(dispatcherLeaf && _wcsicmp(dispatcherLeaf + 1, L"ntdll.dll") == 0,
+        "owned CFG dispatch slot not OS-resolved");
+    const uint64_t relay = AllocateNear(process, site);
+    std::array<BYTE, 24> bytes{0x48, 0xb8};
+    std::memcpy(bytes.data() + 2, &wrapper, sizeof wrapper);
+    bytes[10] = 0xff; bytes[11] = 0x25; // jmp qword ptr [rip+0]
+    std::memcpy(bytes.data() + 16, &dispatcher, sizeof dispatcher);
+    SIZE_T written = 0;
+    Require(WriteProcessMemory(process, reinterpret_cast<void*>(relay), bytes.data(), bytes.size(), &written) &&
+        written == bytes.size(), "relay exact write failed");
+    std::array<BYTE, 24> readback{};
+    Require(ReadExact(process, relay, readback.data(), readback.size()) && readback == bytes,
+        "relay RW readback failed");
+    DWORD old = 0;
+    Require(VirtualProtectEx(process, reinterpret_cast<void*>(relay), 4096, PAGE_EXECUTE_READ, &old) &&
+        old == PAGE_READWRITE, "relay RX protection failed");
+    Require(FlushInstructionCache(process, reinterpret_cast<void*>(relay), bytes.size()), "relay flush failed");
+    MEMORY_BASIC_INFORMATION page{};
+    Require(VirtualQueryEx(process, reinterpret_cast<void*>(relay), &page, sizeof page) == sizeof page &&
+        page.State == MEM_COMMIT && page.Type == MEM_PRIVATE && (page.Protect & 0xff) == PAGE_EXECUTE_READ &&
+        ReadExact(process, relay, readback.data(), readback.size()) && readback == bytes,
+        "relay RX readback failed");
+    return relay; // Remains pinned by the child process until its exit.
 }
 static void WriteFive(HANDLE process, uint64_t site, uint64_t base,
     const std::array<BYTE, 5>& expected, const std::array<BYTE, 5>& replacement, const char* fault) {
@@ -266,6 +407,8 @@ static int OneCase(const wchar_t* executable, const std::array<BYTE, 32>& ownHas
     Shared* shared = static_cast<Shared*>(MapViewOfFile(map.h, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(Shared)));
     Require(shared != nullptr, "owned parent map failed");
     std::memset(shared, 0, sizeof(Shared));
+    if (std::strcmp(fault, "relay-exception") == 0) shared->exceptionCase = 1;
+    if (std::strcmp(fault, "relay-suppressed") == 0) shared->negativeGuard = 1;
     wchar_t command[33000]{};
     swprintf_s(command, L"\"%s\" --owned-child %llu %llu %llu", executable,
         static_cast<unsigned long long>(Ptr(writePipe.h)), static_cast<unsigned long long>(Ptr(gate.h)),
@@ -294,17 +437,17 @@ static int OneCase(const wchar_t* executable, const std::array<BYTE, 32>& ownHas
             ready.originalRva == Ptr(&LoanPatchOwnedOriginal) - localBase &&
             ready.wrapperRva == Ptr(&LoanPatchOwnedWrapper) - localBase &&
             ready.breakRva == Ptr(&LoanPatchOwnedBreak) - localBase &&
+            ready.suppressedRva == Ptr(&LoanPatchOwnedSuppressed) - localBase &&
+            ready.dispatchSlotRva == Ptr(&__guard_dispatch_icall_fptr) - localBase &&
             ready.imageSize == localNt->OptionalHeader.SizeOfImage &&
             ready.siteRva + 5 <= ready.imageSize && ready.wrapperRva < ready.imageSize &&
-            ready.originalRva < ready.imageSize && ready.breakRva < ready.imageSize,
+            ready.originalRva < ready.imageSize && ready.breakRva < ready.imageSize &&
+            ready.suppressedRva < ready.imageSize &&
+            ready.dispatchSlotRva + sizeof(uint64_t) <= ready.imageSize,
             "owned child RVA metadata mismatch");
         Require(DebugActiveProcess(info.dwProcessId) != FALSE, "owned child debug attach failed"); attached = true;
         Require(DebugSetProcessKillOnExit(TRUE) != FALSE, "debug fail-stop policy failed");
-        const int64_t delta = static_cast<int64_t>(ready.wrapperRva) - (static_cast<int64_t>(ready.siteRva) + 5);
-        Require(delta >= INT32_MIN && delta <= INT32_MAX, "wrapper outside rel32 reach");
         std::array<BYTE, 5> original{}; std::array<BYTE, 5> installed{0xe8, 0, 0, 0, 0};
-        const int32_t displacement = static_cast<int32_t>(delta);
-        std::memcpy(installed.data() + 1, &displacement, sizeof displacement);
         bool patched = false, restored = false, gateOpened = false;
         const uint64_t deadline = GetTickCount64() + 15000;
         while (!exited && GetTickCount64() < deadline) {
@@ -332,9 +475,29 @@ static int OneCase(const wchar_t* executable, const std::array<BYTE, 32>& ownHas
             } else if (event.dwDebugEventCode == EXCEPTION_DEBUG_EVENT) {
                 disposition = DBG_EXCEPTION_NOT_HANDLED;
                 const auto& ex = event.u.Exception;
+                // Windows reports this noncontinuable fast-fail as second chance.
+                if (std::strcmp(fault, "relay-suppressed") == 0 && gateOpened && !ex.dwFirstChance &&
+                    ex.ExceptionRecord.ExceptionCode == STATUS_STACK_BUFFER_OVERRUN &&
+                    ex.ExceptionRecord.NumberParameters > 0 &&
+                    ex.ExceptionRecord.ExceptionInformation[0] == FAST_FAIL_GUARD_ICALL_CHECK_FAILURE &&
+                    shared->suppressedCalls == 0)
+                    throw std::runtime_error("CFG suppressed target rejected");
                 if (ex.dwFirstChance && ex.ExceptionRecord.ExceptionCode == EXCEPTION_BREAKPOINT) {
                     if (!gateOpened && site && IsAttachBreakpoint(child.h, ex.ExceptionRecord)) {
                         SafeThreads(info.dwProcessId, site);
+                        ValidateOwnedGfids(child.h, base, ready);
+                        const bool relayCase = std::strcmp(fault, "relay") == 0 ||
+                            std::strcmp(fault, "relay-exception") == 0 ||
+                            std::strcmp(fault, "relay-suppressed") == 0;
+                        const uint64_t relayTarget = std::strcmp(fault, "relay-suppressed") == 0 ?
+                            base + ready.suppressedRva : base + ready.wrapperRva;
+                        const uint64_t destination = relayCase ?
+                            WriteRelay(child.h, site, relayTarget,
+                                base + ready.dispatchSlotRva) : base + ready.wrapperRva;
+                        const int64_t delta = static_cast<int64_t>(destination) - static_cast<int64_t>(site + 5);
+                        Require(delta >= INT32_MIN && delta <= INT32_MAX, "wrapper/relay outside rel32 reach");
+                        const int32_t displacement = static_cast<int32_t>(delta);
+                        std::memcpy(installed.data() + 1, &displacement, sizeof displacement);
                         if (std::strcmp(fault, "foreign") == 0) {
                             auto foreign = original; foreign[0] = 0x90;
                             WriteFive(child.h, site, base, original, foreign, "none");
@@ -366,11 +529,16 @@ static int OneCase(const wchar_t* executable, const std::array<BYTE, 32>& ownHas
                 shared->originalCalls, shared->wrapperCalls, shared->breakpointEntered, shared->badArgs, shared->badResult);
         Require(exitCode == 0,
             "owned child verification failed");
-        Require(shared->originalCalls == 161 && shared->wrapperCalls == 81 && shared->badArgs == 0 &&
-            shared->badResult == 0 && shared->breakpointEntered == 1, "owned call counts invalid");
+        const LONG expectedOriginal = shared->exceptionCase ? 162 : 161;
+        const LONG expectedWrapper = shared->exceptionCase ? 82 : 81;
+        Require(shared->originalCalls == expectedOriginal && shared->wrapperCalls == expectedWrapper &&
+            shared->badArgs == 0 && shared->badResult == 0 && shared->breakpointEntered == 1 &&
+            (!shared->exceptionCase || shared->exceptionCaught == 1), "owned call counts invalid");
         Require(!continuedUncertain, "uncertain child continued");
+        const bool exceptionCaught = shared->exceptionCaught != 0;
         UnmapViewOfFile(shared);
-        printf("{\"case\":\"normal\",\"passed\":true,\"originalCalls\":161,\"wrapperCalls\":81,\"threadsPerPhase\":4,\"restoreWithWrapperOutstanding\":true}\n");
+        printf("{\"case\":\"%s\",\"passed\":true,\"originalCalls\":%ld,\"wrapperCalls\":%ld,\"threadsPerPhase\":4,\"restoreWithWrapperOutstanding\":true,\"exceptionCaught\":%s}\n",
+            fault, expectedOriginal, expectedWrapper, exceptionCaught ? "true" : "false");
         return 0;
     } catch (const std::exception& problem) {
         // Every fault is handled while the event is pending. Kill this exact
@@ -380,6 +548,7 @@ static int OneCase(const wchar_t* executable, const std::array<BYTE, 32>& ownHas
         else if (std::strcmp(fault, "protect") == 0) marker = "injected protection failure";
         else if (std::strcmp(fault, "flush") == 0) marker = "injected flush failure";
         else if (std::strcmp(fault, "foreign") == 0) marker = "foreign callsite bytes";
+        else if (std::strcmp(fault, "relay-suppressed") == 0) marker = "CFG suppressed target rejected";
         const bool expectedFault = marker && std::strcmp(problem.what(), marker) == 0;
         const DWORD state = WaitForSingleObject(child.h, 0);
         if (state != WAIT_TIMEOUT && state != WAIT_OBJECT_0) {
@@ -413,12 +582,13 @@ static int OneCase(const wchar_t* executable, const std::array<BYTE, 32>& ownHas
                 drained = false;
             }
         }
+        const bool suppressedNotRun = shared->suppressedCalls == 0;
         const bool exitedAfterKill = WaitForSingleObject(child.h, 5000) == WAIT_OBJECT_0;
         DWORD code = 0;
         const bool exitQueried = exitedAfterKill && GetExitCodeProcess(child.h, &code) != FALSE;
         UnmapViewOfFile(shared);
         if (expectedFault && stopped && terminationRequested && drained && exitQueried &&
-            code == 71 && !continuedUncertain) {
+            code == 71 && !continuedUncertain && suppressedNotRun) {
             printf("{\"case\":\"%s\",\"passed\":true,\"terminatedWhilePending\":true,\"continuedUncertain\":false,\"reason\":\"%s\"}\n",
                 fault, problem.what()); return 0;
         }
@@ -433,7 +603,8 @@ int wmain(int argc, wchar_t** argv) {
                 _wcstoui64(argv[4], nullptr, 10));
         Require(argc == 1, "fixture accepts no target PID or path");
         const std::wstring path = SelfPath(); const auto hash = FileHash(path);
-        const char* cases[] = {"none", "shortwrite", "protect", "flush", "foreign"};
+        const char* cases[] = {"none", "relay", "relay-exception", "relay-suppressed",
+            "shortwrite", "protect", "flush", "foreign"};
         unsigned passed = 0;
         for (const auto* name : cases) { if (OneCase(path.c_str(), hash, name) == 0) ++passed; else return 1; }
         printf("{\"scope\":\"owned-child-rel32-call-pending-debug-event\",\"passed\":true,\"cases\":%u}\n", passed);

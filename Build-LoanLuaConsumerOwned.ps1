@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([string]$LuaSourcePath)
+param([string]$LuaSourcePath,[switch]$Guarded)
 $ErrorActionPreference = 'Stop'
 if ([string]::IsNullOrWhiteSpace($LuaSourcePath)) { $LuaSourcePath = Join-Path $PSScriptRoot '.run\loan-lua-owned\lua-5.2.4\src' }
 & (Join-Path $PSScriptRoot 'Build-LoanLuaOwnedRuntime.ps1') -UpstreamSourcePath $LuaSourcePath
@@ -17,6 +17,9 @@ $resolver = Join-Path $PSScriptRoot 'native\loan_invocation_stack.cpp'
 $bridgeSource = Join-Path $PSScriptRoot 'native\loan_registration_bridge_owned.asm'
 $bridgeObject = Join-Path $output 'loan_registration_bridge_owned_asm.obj'
 $command = 'ml64.exe /nologo /c /Fo"{5}" "{6}" && ml64.exe /nologo /c /Fo"{8}" "{9}" && cl.exe /nologo /std:c++17 /W4 /WX /EHs /MD /O2 /DLUA_BUILD_AS_DLL /I"{0}" /Fo"{1}\\" /Fe"{2}" "{3}" "{4}" "{5}" "{7}" "{8}"' -f $LuaSourcePath,$output,$exe,$source,$library,$asmObject,$asmSource,$resolver,$bridgeObject,$bridgeSource
+if ($Guarded) {
+  $command = $command.Replace('/O2 /DLUA_BUILD_AS_DLL','/O2 /guard:cf /DTF3_LOAN_OWNED_CFG /DLUA_BUILD_AS_DLL') + ' /link /GUARD:CF /DYNAMICBASE /NXCOMPAT'
+}
 & cmd.exe /d /s /c ('call "{0}" && {1}' -f $vcvars,$command)
 if ($LASTEXITCODE -ne 0) { throw "Owned Lua consumer build failed: $LASTEXITCODE" }
 & $exe

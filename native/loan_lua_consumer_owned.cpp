@@ -131,6 +131,13 @@ int main(int argc, char**) {
     if (argc != 1) return 2;
     lua_State* state = nullptr;
     try {
+#ifdef TF3_LOAN_OWNED_CFG
+        PROCESS_MITIGATION_CONTROL_FLOW_GUARD_POLICY policy{};
+        Require(GetProcessMitigationPolicy(GetCurrentProcess(), ProcessControlFlowGuardPolicy,
+            &policy, sizeof policy) && policy.EnableControlFlowGuard,
+            "owned caller CFG policy actually enabled");
+        fprintf(stderr, "owned_cfg_enabled=true legacy_lua_dll=true\n");
+#endif
         state = lua_newstate(Allocator, nullptr);
         Require(state != nullptr, "owned C++ Lua state");
         fprintf(stderr, "owned_stage=register\n");
