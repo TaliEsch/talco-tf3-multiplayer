@@ -19,7 +19,9 @@ extern "C" unsigned char LoanPatchOwnedCallsite;
 extern "C" bool LoanPatchOwnedTestCall(void*, void*, const char*);
 extern "C" void LoanPatchOwnedBreak();
 extern "C" bool LoanPatchOwnedWrapper(void*, void*, const char*);
+#ifndef LOAN_OWNED_CFG_OFF
 extern "C" void* __guard_dispatch_icall_fptr;
+#endif
 struct Shared {
     volatile LONG phase;
     volatile LONG breakpointEntered;
@@ -61,7 +63,7 @@ extern "C" __declspec(noinline) __declspec(guard(suppress)) bool LoanPatchOwnedS
 }
 
 struct Ready { DWORD magic; DWORD siteRva; DWORD originalRva; DWORD wrapperRva; DWORD breakRva;
-    DWORD suppressedRva; DWORD dispatchSlotRva; DWORD imageSize; };
+    DWORD suppressedRva; DWORD dispatchSlotRva; DWORD imageSize; uint64_t runtimeBase; };
 static constexpr DWORD kMagic = 0x504c4f41;
 static void Require(bool okay, const char* why) { if (!okay) throw std::runtime_error(why); }
 struct Handle {
@@ -97,6 +99,64 @@ static std::array<BYTE, 32> FileHash(const std::wstring& path) {
         BCryptDestroyHash(hash); BCryptCloseAlgorithmProvider(alg, 0); return output;
     } catch (...) { if (hash) BCryptDestroyHash(hash); BCryptCloseAlgorithmProvider(alg, 0); throw; }
 }
+#ifdef LOAN_OWNED_CFG_OFF
+static constexpr std::array<BYTE, 32> kRuntimeHash{{0x98,0x66,0x51,0x80,0x6c,0xf8,0xef,0x1a,
+    0xdf,0x3a,0xff,0x7e,0xdd,0xf2,0x5a,0x40,0xa3,0xe3,0xb4,0x73,0xb0,0x2e,0xc3,0x7f,
+    0x32,0xf1,0x74,0xd8,0xe9,0x40,0xea,0x0a}};
+static std::wstring RuntimePath(const std::wstring& self) {
+    const size_t slash = self.find_last_of(L"\\/");
+    Require(slash != std::wstring::npos, "owned path has no directory");
+    return self.substr(0, slash) + L"\\..\\loan-consumer-runtime\\TF3InProcessRuntime.dll";
+}
+static uint64_t PinnedFallbackRva(const std::wstring& path) {
+    Handle file(CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_DELETE,
+        nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr));
+    Require(file.h != INVALID_HANDLE_VALUE, "pinned runtime file unavailable");
+    const DWORD size = GetFileSize(file.h, nullptr);
+    Require(size > 4096 && size < 16 * 1024 * 1024, "pinned runtime file size invalid");
+    std::vector<BYTE> bytes(size); DWORD got = 0;
+    Require(ReadFile(file.h, bytes.data(), size, &got, nullptr) && got == size, "pinned runtime read failed");
+    IMAGE_DOS_HEADER dos{}; std::memcpy(&dos, bytes.data(), sizeof dos);
+    Require(dos.e_magic == IMAGE_DOS_SIGNATURE && dos.e_lfanew > 0 &&
+        static_cast<size_t>(dos.e_lfanew) + sizeof(IMAGE_NT_HEADERS64) <= bytes.size(), "pinned runtime DOS invalid");
+    IMAGE_NT_HEADERS64 nt{}; std::memcpy(&nt, bytes.data() + dos.e_lfanew, sizeof nt);
+    Require(nt.Signature == IMAGE_NT_SIGNATURE && nt.OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC &&
+        nt.FileHeader.NumberOfSections > 0 && nt.FileHeader.NumberOfSections < 32, "pinned runtime NT invalid");
+    const size_t sectionOffset = static_cast<size_t>(dos.e_lfanew) + sizeof(DWORD) +
+        sizeof(IMAGE_FILE_HEADER) + nt.FileHeader.SizeOfOptionalHeader;
+    Require(sectionOffset + nt.FileHeader.NumberOfSections * sizeof(IMAGE_SECTION_HEADER) <= bytes.size(),
+        "pinned runtime sections invalid");
+    auto rawOffset = [&](DWORD rva, size_t length) -> size_t {
+        for (WORD i = 0; i < nt.FileHeader.NumberOfSections; ++i) {
+            IMAGE_SECTION_HEADER section{};
+            std::memcpy(&section, bytes.data() + sectionOffset + i * sizeof section, sizeof section);
+            if (rva >= section.VirtualAddress && rva - section.VirtualAddress <= section.SizeOfRawData &&
+                length <= section.SizeOfRawData - (rva - section.VirtualAddress)) {
+                const size_t offset = section.PointerToRawData + (rva - section.VirtualAddress);
+                Require(offset <= bytes.size() && length <= bytes.size() - offset, "pinned runtime raw bounds invalid");
+                return offset;
+            }
+        }
+        throw std::runtime_error("pinned runtime RVA absent");
+    };
+    const auto dir = nt.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_LOAD_CONFIG];
+    Require(dir.VirtualAddress && dir.Size >= offsetof(IMAGE_LOAD_CONFIG_DIRECTORY64,
+        GuardCFDispatchFunctionPointer) + sizeof(uint64_t), "pinned runtime load config absent");
+    IMAGE_LOAD_CONFIG_DIRECTORY64 config{};
+    std::memcpy(&config, bytes.data() + rawOffset(dir.VirtualAddress, sizeof config), sizeof config);
+    Require(config.GuardCFDispatchFunctionPointer >= nt.OptionalHeader.ImageBase,
+        "pinned runtime dispatch slot invalid");
+    const uint64_t slotRva = config.GuardCFDispatchFunctionPointer - nt.OptionalHeader.ImageBase;
+    Require(slotRva < nt.OptionalHeader.SizeOfImage, "pinned runtime dispatch slot out of image");
+    uint64_t original = 0;
+    std::memcpy(&original, bytes.data() + rawOffset(static_cast<DWORD>(slotRva), sizeof original), sizeof original);
+    Require(original >= nt.OptionalHeader.ImageBase &&
+        original - nt.OptionalHeader.ImageBase == 0x27240, "pinned runtime fallback RVA changed");
+    const size_t code = rawOffset(0x27240, 2);
+    Require(bytes[code] == 0xff && bytes[code + 1] == 0xe0, "pinned runtime fallback bytes changed");
+    return slotRva;
+}
+#endif
 static DWORD WINAPI Worker(void*) {
     for (unsigned i = 0; i < 20; ++i)
         if (!LoanPatchOwnedTestCall(g_shared, &g_token, kName)) InterlockedIncrement(&g_shared->badResult);
@@ -109,7 +169,11 @@ static void RunWorkers() {
         "owned workers timed out");
     for (auto h : threads) CloseHandle(h);
 }
-static int Child(uint64_t writeHandle, uint64_t gateHandle, uint64_t mapHandle) {
+static int Child(uint64_t writeHandle, uint64_t gateHandle, uint64_t mapHandle,
+    const wchar_t* runtimePath = nullptr) {
+#ifndef LOAN_OWNED_CFG_OFF
+    (void)runtimePath;
+#endif
     g_shared = static_cast<Shared*>(MapViewOfFile(reinterpret_cast<HANDLE>(mapHandle), FILE_MAP_ALL_ACCESS, 0, 0, sizeof(Shared)));
     Require(g_shared != nullptr, "owned shared map failed");
     const uint64_t base = Ptr(GetModuleHandleW(nullptr));
@@ -118,7 +182,16 @@ static int Child(uint64_t writeHandle, uint64_t gateHandle, uint64_t mapHandle) 
         static_cast<DWORD>(Ptr(&LoanPatchOwnedWrapper) - base),
         static_cast<DWORD>(Ptr(&LoanPatchOwnedBreak) - base),
         static_cast<DWORD>(Ptr(&LoanPatchOwnedSuppressed) - base),
-        static_cast<DWORD>(Ptr(&__guard_dispatch_icall_fptr) - base), 0};
+#ifdef LOAN_OWNED_CFG_OFF
+        0, 0, 0};
+    Require(runtimePath != nullptr, "owned CFG-off runtime path missing");
+    HMODULE runtime = LoadLibraryExW(runtimePath, nullptr,
+        LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32);
+    Require(runtime != nullptr, "owned guarded runtime load failed");
+    ready.runtimeBase = Ptr(runtime);
+#else
+        static_cast<DWORD>(Ptr(&__guard_dispatch_icall_fptr) - base), 0, 0};
+#endif
     auto dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
     auto nt = reinterpret_cast<const IMAGE_NT_HEADERS64*>(base + dos->e_lfanew);
     ready.imageSize = nt->OptionalHeader.SizeOfImage;
@@ -154,6 +227,7 @@ static int Child(uint64_t writeHandle, uint64_t gateHandle, uint64_t mapHandle) 
 static bool ReadExact(HANDLE process, uint64_t address, void* data, SIZE_T size) {
     SIZE_T got = 0; return ReadProcessMemory(process, reinterpret_cast<void*>(address), data, size, &got) && got == size;
 }
+#ifndef LOAN_OWNED_CFG_OFF
 static void ValidateOwnedGfids(HANDLE process, uint64_t base, const Ready& ready) {
     IMAGE_DOS_HEADER dos{};
     Require(ReadExact(process, base, &dos, sizeof dos) && dos.e_magic == IMAGE_DOS_SIGNATURE &&
@@ -203,6 +277,7 @@ static void ValidateOwnedGfids(HANDLE process, uint64_t base, const Ready& ready
     }
     Require(wrapperFound && suppressedFound, "owned wrapper/suppressed GFID absent");
 }
+#endif
 static std::array<BYTE, 5> ReadSite(HANDLE process, uint64_t site) {
     std::array<BYTE, 5> bytes{}; Require(ReadExact(process, site, bytes.data(), bytes.size()), "callsite read failed"); return bytes;
 }
@@ -251,10 +326,17 @@ static uint64_t AllocateNear(HANDLE process, uint64_t site) {
     }
     throw std::runtime_error("no reachable owned relay page");
 }
-static uint64_t WriteRelay(HANDLE process, uint64_t site, uint64_t wrapper, uint64_t dispatchSlot) {
+static uint64_t WriteRelay(HANDLE process, uint64_t site, uint64_t wrapper, uint64_t dispatchSlot,
+    uint64_t runtimeBase = 0) {
     PROCESS_MITIGATION_CONTROL_FLOW_GUARD_POLICY cfg{};
+#ifdef LOAN_OWNED_CFG_OFF
+    Require(GetProcessMitigationPolicy(process, ProcessControlFlowGuardPolicy, &cfg, sizeof cfg) &&
+        cfg.Flags == 0, "owned CFG-off policy changed");
+#else
+    (void)runtimeBase;
     Require(GetProcessMitigationPolicy(process, ProcessControlFlowGuardPolicy, &cfg, sizeof cfg) &&
         cfg.EnableControlFlowGuard, "owned CFG policy not enabled");
+#endif
     MEMORY_BASIC_INFORMATION slotPage{};
     Require(VirtualQueryEx(process, reinterpret_cast<void*>(dispatchSlot), &slotPage, sizeof slotPage) == sizeof slotPage &&
         slotPage.State == MEM_COMMIT && slotPage.Type == MEM_IMAGE &&
@@ -270,9 +352,17 @@ static uint64_t WriteRelay(HANDLE process, uint64_t site, uint64_t wrapper, uint
     wchar_t dispatcherPath[32768]{};
     Require(GetMappedFileNameW(process, dispatcherPage.AllocationBase, dispatcherPath, 32768) != 0,
         "owned CFG dispatcher path unavailable");
+#ifdef LOAN_OWNED_CFG_OFF
+    Require(Ptr(dispatcherPage.AllocationBase) == runtimeBase && dispatcher == runtimeBase + 0x27240,
+        "owned runtime fallback dispatcher mismatch");
+    std::array<BYTE, 2> fallback{};
+    Require(ReadExact(process, dispatcher, fallback.data(), fallback.size()) &&
+        fallback == std::array<BYTE, 2>{0xff, 0xe0}, "owned runtime fallback bytes mismatch");
+#else
     const wchar_t* dispatcherLeaf = wcsrchr(dispatcherPath, L'\\');
     Require(dispatcherLeaf && _wcsicmp(dispatcherLeaf + 1, L"ntdll.dll") == 0,
         "owned CFG dispatch slot not OS-resolved");
+#endif
     const uint64_t relay = AllocateNear(process, site);
     std::array<BYTE, 24> bytes{0x48, 0xb8};
     std::memcpy(bytes.data() + 2, &wrapper, sizeof wrapper);
@@ -295,6 +385,45 @@ static uint64_t WriteRelay(HANDLE process, uint64_t site, uint64_t wrapper, uint
         "relay RX readback failed");
     return relay; // Remains pinned by the child process until its exit.
 }
+#ifdef LOAN_OWNED_CFG_OFF
+static uint64_t ValidateRuntimeLoaded(HANDLE process, uint64_t runtimeBase,
+    const std::wstring& runtimePath, uint64_t pinnedSlotRva) {
+    Require(runtimeBase != 0 && FileHash(runtimePath) == kRuntimeHash,
+        "owned guarded runtime identity changed");
+    wchar_t loadedPath[32768]{};
+    Require(GetModuleFileNameExW(process, reinterpret_cast<HMODULE>(runtimeBase), loadedPath, 32768) != 0 &&
+        _wcsicmp(loadedPath, runtimePath.c_str()) == 0, "owned runtime module path changed");
+    MEMORY_BASIC_INFORMATION image{};
+    Require(VirtualQueryEx(process, reinterpret_cast<void*>(runtimeBase), &image, sizeof image) == sizeof image &&
+        image.Type == MEM_IMAGE && Ptr(image.AllocationBase) == runtimeBase,
+        "owned guarded runtime image absent");
+    IMAGE_DOS_HEADER dos{};
+    Require(ReadExact(process, runtimeBase, &dos, sizeof dos) && dos.e_magic == IMAGE_DOS_SIGNATURE &&
+        dos.e_lfanew > 0 && dos.e_lfanew < 0x1000, "owned runtime DOS invalid");
+    IMAGE_NT_HEADERS64 nt{};
+    Require(ReadExact(process, runtimeBase + dos.e_lfanew, &nt, sizeof nt) &&
+        nt.Signature == IMAGE_NT_SIGNATURE && nt.OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC,
+        "owned runtime NT invalid");
+    const auto dir = nt.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_LOAD_CONFIG];
+    Require(dir.VirtualAddress && dir.Size >= offsetof(IMAGE_LOAD_CONFIG_DIRECTORY64,
+        GuardCFDispatchFunctionPointer) + sizeof(uint64_t) &&
+        dir.VirtualAddress < nt.OptionalHeader.SizeOfImage &&
+        dir.Size <= nt.OptionalHeader.SizeOfImage - dir.VirtualAddress, "owned runtime load config invalid");
+    IMAGE_LOAD_CONFIG_DIRECTORY64 config{};
+    Require(ReadExact(process, runtimeBase + dir.VirtualAddress, &config, sizeof config) &&
+        (config.GuardFlags & IMAGE_GUARD_CF_INSTRUMENTED) &&
+        config.GuardCFDispatchFunctionPointer == runtimeBase + pinnedSlotRva,
+        "owned runtime dispatch metadata mismatch");
+    const uint64_t slot = runtimeBase + pinnedSlotRva;
+    uint64_t dispatcher = 0;
+    Require(ReadExact(process, slot, &dispatcher, sizeof dispatcher) &&
+        dispatcher == runtimeBase + 0x27240, "owned runtime fallback dispatcher mismatch");
+    std::array<BYTE, 2> code{};
+    Require(ReadExact(process, dispatcher, code.data(), code.size()) &&
+        code == std::array<BYTE, 2>{0xff, 0xe0}, "owned runtime fallback bytes mismatch");
+    return slot;
+}
+#endif
 static void WriteFive(HANDLE process, uint64_t site, uint64_t base,
     const std::array<BYTE, 5>& expected, const std::array<BYTE, 5>& replacement, const char* fault) {
     Require(ReadSite(process, site) == expected, "foreign callsite bytes");
@@ -395,7 +524,11 @@ static void DrainTerminated(DWORD pid, bool terminationRequested) {
     }
     throw std::runtime_error("owned child debug exit missing");
 }
-static int OneCase(const wchar_t* executable, const std::array<BYTE, 32>& ownHash, const char* fault) {
+static int OneCase(const wchar_t* executable, const std::array<BYTE, 32>& ownHash, const char* fault
+#ifdef LOAN_OWNED_CFG_OFF
+    , const std::wstring& runtimePath, uint64_t pinnedSlotRva
+#endif
+    ) {
     SECURITY_ATTRIBUTES attributes{sizeof attributes, nullptr, TRUE};
     HANDLE readRaw = nullptr, writeRaw = nullptr;
     Require(CreatePipe(&readRaw, &writeRaw, &attributes, 0) != FALSE, "ready pipe create failed");
@@ -410,9 +543,15 @@ static int OneCase(const wchar_t* executable, const std::array<BYTE, 32>& ownHas
     if (std::strcmp(fault, "relay-exception") == 0) shared->exceptionCase = 1;
     if (std::strcmp(fault, "relay-suppressed") == 0) shared->negativeGuard = 1;
     wchar_t command[33000]{};
+#ifdef LOAN_OWNED_CFG_OFF
+    swprintf_s(command, L"\"%s\" --owned-child %llu %llu %llu \"%s\"", executable,
+        static_cast<unsigned long long>(Ptr(writePipe.h)), static_cast<unsigned long long>(Ptr(gate.h)),
+        static_cast<unsigned long long>(Ptr(map.h)), runtimePath.c_str());
+#else
     swprintf_s(command, L"\"%s\" --owned-child %llu %llu %llu", executable,
         static_cast<unsigned long long>(Ptr(writePipe.h)), static_cast<unsigned long long>(Ptr(gate.h)),
         static_cast<unsigned long long>(Ptr(map.h)));
+#endif
     STARTUPINFOW startup{sizeof startup}; PROCESS_INFORMATION info{};
     Require(CreateProcessW(executable, command, nullptr, nullptr, TRUE, 0, nullptr, nullptr, &startup, &info) != FALSE,
         "owned child spawn failed");
@@ -438,12 +577,20 @@ static int OneCase(const wchar_t* executable, const std::array<BYTE, 32>& ownHas
             ready.wrapperRva == Ptr(&LoanPatchOwnedWrapper) - localBase &&
             ready.breakRva == Ptr(&LoanPatchOwnedBreak) - localBase &&
             ready.suppressedRva == Ptr(&LoanPatchOwnedSuppressed) - localBase &&
+#ifndef LOAN_OWNED_CFG_OFF
             ready.dispatchSlotRva == Ptr(&__guard_dispatch_icall_fptr) - localBase &&
+#else
+            ready.dispatchSlotRva == 0 && ready.runtimeBase != 0 &&
+#endif
             ready.imageSize == localNt->OptionalHeader.SizeOfImage &&
             ready.siteRva + 5 <= ready.imageSize && ready.wrapperRva < ready.imageSize &&
             ready.originalRva < ready.imageSize && ready.breakRva < ready.imageSize &&
             ready.suppressedRva < ready.imageSize &&
-            ready.dispatchSlotRva + sizeof(uint64_t) <= ready.imageSize,
+#ifndef LOAN_OWNED_CFG_OFF
+            ready.dispatchSlotRva + sizeof(uint64_t) <= ready.imageSize && ready.runtimeBase == 0,
+#else
+            true,
+#endif
             "owned child RVA metadata mismatch");
         Require(DebugActiveProcess(info.dwProcessId) != FALSE, "owned child debug attach failed"); attached = true;
         Require(DebugSetProcessKillOnExit(TRUE) != FALSE, "debug fail-stop policy failed");
@@ -485,15 +632,50 @@ static int OneCase(const wchar_t* executable, const std::array<BYTE, 32>& ownHas
                 if (ex.dwFirstChance && ex.ExceptionRecord.ExceptionCode == EXCEPTION_BREAKPOINT) {
                     if (!gateOpened && site && IsAttachBreakpoint(child.h, ex.ExceptionRecord)) {
                         SafeThreads(info.dwProcessId, site);
+#ifdef LOAN_OWNED_CFG_OFF
+                        PROCESS_MITIGATION_CONTROL_FLOW_GUARD_POLICY cfg{};
+                        PROCESS_MITIGATION_DYNAMIC_CODE_POLICY dynamic{};
+                        PROCESS_MITIGATION_USER_SHADOW_STACK_POLICY cet{};
+                        Require(GetProcessMitigationPolicy(child.h, ProcessControlFlowGuardPolicy, &cfg, sizeof cfg) &&
+                            GetProcessMitigationPolicy(child.h, ProcessDynamicCodePolicy, &dynamic, sizeof dynamic) &&
+                            GetProcessMitigationPolicy(child.h, ProcessUserShadowStackPolicy, &cet, sizeof cet) &&
+                            cfg.Flags == 0 && dynamic.Flags == 0 && !cet.EnableUserShadowStack &&
+                            !cet.SetContextIpValidation, "owned natural CFG-off policy invalid");
+                        printf("{\"event\":\"owned_policy\",\"case\":\"%s\",\"cfgFlags\":%lu,\"dynamicFlags\":%lu,\"cetFlags\":%lu}\n",
+                            fault, cfg.Flags, dynamic.Flags, cet.Flags);
+                        const uint64_t runtimeSlot = ValidateRuntimeLoaded(child.h, ready.runtimeBase,
+                            runtimePath, pinnedSlotRva);
+#else
                         ValidateOwnedGfids(child.h, base, ready);
+#endif
                         const bool relayCase = std::strcmp(fault, "relay") == 0 ||
                             std::strcmp(fault, "relay-exception") == 0 ||
+                            std::strcmp(fault, "relay-tampered-slot") == 0 ||
                             std::strcmp(fault, "relay-suppressed") == 0;
+#ifdef LOAN_OWNED_CFG_OFF
+                        if (std::strcmp(fault, "relay-tampered-slot") == 0) {
+                            DWORD old = 0, restoredProtection = 0;
+                            Require(VirtualProtectEx(child.h, reinterpret_cast<void*>(runtimeSlot), sizeof(uint64_t),
+                                PAGE_READWRITE, &old) && old == PAGE_READONLY,
+                                "owned runtime slot fault setup failed");
+                            const uint64_t tampered = ready.runtimeBase + 0x27241;
+                            SIZE_T count = 0;
+                            Require(WriteProcessMemory(child.h, reinterpret_cast<void*>(runtimeSlot), &tampered,
+                                sizeof tampered, &count) && count == sizeof tampered &&
+                                VirtualProtectEx(child.h, reinterpret_cast<void*>(runtimeSlot), sizeof(uint64_t),
+                                    old, &restoredProtection) && restoredProtection == PAGE_READWRITE,
+                                "owned runtime slot fault write failed");
+                        }
+#endif
                         const uint64_t relayTarget = std::strcmp(fault, "relay-suppressed") == 0 ?
                             base + ready.suppressedRva : base + ready.wrapperRva;
                         const uint64_t destination = relayCase ?
+#ifdef LOAN_OWNED_CFG_OFF
+                            WriteRelay(child.h, site, relayTarget, runtimeSlot, ready.runtimeBase) : base + ready.wrapperRva;
+#else
                             WriteRelay(child.h, site, relayTarget,
                                 base + ready.dispatchSlotRva) : base + ready.wrapperRva;
+#endif
                         const int64_t delta = static_cast<int64_t>(destination) - static_cast<int64_t>(site + 5);
                         Require(delta >= INT32_MIN && delta <= INT32_MAX, "wrapper/relay outside rel32 reach");
                         const int32_t displacement = static_cast<int32_t>(delta);
@@ -549,6 +731,9 @@ static int OneCase(const wchar_t* executable, const std::array<BYTE, 32>& ownHas
         else if (std::strcmp(fault, "flush") == 0) marker = "injected flush failure";
         else if (std::strcmp(fault, "foreign") == 0) marker = "foreign callsite bytes";
         else if (std::strcmp(fault, "relay-suppressed") == 0) marker = "CFG suppressed target rejected";
+#ifdef LOAN_OWNED_CFG_OFF
+        else if (std::strcmp(fault, "relay-tampered-slot") == 0) marker = "owned runtime fallback dispatcher mismatch";
+#endif
         const bool expectedFault = marker && std::strcmp(problem.what(), marker) == 0;
         const DWORD state = WaitForSingleObject(child.h, 0);
         if (state != WAIT_TIMEOUT && state != WAIT_OBJECT_0) {
@@ -598,16 +783,45 @@ static int OneCase(const wchar_t* executable, const std::array<BYTE, 32>& ownHas
 }
 int wmain(int argc, wchar_t** argv) {
     try {
+#ifdef LOAN_OWNED_CFG_OFF
+        if (argc == 6 && std::wcscmp(argv[1], L"--owned-child") == 0)
+            return Child(_wcstoui64(argv[2], nullptr, 10), _wcstoui64(argv[3], nullptr, 10),
+                _wcstoui64(argv[4], nullptr, 10), argv[5]);
+#else
         if (argc == 5 && std::wcscmp(argv[1], L"--owned-child") == 0)
             return Child(_wcstoui64(argv[2], nullptr, 10), _wcstoui64(argv[3], nullptr, 10),
                 _wcstoui64(argv[4], nullptr, 10));
+#endif
         Require(argc == 1, "fixture accepts no target PID or path");
         const std::wstring path = SelfPath(); const auto hash = FileHash(path);
+#ifdef LOAN_OWNED_CFG_OFF
+        std::wstring runtimePath = RuntimePath(path);
+        wchar_t canonical[32768]{};
+        const DWORD pathLength = GetFullPathNameW(runtimePath.c_str(), 32768, canonical, nullptr);
+        Require(pathLength && pathLength < 32768, "owned runtime absolute path unavailable");
+        runtimePath = canonical;
+        Require(FileHash(runtimePath) == kRuntimeHash, "owned guarded runtime SHA256 mismatch");
+        const uint64_t pinnedSlotRva = PinnedFallbackRva(runtimePath);
+        const char* cases[] = {"none", "relay", "relay-exception", "relay-tampered-slot",
+            "shortwrite", "protect", "flush", "foreign"};
+#else
         const char* cases[] = {"none", "relay", "relay-exception", "relay-suppressed",
             "shortwrite", "protect", "flush", "foreign"};
+#endif
         unsigned passed = 0;
-        for (const auto* name : cases) { if (OneCase(path.c_str(), hash, name) == 0) ++passed; else return 1; }
+        for (const auto* name : cases) {
+#ifdef LOAN_OWNED_CFG_OFF
+            if (OneCase(path.c_str(), hash, name, runtimePath, pinnedSlotRva) == 0) ++passed; else return 1;
+#else
+            if (OneCase(path.c_str(), hash, name) == 0) ++passed; else return 1;
+#endif
+        }
+#ifdef LOAN_OWNED_CFG_OFF
+        printf("{\"scope\":\"owned-natural-cfg-off-guarded-runtime-relay\",\"passed\":true,\"cases\":%u,\"pinnedSlotRva\":%llu}\n",
+            passed, static_cast<unsigned long long>(pinnedSlotRva));
+#else
         printf("{\"scope\":\"owned-child-rel32-call-pending-debug-event\",\"passed\":true,\"cases\":%u}\n", passed);
+#endif
         return 0;
     } catch (const std::exception& problem) { fprintf(stderr, "fixture: %s\n", problem.what()); return 1; }
 }

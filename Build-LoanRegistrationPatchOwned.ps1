@@ -18,3 +18,16 @@ $command = 'ml64.exe /nologo /c /Fo"{0}" "{1}" && cl.exe /nologo /std:c++17 /W4 
 if ($LASTEXITCODE -ne 0) { throw "Owned registration patch build failed: $LASTEXITCODE" }
 & $exe
 if ($LASTEXITCODE -ne 0) { throw "Owned registration patch qualification failed: $LASTEXITCODE" }
+$runtime = Join-Path $PSScriptRoot 'dist\loan-consumer-runtime\TF3InProcessRuntime.dll'
+if (-not (Test-Path -LiteralPath $runtime -PathType Leaf)) { throw 'Pinned guarded runtime missing.' }
+$runtimeHash = (Get-FileHash -LiteralPath $runtime -Algorithm SHA256).Hash
+if ($runtimeHash -ne '986651806CF8EF1ADF3AFF7EDDF25A40A3E3B473B02EC37F32F174D8E940EA0A') {
+    throw 'Pinned guarded runtime SHA256 mismatch.'
+}
+$offObject = Join-Path $output 'loan_registration_patch_owned_cfgoff.obj'
+$offExe = Join-Path $output 'LoanRegistrationPatchOwnedCfgOff.exe'
+$offCommand = 'cl.exe /nologo /std:c++17 /W4 /WX /EHs /O2 /DLOAN_OWNED_CFG_OFF /Fo"{0}" /Fe"{1}" "{2}" "{3}" bcrypt.lib psapi.lib' -f $offObject,$offExe,$cpp,$asmObject
+& cmd.exe /d /s /c ('call "{0}" && {1}' -f $vcvars,$offCommand)
+if ($LASTEXITCODE -ne 0) { throw "Owned CFG-off host build failed: $LASTEXITCODE" }
+& $offExe
+if ($LASTEXITCODE -ne 0) { throw "Owned CFG-off guarded runtime qualification failed: $LASTEXITCODE" }
