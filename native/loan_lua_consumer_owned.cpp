@@ -23,6 +23,13 @@ lua_State* stock_expected_state = nullptr;
 void* stock_expected_function = nullptr;
 const char* stock_expected_name = nullptr;
 unsigned stock_calls = 0;
+unsigned custom_calls = 0;
+int CustomConsumer(lua_State* state) {
+    if (lua_gettop(state) == 3 && lua_type(state, 1) == LUA_TSTRING &&
+        lua_type(state, 2) == LUA_TSTRING && lua_type(state, 3) == LUA_TUSERDATA)
+        ++custom_calls;
+    lua_pushboolean(state, 0); return 1;
+}
 struct OwnedStockError {};
 tf3loaninvocation::Site invocation_site{};
 struct OwnedDescriptor { bool loan; };
@@ -144,6 +151,16 @@ int main(int argc, char**) {
         lua_pushinteger(state, 42); const auto base = lua_gettop(state);
         Require(tf3loanlua::Register<Binding>(state) && lua_gettop(state) == base &&
             lua_tointeger(state, 1) == 42, "protected registration preserves stack");
+        Require(tf3loanlua::Register<Binding, &CustomConsumer>(state) && lua_gettop(state) == base,
+            "custom protected registration preserves stack");
+        lua_getglobal(state, "tf3mpConsumeOrdinaryLoanResume");
+        lua_pushliteral(state, "owned nonce"); lua_pushliteral(state, "owned digest");
+        lua_newuserdata(state, 16);
+        Require(lua_pcall(state, 3, 1, 0) == 0 && !lua_toboolean(state, -1) &&
+            custom_calls == 1 && claims == 0, "custom registration forwards actual third userdata without default claim");
+        lua_settop(state, base);
+        Require(tf3loanlua::Register<Binding>(state) && lua_gettop(state) == base,
+            "default consumer restored after custom callback");
         Arm();
         fprintf(stderr, "owned_stage=consumer\n");
         const auto nonce = Hex(grant.nonce.data(), grant.nonce.size());

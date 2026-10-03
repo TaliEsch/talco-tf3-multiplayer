@@ -58,9 +58,9 @@ template<class Binding> int Consumer(lua_State* state) {
     // Lua's C dispatcher reserves at least 20 slots; this pushes exactly one.
     api.pushboolean(state, accepted ? 1 : 0); return 1;
 }
-template<class Binding> int RegistrationThunk(lua_State* state) {
+template<class Binding, CFunction ConsumerFunction = &Consumer<Binding>> int RegistrationThunk(lua_State* state) {
     const auto& api = Binding::Functions();
-    api.pushcclosure(state, &Consumer<Binding>, 0);
+    api.pushcclosure(state, ConsumerFunction, 0);
     api.setglobal(state, "tf3mpConsumeOrdinaryLoanResume");
     return 0;
 }
@@ -70,12 +70,12 @@ template<class Binding> int RegistrationThunk(lua_State* state) {
 // Failure can leave an earlier global closure installed: the integration must
 // independently disable native Claim/arming and halt, not infer revocation from
 // Register(false). Code remains pinned while any Lua closure may retain it.
-template<class Binding> bool Register(lua_State* state) {
+template<class Binding, CFunction ConsumerFunction = &Consumer<Binding>> bool Register(lua_State* state) {
     const auto& api = Binding::Functions();
     if (!state || !api.Complete()) return false;
     const int saved_top = api.gettop(state);
     if (saved_top < 0 || !api.checkstack(state, 4)) return false;
-    api.pushcclosure(state, &RegistrationThunk<Binding>, 0);
+    api.pushcclosure(state, &RegistrationThunk<Binding, ConsumerFunction>, 0);
     const int status = api.pcallk(state, 0, 0, 0, 0, nullptr);
     api.settop(state, saved_top);
     return status == 0;
