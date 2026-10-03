@@ -49,7 +49,7 @@ at compile time to be nonthrowing. Registration must permit C++ unwinding;
 Lua's [C++ error path](https://www.lua.org/source/5.2/ldo.c.html) cannot cross
 `noexcept` or a broad exception-suppression bridge.
 
-`Build-LoanLuaConsumerOwned.ps1` passes 52 checks using unchanged Lua 5.2.4
+`Build-LoanLuaConsumerOwned.ps1` passes 68 checks using unchanged Lua 5.2.4
 compiled as a C++ DLL. These cover protected registration, growing-allocation
 failure, a Lua C++ error crossing the DLL boundary, malformed/extra arguments,
 non-string rejection without conversion, duplicate consumption and actual
@@ -57,6 +57,13 @@ Lua-to-native stack traversal through the owned invocation fixture. A shared
 VM without an invocation, a foreign owned resource and mismatched raw state
 are denied. Resource and borrower observations in this fixture are synthetic;
 they do not qualify TF3's layout or world lifecycle.
+
+The ordinary three-argument bridge forwards the original state/function/name
+unchanged and preserves the original Boolean result. Its owned ASM CALL frame
+has unwind metadata. Stock failure and protected-registration failure disable
+native permission; a stock C++ error disables and rethrows through the owned
+ASM frame. A retained earlier Lua closure then returns false. This proves the
+forwarding/error mechanics, not installation or mitigation compatibility in TF3.
 
 The root fixture is built with `/EHs` so C linkage on the owned ASM callbacks
 does not imply they are nonthrowing. The upstream runtime uses its normal C++

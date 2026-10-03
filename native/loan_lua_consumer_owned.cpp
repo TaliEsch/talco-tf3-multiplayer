@@ -1,4 +1,5 @@
 #include "loan_lua_consumer.h"
+#include "loan_registration_bridge.h"
 #include "loan_invocation_stack.h"
 #include "lua.h"
 #include "lauxlib.h"
@@ -10,12 +11,19 @@
 
 extern "C" void LoanOwnedInvocation(std::uint64_t descriptor, std::uint64_t wrapper);
 extern "C" unsigned char LoanOwnedInvocationReturn, LoanOwnedInvocationEnd;
+extern "C" bool LoanOwnedStockRegistration(lua_State*, void*, const char*);
 
 namespace {
 unsigned cases = 0, claims = 0, string_reads = 0;
 unsigned allocation_failures = 0;
 bool foreign_context = false, fail_allocations = false, force_registration_error = false;
 bool require_witness = false;
+bool native_disabled = false, stock_result = true, throw_stock = false;
+lua_State* stock_expected_state = nullptr;
+void* stock_expected_function = nullptr;
+const char* stock_expected_name = nullptr;
+unsigned stock_calls = 0;
+struct OwnedStockError {};
 tf3loaninvocation::Site invocation_site{};
 struct OwnedDescriptor { bool loan; };
 struct OwnedInvocation {
@@ -50,6 +58,14 @@ void SetGlobal(lua_State* state, const char* name) {
     lua_setglobal(state, name);
 }
 struct Binding {
+    static bool StockRegister(lua_State* state, void* function, const char* name) {
+        ++stock_calls;
+        Require(state == stock_expected_state && function == stock_expected_function && name == stock_expected_name,
+            "three stock registrar arguments forwarded unchanged");
+        if (throw_stock) throw OwnedStockError{};
+        return stock_result;
+    }
+    static void Disable() noexcept { native_disabled = true; authority.Invalidate(); }
     static const tf3loanlua::Api& Functions() {
         static const tf3loanlua::Api api{lua_gettop, lua_checkstack, lua_type, StringRead,
             lua_pushboolean, lua_settop, lua_pushcclosure, SetGlobal, lua_pcallk};
@@ -68,7 +84,7 @@ struct Binding {
         }
         // Fixture resource and borrower identity only; no actual TF3 layout or
         // ownership observation is represented by this owned C++ descriptor.
-        return !foreign_context && authority.Consume(grant.world, nonce, digest, grant.owner, grant.loan);
+        return !native_disabled && !foreign_context && authority.Consume(grant.world, nonce, digest, grant.owner, grant.loan);
     }
 };
 std::string Hex(const unsigned char* value, std::size_t count) {
@@ -84,6 +100,7 @@ void Arm() {
     Require(authority.OpenWorld(epoch, transition, &grant.world), "owned native world");
     grant.nonce[0] = 2; grant.digest[0] = 3; grant.owner = 15702; grant.loan = 0; grant.expires_at = 1100;
     Require(authority.Arm(grant), "owned native arm");
+    native_disabled = false;
 }
 bool Invoke(lua_State* state, const std::string& nonce, const std::string& digest, int extra = 0) {
     const int base = lua_gettop(state);
@@ -105,6 +122,10 @@ extern "C" __declspec(noinline) void LoanOwnedCallback() {
 }
 extern "C" __declspec(noinline) void LoanOwnedMissingMetadataCallback() {
     throw std::runtime_error("unused owned metadata callback");
+}
+extern "C" __declspec(noinline) bool LoanOwnedStockRegistrationBridge(lua_State* state,
+    void* function, const char* name) {
+    return tf3loanlua::StockRegistrationBridge<Binding>(state, function, name);
 }
 int main(int argc, char**) {
     if (argc != 1) return 2;
@@ -167,6 +188,26 @@ int main(int argc, char**) {
             lua_tointeger(state, 1) == 42, "C++ Lua registration error crosses DLL and restores stack");
         force_registration_error = false;
         Require(tf3loanlua::Register<Binding>(state) && lua_gettop(state) == base, "registration after protected error");
+        int owned_function_object = 42;
+        stock_expected_state = state; stock_expected_function = &owned_function_object;
+        stock_expected_name = "owned_stock_useFn";
+        Require(LoanOwnedStockRegistration(state, stock_expected_function, stock_expected_name) &&
+            stock_calls == 1 && lua_gettop(state) == base, "ordinary stock bridge original true return");
+        stock_result = false;
+        Require(!LoanOwnedStockRegistration(state, stock_expected_function, stock_expected_name) &&
+            stock_calls == 2 && native_disabled && lua_gettop(state) == base,
+            "ordinary stock bridge original false return disables native permission");
+        stock_result = true; Arm(); force_registration_error = true;
+        Require(LoanOwnedStockRegistration(state, stock_expected_function, stock_expected_name) &&
+            native_disabled && !Invoke(state, nonce, digest) && lua_gettop(state) == base,
+            "registration error independently disables retained closure");
+        force_registration_error = false; Arm(); throw_stock = true;
+        bool propagated = false;
+        try { LoanOwnedStockRegistration(state, stock_expected_function, stock_expected_name); }
+        catch (const OwnedStockError&) { propagated = true; }
+        throw_stock = false;
+        Require(propagated && native_disabled && !Invoke(state, nonce, digest) && lua_gettop(state) == base,
+            "stock C++ error unwinds owned ASM and revokes native permission");
         // Use a fresh VM so the global's name must allocate/intern for the first
         // time. Allocation failure remains inside the protected registration.
         auto* allocation_state = lua_newstate(Allocator, nullptr);
