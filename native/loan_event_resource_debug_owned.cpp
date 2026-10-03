@@ -37,8 +37,7 @@ HANDLE ArgHandle(const wchar_t* text) {
 }
 void Resource(std::array<unsigned char, 64>& header, const char* path) {
     header.fill(0);
-    memcpy(header.data(), "base", 5);
-    const uint64_t shortLength = 4, shortCapacity = 15;
+    const uint64_t shortLength = 0, shortCapacity = 15;
     memcpy(header.data() + 16, &shortLength, 8);
     memcpy(header.data() + 24, &shortCapacity, 8);
     const uint64_t pointer = reinterpret_cast<uint64_t>(path), length = strlen(path);
@@ -63,8 +62,8 @@ int Child(int argc, wchar_t** argv) {
     std::array<uint64_t, 3> helper{reinterpret_cast<uint64_t>(&engine), 0, 123};
     uint64_t helperSlot = reinterpret_cast<uint64_t>(helper.data());
     std::array<unsigned char, 64> other{}, loan{};
-    Resource(other, "/game_mechanics/finance/unrelated.gs");
-    Resource(loan, "/game_mechanics/finance/loan.gs");
+    Resource(other, "game_mechanics/finance/unrelated.gs");
+    Resource(loan, "game_mechanics/finance/loan.gs");
     std::array<uint64_t, 7> descriptor{reinterpret_cast<uint64_t>(&rep), reinterpret_cast<uint64_t>(&ref),
         reinterpret_cast<uint64_t>(other.data()), 0, 0, 0, reinterpret_cast<uint64_t>(&helperSlot)};
     shared.pid = GetCurrentProcessId(); shared.thread = GetCurrentThreadId();
@@ -180,7 +179,7 @@ void Scenario(bool limit) {
                 tf3loanresourceobservation::Snapshot snapshot{};
                 Check(context.R13 == shared.descriptor && tf3loanresourceobservation::Capture(process.h, context, &SafeReadSpan, &snapshot) &&
                     snapshot.wrapper == shared.wrapper && snapshot.raw_state == shared.raw && snapshot.engine == shared.engine &&
-                    snapshot.entity == 123 && snapshot.string_bytes[0] == 5, "pending-frame capture mismatch");
+                    snapshot.entity == 123 && snapshot.string_bytes[0] == 1, "pending-frame capture mismatch");
                 CONTEXT resume = context; resume.ContextFlags = CONTEXT_CONTROL | CONTEXT_DEBUG_REGISTERS;
                 resume.EFlags |= 0x10000; resume.Dr6 = 0;
                 Check(SetThreadContext(found->second.contextHandle, &resume), "owned RF write");

@@ -376,10 +376,11 @@ bool EmitLoanResource(HANDLE process, DWORD pid, DWORD thread, const CONTEXT& co
     const bool readable = tf3loanresourceobservation::Capture(process, context, &SafeReadSpan, &snapshot);
     bool candidate = false;
     if (readable) {
-        for (size_t i = 0; i < 2; ++i) {
-            const std::string value(reinterpret_cast<const char*>(snapshot.strings[i].data()), snapshot.string_bytes[i] - 1);
-            candidate = candidate || value.find("/game_mechanics/finance/loan") != std::string::npos;
-        }
+        // Observed exact 40408 ResName pair. This selects a diagnostic sample,
+        // never authorization; the live pair has no leading slash.
+        const std::string scope(reinterpret_cast<const char*>(snapshot.strings[0].data()), snapshot.string_bytes[0] - 1);
+        const std::string resource(reinterpret_cast<const char*>(snapshot.strings[1].data()), snapshot.string_bytes[1] - 1);
+        candidate = scope.empty() && resource == "game_mechanics/finance/loan.gs";
     }
     printf("{\"event\":\"loan-event-resource-hit\",\"diagnosticOnly\":true,\"activationPermitted\":false,"
         "\"pid\":%lu,\"threadId\":%lu,\"ordinal\":%u,\"readable\":%s,\"loanCandidate\":%s",

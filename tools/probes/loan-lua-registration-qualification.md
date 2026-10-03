@@ -174,8 +174,30 @@ been collected; this discovery does not permit installation of a lifecycle hook.
 
 ## Next required proof
 
-Trace the actual Loan resource context at callback invocation and real world
-load begin/teardown before implementing registration. Then qualify a dormant
+Actual paused-world Loan context was captured on exact 40408 in private run
+`.run/loan-resource-live-8937763e-9c1d-4426-b75d-9918001dbdce`.
+At `F410A7`, the copied resource pair was `['', 'game_mechanics/finance/loan.gs']`,
+thread 9552, script Entity 28441 (not company 15702), with a correlated fresh
+`loan_peek_A` receipt reporting one loan and zero payments. Both before/after
+readbacks remained paused at update 366 with borrower balance 21,000,000.
+An unrelated `mission/guide_system.gs` invocation on the same thread shared
+wrapper, raw VM, Engine and ScriptRep, while ScriptRef and Entity differed.
+These addresses/entities are temporary witnesses, never persisted identities.
+
+The probe exited one after timeout because its old candidate substring expected
+a leading slash. Both readable snapshots were preserved and independently
+decoded; restoration, drain, detach and target survival all passed. The filter
+now requires the observed empty scope and exact resource path. Rebuilt owned
+fixtures pass the two-hit and 32-hit cases; reader checks reject foreign scope
+and path variants. This fixes diagnostic classification only; no second TF3 run
+was performed to claim the revised early-stop behavior. Both test processes are
+closed, saved bytes unchanged, original native/mod hashes restored. The initial
+Steam launch replacement was caught before any event and explicitly reconciled
+into the same loaded diagnostic process, without restarting the world.
+
+Next trace real world load begin/teardown and bind the guarded consumer to a
+native-established active Loan invocation before implementing registration.
+Then qualify a dormant
 adapter in an owned process: balanced stack, exact return convention, denied
 foreign context, one-use consumption, lifetime/cleanup and reload invalidation.
 Only after those checks should a disposable TF3 run test positive consumption

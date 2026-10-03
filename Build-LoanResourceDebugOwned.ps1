@@ -16,4 +16,12 @@ $command = 'cl.exe /nologo /std:c++17 /W4 /WX /EHsc /O2 /Fo"{0}" /Fe"{1}" "{2}" 
 if ($LASTEXITCODE -ne 0) { throw "Owned loan debugger fixture build failed: $LASTEXITCODE" }
 & $exe
 if ($LASTEXITCODE -ne 0) { throw "Owned loan debugger fixture failed: $LASTEXITCODE" }
+$reader = Join-Path $PSScriptRoot 'native\loan_event_resource_readback_owned.cpp'
+$readerExe = Join-Path $output 'LoanResourceReadbackOwned.exe'
+$readerObject = Join-Path $output 'loan_event_resource_readback_owned.obj'
+$readerCommand = 'cl.exe /nologo /std:c++17 /W4 /WX /EHsc /O2 /Fo"{0}" /Fe"{1}" "{2}" bcrypt.lib psapi.lib' -f $readerObject,$readerExe,$reader
+& cmd.exe /d /s /c ('call "{0}" && {1}' -f $vcvars,$readerCommand)
+if ($LASTEXITCODE -ne 0) { throw "Owned loan reader build failed: $LASTEXITCODE" }
+& $readerExe
+if ($LASTEXITCODE -ne 0) { throw "Owned loan reader failed: $LASTEXITCODE" }
 Write-Host "Built and verified $exe"

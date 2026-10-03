@@ -22,7 +22,7 @@ struct Owned {
     std::array<uint64_t, 32> frame{};
     std::array<unsigned char, 64> resource{};
     std::array<uint64_t, 3> helper{};
-    std::string path = "/game_mechanics/finance/loan.gs.lua";
+    std::string path = "game_mechanics/finance/loan.gs";
     uint64_t raw = 123, wrapper = reinterpret_cast<uint64_t>(&raw), helper_slot = reinterpret_cast<uint64_t>(helper.data());
     CONTEXT context{};
     Owned() {
@@ -33,8 +33,7 @@ struct Owned {
         context.Rbp = reinterpret_cast<uint64_t>(frame.data() + 16);
         context.R13 = reinterpret_cast<uint64_t>(descriptor.data());
         helper[0] = reinterpret_cast<uint64_t>(&raw); helper[2] = 3141;
-        resource[0] = ':'; resource[1] = ':';
-        uint64_t length = 2, capacity = 15;
+        uint64_t length = 0, capacity = 15;
         memcpy(resource.data() + 16, &length, 8); memcpy(resource.data() + 24, &capacity, 8);
         const uint64_t pointer = reinterpret_cast<uint64_t>(path.c_str());
         length = path.size(); capacity = length;
@@ -49,10 +48,21 @@ int main() {
         Owned owned; Snapshot output{};
         Require(Capture(GetCurrentProcess(), owned.context, SafeReadSpan, &output), "valid capture");
         Require(output.entity == 3141 && output.raw_state == reinterpret_cast<uint64_t>(&owned.raw), "frame chain");
-        Require(output.string_bytes[0] == 3 && output.string_bytes[1] == owned.path.size() + 1 &&
+        Require(output.string_bytes[0] == 1 && output.string_bytes[1] == owned.path.size() + 1 &&
             memcmp(output.strings[1].data(), owned.path.c_str(), owned.path.size() + 1) == 0, "string data");
         Require(EmitLoanResource(GetCurrentProcess(), GetCurrentProcessId(), GetCurrentThreadId(), owned.context, 1),
             "native serialized candidate");
+        owned.resource[0] = ':';
+        const uint64_t foreignScopeLength = 1, emptyScopeLength = 0;
+        memcpy(owned.resource.data() + 16, &foreignScopeLength, 8);
+        Require(!EmitLoanResource(GetCurrentProcess(), GetCurrentProcessId(), GetCurrentThreadId(), owned.context, 2),
+            "foreign resource scope is not a Loan candidate");
+        owned.resource[0] = 0;
+        memcpy(owned.resource.data() + 16, &emptyScopeLength, 8);
+        owned.path[0] = '/';
+        Require(!EmitLoanResource(GetCurrentProcess(), GetCurrentProcessId(), GetCurrentThreadId(), owned.context, 3),
+            "path variants are not Loan candidates");
+        owned.path[0] = 'g';
         owned.helper[2] = UINT32_MAX;
         Require(Capture(GetCurrentProcess(), owned.context, SafeReadSpan, &output) && output.entity == -1,
             "sentinel entity retained for observation");
