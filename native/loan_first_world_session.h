@@ -12,7 +12,7 @@ struct Identity {
 };
 
 // Construct both objects for process lifetime; Authority must outlive Session.
-// This Session must be the sole caller of Authority::OpenWorld/Invalidate/Arm
+// This Session must be the sole caller of Authority::OpenWorld/Invalidate/Arm/ArmDue
 // for its Authority instance. Direct external calls break lifecycle admission.
 // Every method takes lifecycle_ before any Authority lock. Never call these
 // methods from VEH, recursively, or while holding an Authority lock. Release
@@ -86,6 +86,16 @@ public:
         if (phase_ != Phase::open || !output) return false;
         *output = world_; return true;
     }
+    // Read-only revalidation of an independently captured invocation witness.
+    // Unlike ObserveLoan, this cannot open, rebind or close a world, and unlike
+    // Consume it never spends authority. It confers no engine lifetime guarantee.
+    bool MatchesObservedWorld(const Identity& observed,
+        const tf3loanresume::World& expected) noexcept {
+        Lock guard(&lifecycle_);
+        return phase_ == Phase::open && Valid(observed) &&
+            observed.thread == GetCurrentThreadId() && Same(identity_, observed) &&
+            Same(world_, expected);
+    }
     // Caller must authenticate the grant before entry. The lifecycle lock
     // rechecks session/world and remains held through Authority::Arm.
     bool Arm(const tf3loanresume::Grant& grant) noexcept {
@@ -105,6 +115,41 @@ public:
             CloseLocked(); return false;
         }
         return authority_.Consume(world_, nonce, digest, observed_owner, observed_loan);
+    }
+    // Dormant servicing seam. Only authenticated native ingress may arm; it
+    // shares this world's lifetime, but never renews initialization permission.
+    bool ArmDue(const tf3loanresume::DueGrant& grant) noexcept {
+        Lock guard(&lifecycle_);
+        return phase_ == Phase::open && Same(grant.world, world_) && authority_.ArmDue(grant);
+    }
+    // Caller must independently qualify the protected-update execution condition
+    // and freshly read all payment facts at the exact native Loan invocation.
+    // Lua arguments, saved tables or boundary snapshots alone do not qualify it.
+    // Locks serialize revocation only; none protect later engine mutation.
+    bool ConsumeDue(const Identity& freshly_observed,
+        const tf3loanresume::DueObservation& payment) noexcept {
+        Lock guard(&lifecycle_);
+        if (phase_ != Phase::open) return false;
+        if (!Valid(freshly_observed) || !Same(identity_, freshly_observed) ||
+            freshly_observed.thread != GetCurrentThreadId()) {
+            CloseLocked(); return false;
+        }
+        return authority_.ConsumeDue(world_, payment);
+    }
+    // Check the spent due observation against the current session identity and
+    // native clock. Mismatch closes the session; Authority permanently revokes
+    // a consumed due grant on world/payment/clock failure. The caller still
+    // needs an independently qualified live invocation before each use.
+    bool CheckConsumedDue(const Identity& freshly_observed,
+        const tf3loanresume::World& expected_world,
+        const tf3loanresume::DueObservation& payment) noexcept {
+        Lock guard(&lifecycle_);
+        if (phase_ != Phase::open) return false;
+        if (!Valid(freshly_observed) || !Same(identity_, freshly_observed) ||
+            freshly_observed.thread != GetCurrentThreadId() || !Same(world_, expected_world)) {
+            CloseLocked(); return false;
+        }
+        return authority_.CheckConsumedDue(world_, payment);
     }
     // Call from join, IPC failure, registration failure, or any inability to
     // prove the callback identity. Invalidation completes before lock release.
