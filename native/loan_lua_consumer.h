@@ -69,6 +69,53 @@ template<class Binding> int Consumer(lua_State* state) {
     // Lua's C dispatcher reserves at least 20 slots; this pushes exactly one.
     api.pushboolean(state, accepted ? 1 : 0); return 1;
 }
+// The existing three-argument initialization Claim and an optional read-only
+// post-Claim probe share one protected Lua call. Binding supplies only the
+// already-qualified native Claim/Probe and nonallocating stack value copies.
+// A probe error cannot change a Claim result already detached in Context.
+template<class Binding> struct ProtectedClaimProbe {
+    struct Context {
+        tf3loanresume::Nonce nonce{};
+        tf3loanresume::Digest digest{};
+        bool consumed = false;
+    };
+    static bool& Active() noexcept {
+        static thread_local bool active = false;
+        return active;
+    }
+    static int Thunk(lua_State* state) {
+        const auto& api = Binding::Functions();
+        if (api.gettop(state) != 4 || api.type(state, 4) != 2) return 0;
+        auto* context = static_cast<Context*>(Binding::ToContext(state, 4));
+        if (!context || Active() || !Binding::Ready(state)) return 0;
+        api.settop(state, 3);
+        Active() = true;
+        context->consumed = Binding::Claim(state, context->nonce, context->digest);
+        if (context->consumed && api.gettop(state) == 3)
+            Binding::Probe(state, context->nonce, context->digest);
+        return 0;
+    }
+    static bool Run(lua_State* state, const tf3loanresume::Nonce& nonce,
+        const tf3loanresume::Digest& digest) {
+        const auto& api = Binding::Functions();
+        if (!state || Active() || api.gettop(state) != 3 ||
+            api.type(state, 1) != 4 || api.type(state, 2) != 4 ||
+            api.type(state, 3) != 7 || !api.checkstack(state, 6)) return false;
+        const int top = api.gettop(state);
+        Context context{nonce, digest};
+        // These fixed pushes follow the stack reserve and precede Claim. The
+        // zero-upvalue C function and copied values do not allocate.
+        api.pushcclosure(state, &Thunk, 0);
+        Binding::PushValue(state, 1);
+        Binding::PushValue(state, 2);
+        Binding::PushValue(state, 3);
+        Binding::PushContext(state, &context);
+        api.pcallk(state, 4, 0, 0, 0, nullptr);
+        Active() = false;
+        api.settop(state, top);
+        return context.consumed;
+    }
+};
 template<class Binding, CFunction ConsumerFunction = &Consumer<Binding>> int RegistrationThunk(lua_State* state) {
     const auto& api = Binding::Functions();
     api.pushcclosure(state, ConsumerFunction, 0);

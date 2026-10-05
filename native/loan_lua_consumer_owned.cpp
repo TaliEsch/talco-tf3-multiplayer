@@ -94,6 +94,75 @@ struct Binding {
         return !native_disabled && !foreign_context && authority.Consume(grant.world, nonce, digest, grant.owner, grant.loan);
     }
 };
+unsigned protected_claims = 0, protected_probes = 0;
+bool protected_ready = true, protected_accept = false, protected_published = false;
+bool protected_reentry_denied = false;
+int protected_probe_mode = 0; // 1: Lua error; 2: nested attempt.
+struct ProtectedBinding {
+    static const tf3loanlua::Api& Functions() { return Binding::Functions(); }
+    static bool Ready(lua_State*) noexcept { return protected_ready; }
+    static void* ToContext(lua_State* state, int index) noexcept {
+        return lua_touserdata(state, index);
+    }
+    static void PushValue(lua_State* state, int index) { lua_pushvalue(state, index); }
+    static void PushContext(lua_State* state, void* context) {
+        lua_pushlightuserdata(state, context);
+    }
+    static bool Claim(lua_State* state, const tf3loanresume::Nonce&,
+        const tf3loanresume::Digest&) noexcept {
+        ++protected_claims;
+        return protected_ready && lua_gettop(state) == 3 &&
+            lua_type(state, 3) == LUA_TUSERDATA && protected_accept;
+    }
+    static void Probe(lua_State* state, const tf3loanresume::Nonce& nonce,
+        const tf3loanresume::Digest& digest) {
+        ++protected_probes;
+        if (protected_probe_mode == 1) luaL_error(state, "synthetic post-claim probe failure");
+        if (protected_probe_mode == 2) {
+            protected_reentry_denied = !tf3loanlua::ProtectedClaimProbe<ProtectedBinding>::Run(
+                state, nonce, digest) && protected_claims == 1;
+        }
+        protected_published = true;
+    }
+};
+void ProtectedClaimProbeChecks(lua_State* state) {
+    const int saved = lua_gettop(state);
+    lua_settop(state, 0);
+    lua_pushliteral(state, "nonce");
+    lua_pushliteral(state, "digest");
+    auto* receiver = lua_newuserdata(state, 16);
+    tf3loanresume::Nonce nonce{}; tf3loanresume::Digest digest{};
+    nonce[0] = 9; digest[0] = 7;
+    auto reset = [&]() {
+        protected_claims = protected_probes = 0;
+        protected_ready = true; protected_accept = false;
+        protected_published = protected_reentry_denied = false;
+        protected_probe_mode = 0;
+    };
+    auto preserved = [&]() {
+        return lua_gettop(state) == 3 && lua_type(state, 1) == LUA_TSTRING &&
+            lua_type(state, 2) == LUA_TSTRING && lua_touserdata(state, 3) == receiver &&
+            !tf3loanlua::ProtectedClaimProbe<ProtectedBinding>::Active();
+    };
+    reset(); protected_accept = true; protected_probe_mode = 1;
+    Require(tf3loanlua::ProtectedClaimProbe<ProtectedBinding>::Run(state, nonce, digest) &&
+        protected_claims == 1 && protected_probes == 1 && !protected_published && preserved(),
+        "post-Claim Lua error preserves spent truth and caller stack without publication");
+    reset();
+    Require(!tf3loanlua::ProtectedClaimProbe<ProtectedBinding>::Run(state, nonce, digest) &&
+        protected_claims == 1 && protected_probes == 0 && preserved(),
+        "denied Claim never reaches post-Claim probe");
+    reset(); protected_ready = false;
+    Require(!tf3loanlua::ProtectedClaimProbe<ProtectedBinding>::Run(state, nonce, digest) &&
+        protected_claims == 0 && protected_probes == 0 && preserved(),
+        "pre-Claim readiness rejection consumes nothing");
+    reset(); protected_accept = true; protected_probe_mode = 2;
+    Require(tf3loanlua::ProtectedClaimProbe<ProtectedBinding>::Run(state, nonce, digest) &&
+        protected_reentry_denied && protected_claims == 1 && protected_probes == 1 &&
+        protected_published && preserved(),
+        "nested protected Claim denied without replacing outer consumed truth");
+    lua_settop(state, saved);
+}
 std::string Hex(const unsigned char* value, std::size_t count) {
     const char* alphabet = "0123456789abcdef"; std::string result;
     for (std::size_t i = 0; i < count; ++i) {
@@ -147,6 +216,7 @@ int main(int argc, char**) {
 #endif
         state = lua_newstate(Allocator, nullptr);
         Require(state != nullptr, "owned C++ Lua state");
+        ProtectedClaimProbeChecks(state);
         fprintf(stderr, "owned_stage=register\n");
         lua_pushinteger(state, 42); const auto base = lua_gettop(state);
         tf3loanlua::RegistrationReport registration_report{};
