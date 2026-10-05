@@ -37,6 +37,7 @@ int CheckType(lua_State* s, int i) { return lua_type(s, i); }
 std::size_t RawLen(lua_State* s, int i) { return lua_rawlen(s, i); }
 void* ToUserdata(lua_State* s, int i) { return lua_touserdata(s, i); }
 int GetTop(lua_State* s) { return lua_gettop(s); }
+const void* ToPointer(lua_State* s, int i) { return lua_topointer(s, i); }
 int CheckStack(lua_State* s, int n) { return lua_checkstack(s, n); }
 void SetTop(lua_State* s, int i) { lua_settop(s, i); }
 void PushClosure(lua_State* s, tf3loanstate::CFunction f, int n) { lua_pushcclosure(s, f, n); }
@@ -188,6 +189,23 @@ int main() {
     try {
         lua_State* s = luaL_newstate(); Require(s != nullptr, "Lua state created");
         Reset(s); Install(s); Success(s);
+        const void* indexFunction = reinterpret_cast<const void*>(&HostileIndex);
+        lua_pushcfunction(s, HostileIndex);
+        int indexTop = lua_gettop(s);
+        Require(Readback::NativeIndexMatches(s, indexTop, indexFunction, ToPointer), "exact light C index accepted without invocation");
+        Require(lua_gettop(s) == indexTop && indexCalls == 0, "index inspection is stack-neutral and read-only");
+        Require(!Readback::NativeIndexMatches(s, indexTop, reinterpret_cast<const void*>(&Getter), ToPointer), "wrong light C index rejected");
+        lua_pushboolean(s, 1); lua_pushcclosure(s, HostileIndex, 1);
+        indexTop = lua_gettop(s);
+        Require(!Readback::NativeIndexMatches(s, indexTop, lua_topointer(s, indexTop), ToPointer), "captured C index rejected");
+        Require(lua_gettop(s) == indexTop && indexCalls == 0, "captured index rejection restores stack");
+        Require(luaL_loadstring(s, "return nil") == 0, "owned Lua function compiled");
+        Require(!Readback::NativeIndexMatches(s, lua_gettop(s), indexFunction, ToPointer), "Lua index rejected");
+        lua_newtable(s);
+        Require(!Readback::NativeIndexMatches(s, lua_gettop(s), lua_topointer(s, -1), ToPointer), "table index rejected");
+        lua_pushnil(s);
+        Require(!Readback::NativeIndexMatches(s, lua_gettop(s), indexFunction, ToPointer), "absent index rejected");
+        Reset(s);
 
         Reset(s); Install(s, false, true); Reject(s, "missing class registry entry rejected");
         Reset(s); registryMode = 2; Install(s); Reject(s, "wrong class registry entry rejected");

@@ -39,6 +39,18 @@ template<class Binding> struct ProtectedReadback {
         Observation observed{};
         bool complete = false;
     };
+    // Exact-build class lookup uses a light C function, not a heap closure.
+    // Qualified topointer returns its native address; never invoke __index.
+    static bool NativeIndexMatches(lua_State* state, int index, const void* expected,
+        const void* (*topointer)(lua_State*, int)) {
+        const auto& api = Binding::Functions();
+        const int top = api.gettop(state);
+        bool valid = expected && topointer && api.receiver.type(state, index) == 6 &&
+            topointer(state, index) == expected;
+        if (valid) valid = api.getupvalue(state, index, 1) == nullptr;
+        api.settop(state, top);
+        return valid && api.gettop(state) == top;
+    }
     static bool GetterMatches(lua_State* state, int index) {
         const auto& api = Binding::Functions();
         const int top = api.gettop(state);
