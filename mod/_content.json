@@ -16,6 +16,7 @@
     "tf3mp_line_create_order_wire.lua",
     "tf3mp_line_remove_order.lua",
     "tf3mp_load_probe.script.lua",
+    "tf3mp_ordinary_loan_native_consumer.lua",
     "tf3mp_native_controls.res.lua",
     "tf3mp_native_controls.script.tl",
     "tf3mp_proposal_facts.lua",

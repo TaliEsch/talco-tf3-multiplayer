@@ -26,11 +26,15 @@ struct Api {
     void (*pushboolean)(lua_State*, int);
     void (*settop)(lua_State*, int);
     void (*pushcclosure)(lua_State*, CFunction, int);
-    void (*setglobal)(lua_State*, const char*);
+    void (*rawgeti)(lua_State*, int, int);
+    const char* (*pushlstring)(lua_State*, const char*, std::size_t);
+    void (*rawget)(lua_State*, int);
+    int (*rawequal)(lua_State*, int, int);
     int (*pcallk)(lua_State*, int, int, int, int, CFunction);
     bool Complete() const noexcept {
         return gettop && checkstack && type && tolstring && pushboolean && settop &&
-            pushcclosure && setglobal && pcallk;
+            pushcclosure && rawgeti &&
+            pushlstring && rawget && rawequal && pcallk;
     }
 };
 template<std::size_t N> bool Decode(const char* source, std::size_t length,
@@ -69,6 +73,78 @@ template<class Binding> int Consumer(lua_State* state) {
     // Lua's C dispatcher reserves at least 20 slots; this pushes exactly one.
     api.pushboolean(state, accepted ? 1 : 0); return 1;
 }
+// Inert diagnostic purpose: exact userdata argument reaches the independent
+// observer, but no observer result can become permission or resume fallback.
+template<class Binding> int DueDiagnosticConsumer(lua_State* state) {
+    const auto& api = Binding::Functions();
+    if (api.gettop(state) == 3 && api.type(state, 1) == 4 &&
+        api.type(state, 2) == 4 && api.type(state, 3) == 7) {
+        std::size_t nonce_length = 0, digest_length = 0;
+        const auto* nonce_text = api.tolstring(state, 1, &nonce_length);
+        const auto* digest_text = api.tolstring(state, 2, &digest_length);
+        tf3loanresume::Nonce nonce{}; tf3loanresume::Digest digest{};
+        static_assert(noexcept(Binding::ObserveDue(state, nonce, digest)));
+        if (Decode(nonce_text, nonce_length, &nonce) && Decode(digest_text, digest_length, &digest))
+            Binding::ObserveDue(state, nonce, digest);
+    }
+    api.pushboolean(state, 0); return 1;
+}
+// Preserve the installed reader/loader and optional adapter upvalues while moving a three-argument
+// callback beneath a protected Lua boundary. The zero-upvalue outer thunk needs
+// no allocated closure; allocation of the inner closure happens
+// inside pcall. Three-root callers reserve seven slots BEFORE opening any native latch and
+// retire their owned latch after Run, including a protected allocation error.
+template<class Binding, CFunction Callback, int Roots = 2, bool ForwardResult = false> struct ProtectedRootedCallback {
+    static_assert(Roots == 2 || Roots == 3);
+    static_assert(!ForwardResult || Roots == 3);
+    static int Thunk(lua_State* state) {
+        const auto& api = Binding::Functions();
+        if (api.gettop(state) != 3 + Roots || api.type(state, 4) != 6 || api.type(state, 5) != 6 ||
+            (Roots == 3 && api.type(state, 6) != 5))
+            { api.pushboolean(state, 0); return 1; }
+        Binding::PushValue(state, 4);
+        Binding::PushValue(state, 5);
+        if constexpr (Roots == 3) Binding::PushValue(state, 6);
+        api.pushcclosure(state, Callback, Roots);
+        for (int i = 1; i <= 3; ++i) Binding::PushValue(state, i);
+        // Errors belong to the outer pcall, which also covers closure creation.
+        // Diagnostic callers report only protected completion. The due path
+        // may carry its native callback's actual boolean result; successful
+        // pcall, nil or Lua truthiness cannot substitute for that result.
+        // Lua's MULTRET (-1) preserves the result count for exact-shape
+        // validation instead of silently discarding an unexpected extra result.
+        const int status = api.pcallk(state, 3, ForwardResult ? -1 : 0, 0, 0, nullptr);
+        bool accepted = status == 0;
+        if constexpr (ForwardResult) {
+            accepted = accepted && api.gettop(state) == 4 + Roots && api.type(state, -1) == 1;
+            if (accepted) {
+                api.pushboolean(state, 1);
+                accepted = api.rawequal(state, -1, -2) != 0;
+            }
+            api.settop(state, 3 + Roots);
+        }
+        api.pushboolean(state, accepted ? 1 : 0);
+        return 1;
+    }
+    static bool Run(lua_State* state) {
+        const auto& api = Binding::Functions();
+        const int top = api.gettop(state);
+        if (top != 3) return false;
+        api.pushcclosure(state, &Thunk, 0);
+        for (int i = 1; i <= 3; ++i) Binding::PushValue(state, i);
+        Binding::PushValue(state, -1001001);
+        Binding::PushValue(state, -1001002);
+        if constexpr (Roots == 3) Binding::PushValue(state, -1001003);
+        const int status = api.pcallk(state, 3 + Roots, 1, 0, 0, nullptr);
+        bool okay = false;
+        if (status == 0 && api.type(state, -1) == 1) {
+            api.pushboolean(state, 1);
+            okay = api.rawequal(state, -1, -2) != 0;
+        }
+        api.settop(state, top);
+        return okay;
+    }
+};
 // The existing three-argument initialization Claim and an optional read-only
 // post-Claim probe share one protected Lua call. Binding supplies only the
 // already-qualified native Claim/Probe and nonallocating stack value copies.
@@ -116,19 +192,47 @@ template<class Binding> struct ProtectedClaimProbe {
         return context.consumed;
     }
 };
-template<class Binding, CFunction ConsumerFunction = &Consumer<Binding>> int RegistrationThunk(lua_State* state) {
+template<class Binding, CFunction ConsumerFunction = &Consumer<Binding>, bool Due = false>
+int RegistrationThunk(lua_State* state) {
     const auto& api = Binding::Functions();
+    constexpr int kShapeError = 2; // Lua 5.2 LUA_ERRRUN.
+    auto finish = [&](int status) {
+        // Lua 5.2 status codes are single digits. This allocation is itself
+        // protected by the outer pcall, including an out-of-memory failure.
+        const char result = static_cast<char>('0' + status);
+        api.pushlstring(state, &result, 1);
+        return 1;
+    };
+    constexpr char module[] = "tf3mp_status_1::/tf3mp_ordinary_loan_native_consumer.lua";
+    api.rawgeti(state, -1001000, 2); // Lua 5.2 registry globals table.
+    if (api.type(state, -1) != 5) return finish(kShapeError);
+    api.pushlstring(state, "ug_require", sizeof("ug_require") - 1);
+    api.rawget(state, -2); // Ignore globals __index and __newindex policies.
+    if (api.type(state, -1) != 6) return finish(kShapeError);
+    api.pushlstring(state, module, sizeof(module) - 1);
+    const int require_status = api.pcallk(state, 1, 1, 0, 0, nullptr);
+    if (require_status != 0) return finish(require_status);
+    if (api.type(state, -1) != 5) return finish(kShapeError);
+    if constexpr (Due) api.pushlstring(state, "installDue", sizeof("installDue") - 1);
+    else api.pushlstring(state, "install", sizeof("install") - 1);
+    api.rawget(state, -2); // A malformed module cannot invoke __index.
+    if (api.type(state, -1) != 6) return finish(kShapeError);
     api.pushcclosure(state, ConsumerFunction, 0);
-    api.setglobal(state, "tf3mpConsumeOrdinaryLoanResume");
-    return 0;
+    const int install_status = api.pcallk(state, 1, 1, 0, 0, nullptr);
+    if (install_status != 0) return finish(install_status);
+    api.pushboolean(state, 1);
+    if (api.type(state, -2) != 1 || !api.rawequal(state, -2, -1))
+        return finish(kShapeError);
+    return finish(0);
 }
-// Allocating setglobal runs under Lua's protected call. No noexcept/SEH wrapper
+// All registry/module reads, require and installer calls run under Lua's
+// protected call. No noexcept/SEH wrapper
 // or catch-all may suppress its C++ error unwinding. The caller/bridge must have
 // normal unwind metadata and run on the owning Lua thread outside VEH.
-// Failure can leave an earlier global closure installed: the integration must
+// Failure can leave an earlier module closure installed: the integration must
 // independently disable native Claim/arming and halt, not infer revocation from
 // Register(false). Code remains pinned while any Lua closure may retain it.
-template<class Binding, CFunction ConsumerFunction = &Consumer<Binding>> bool Register(lua_State* state,
+template<class Binding, CFunction ConsumerFunction = &Consumer<Binding>, bool Due = false> bool Register(lua_State* state,
     RegistrationReport* report = nullptr) {
     auto stage = [&](RegistrationStage value) noexcept { if (report) report->stage = value; };
     const auto& api = Binding::Functions();
@@ -139,15 +243,28 @@ template<class Binding, CFunction ConsumerFunction = &Consumer<Binding>> bool Re
     if (report) report->saved_top = saved_top;
     if (saved_top < 0) { stage(RegistrationStage::invalid_top); return false; }
     stage(RegistrationStage::checkstack);
-    if (!api.checkstack(state, 4)) { stage(RegistrationStage::checkstack_failed); return false; }
+    if (!api.checkstack(state, 8)) { stage(RegistrationStage::checkstack_failed); return false; }
     stage(RegistrationStage::push_closure);
-    api.pushcclosure(state, &RegistrationThunk<Binding, ConsumerFunction>, 0);
+    api.pushcclosure(state, &RegistrationThunk<Binding, ConsumerFunction, Due>, 0);
     stage(RegistrationStage::protected_call);
-    const int status = api.pcallk(state, 0, 0, 0, 0, nullptr);
+    const int outer_status = api.pcallk(state, 0, 1, 0, 0, nullptr);
+    int status = outer_status;
+    if (!outer_status) {
+        std::size_t length = 0;
+        const char* result = api.type(state, -1) == 4 ? api.tolstring(state, -1, &length) : nullptr;
+        status = result && length == 1 && result[0] >= '0' && result[0] <= '9'
+            ? result[0] - '0' : 2;
+    }
     if (report) report->lua_status = status;
     stage(RegistrationStage::restore_stack);
     api.settop(state, saved_top);
     stage(status == 0 ? RegistrationStage::success : RegistrationStage::protected_error);
     return status == 0;
+}
+// The callback is explicit: no default initialization consumer can be installed
+// in the due slot accidentally. Failures require independent native revocation.
+template<class Binding, CFunction ConsumerFunction> bool RegisterDue(lua_State* state,
+    RegistrationReport* report = nullptr) {
+    return Register<Binding, ConsumerFunction, true>(state, report);
 }
 }
