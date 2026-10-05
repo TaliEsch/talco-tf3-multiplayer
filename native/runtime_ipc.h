@@ -7,7 +7,10 @@
 
 constexpr std::uint32_t TF3_RUNTIME_IPC_MAGIC = 0x54463349u; // "IF3T"
 constexpr std::uint16_t TF3_RUNTIME_IPC_VERSION = 1;
-constexpr std::uint32_t TF3_RUNTIME_IPC_MAX_PAYLOAD = 4096;
+// A composed ping includes boundary, vehicle, cancellation and Loan-world
+// evidence. Its bounded worst-case representation exceeds 4 KiB; preserve all
+// fields and match the client cap instead of dropping safety observations.
+constexpr std::uint32_t TF3_RUNTIME_IPC_MAX_PAYLOAD = 8192;
 // A qualified in-process gate must not remain attached indefinitely when its
 // authenticated controller stops servicing it.  This exceeds the current
 // coordinator heartbeat period while still bounding a hung local helper.

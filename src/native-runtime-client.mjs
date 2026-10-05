@@ -2,7 +2,8 @@ import {EventEmitter} from 'node:events';
 import {randomBytes} from 'node:crypto';
 import net from 'node:net';
 
-const MAGIC=0x54463349, VERSION=1, HEADER=36, MAX=4096;
+// Match TF3_RUNTIME_IPC_MAX_PAYLOAD: composed diagnostic pings exceed 4 KiB.
+const MAGIC=0x54463349, VERSION=1, HEADER=36, MAX=8192;
 const TYPES=Object.freeze({hello:1,helloAck:2,control:3,receipt:4,event:5,error:6});
 // Capability strings are a compatibility contract, not an assertion that this
 // build implements them.  Host/Join must require each one immediately before
