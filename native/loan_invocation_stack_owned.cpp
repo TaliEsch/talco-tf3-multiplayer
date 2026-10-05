@@ -33,6 +33,101 @@ bool ReadOwned(std::uint64_t address, void* output, std::size_t bytes) noexcept 
     return ReadProcessMemory(GetCurrentProcess(), reinterpret_cast<const void*>(address), output, bytes, &copied) &&
         copied == bytes;
 }
+unsigned selected_reads = 0, selected_fail_at = 0, selected_change_at = 0;
+std::uint64_t selected_change_value = 0;
+bool ReadSelected(std::uint64_t address, void* output, std::size_t bytes) noexcept {
+    ++selected_reads;
+    if (selected_reads == selected_fail_at) return false;
+    if (!ReadOwned(address, output, bytes)) return false;
+    if (selected_reads == selected_change_at) {
+        if (bytes > sizeof selected_change_value) return false;
+        std::memcpy(output, &selected_change_value, bytes);
+    }
+    return true;
+}
+void CheckSelectedState() {
+    // Owned storage exercises the decoder, not a real engine lifetime/lock.
+    std::array<unsigned char, 0x200> game{};
+    std::array<unsigned char, 0xb0> manager{};
+    std::array<std::array<unsigned char, 0x20>, 2> states{};
+    std::array<std::uint64_t, 2> engines{};
+    const auto manager_pointer = reinterpret_cast<std::uint64_t>(manager.data());
+    const auto state0 = reinterpret_cast<std::uint64_t>(states[0].data());
+    const auto state1 = reinterpret_cast<std::uint64_t>(states[1].data());
+    const auto engine0 = reinterpret_cast<std::uint64_t>(&engines[0]);
+    const auto engine1 = reinterpret_cast<std::uint64_t>(&engines[1]);
+    const DWORD thread = GetCurrentThreadId();
+    std::memcpy(game.data() + 0x1f0, &manager_pointer, sizeof manager_pointer);
+    std::memcpy(manager.data() + 0xa8, &thread, sizeof thread);
+    std::memcpy(manager.data() + 0x78, &state0, sizeof state0);
+    std::memcpy(manager.data() + 0x80, &state1, sizeof state1);
+    std::memcpy(states[0].data() + 0x18, &engine0, sizeof engine0);
+    std::memcpy(states[1].data() + 0x18, &engine1, sizeof engine1);
+    const tf3loansimulation::Snapshot witness{
+        reinterpret_cast<std::uint64_t>(game.data()), manager_pointer, thread};
+    auto run = [&](const tf3loansimulation::Snapshot& observed, std::uint64_t engine,
+                   bool expected, const char* label) {
+        selected_reads = 0;
+        tf3loansimulation::SelectedState result{-77, 0xabcdef, 0x123456};
+        Require(tf3loansimulation::CaptureSelectedState(observed, engine, ReadSelected, &result) == expected,
+            label);
+        Require(expected ? result.engine == engine && result.state == (result.index == 0 ? state0 : state1)
+            : result.index == -77 && result.state == 0xabcdef && result.engine == 0x123456,
+            "selected state publishes only complete evidence");
+        ++cases;
+    };
+    run(witness, engine0, true, "selected slot zero");
+    Require(selected_reads == 10, "selected chain is fully bracketed"); ++cases;
+    std::int32_t index = 1;
+    std::memcpy(manager.data() + 0x98, &index, sizeof index);
+    run(witness, engine1, true, "selected slot one");
+    run(witness, engine0, false, "wrong selected engine denied");
+    for (const std::int32_t invalid : {-1, 2, 0x7fffffff}) {
+        std::memcpy(manager.data() + 0x98, &invalid, sizeof invalid);
+        run(witness, engine0, false, "out of range signed index denied");
+        Require(selected_reads == 3, "invalid index never addresses a state slot"); ++cases;
+    }
+    index = 0;
+    std::memcpy(manager.data() + 0x98, &index, sizeof index);
+    for (unsigned failure = 1; failure <= 10; ++failure) {
+        selected_fail_at = failure;
+        run(witness, engine0, false, "each selected-chain read failure denied");
+    }
+    selected_fail_at = 0;
+    // Initial chain: manager/thread/index/state/engine; reverse reread follows.
+    const std::array<std::uint64_t, 5> changes{
+        engine1, state1, 1, static_cast<std::uint64_t>(thread ^ 0x40000000), manager_pointer + 8};
+    for (unsigned i = 0; i < changes.size(); ++i) {
+        selected_change_at = 6 + i; selected_change_value = changes[i];
+        run(witness, engine0, false, "changed engine/state/index/thread/manager denied");
+    }
+    selected_change_at = 0;
+    auto foreign = witness;
+    foreign.thread_id ^= 0x40000000;
+    run(foreign, engine0, false, "foreign witness owner denied");
+    foreign = witness; foreign.thread_id = 0;
+    run(foreign, engine0, false, "missing witness owner denied");
+    foreign = witness; foreign.manager += 8;
+    run(foreign, engine0, false, "wrong witnessed manager denied");
+    foreign = witness; foreign.game = 0x7fffffffffffULL;
+    run(foreign, engine0, false, "game field overflow denied");
+    foreign = witness; foreign.manager = 0x7fffffffffffULL;
+    run(foreign, engine0, false, "manager field overflow denied");
+    run(witness, 0, false, "missing Loan engine denied");
+    for (const std::uint64_t invalid : {0ULL, 0x7fffffffffffULL, 1ULL}) {
+        std::memcpy(manager.data() + 0x78, &invalid, sizeof invalid);
+        run(witness, engine0, false, "null overflowing or unreadable state denied");
+    }
+    std::memcpy(manager.data() + 0x78, &state0, sizeof state0);
+    const std::uint64_t missing_engine = 0;
+    std::memcpy(states[0].data() + 0x18, &missing_engine, sizeof missing_engine);
+    run(witness, engine0, false, "null selected Engine denied");
+    std::memcpy(states[0].data() + 0x18, &engine0, sizeof engine0);
+    tf3loansimulation::SelectedState result{};
+    Require(!tf3loansimulation::CaptureSelectedState(witness, engine0, nullptr, &result) &&
+        !tf3loansimulation::CaptureSelectedState(witness, engine0, ReadSelected, nullptr),
+        "missing selected reader/output denied"); ++cases;
+}
 __declspec(noinline) void CaptureNested() {
     CONTEXT output{};
     const auto result = tf3loaninvocation::CaptureCurrent(site, &output);
@@ -92,6 +187,7 @@ extern "C" __declspec(noinline) void LoanOwnedMissingMetadataCallback() {
 int main(int argc, char**) {
     if (argc != 1) return 2;
     try {
+        CheckSelectedState();
         DWORD64 image = 0;
         const auto* function = RtlLookupFunctionEntry(reinterpret_cast<DWORD64>(&LoanOwnedInvocationReturn), &image, nullptr);
         Require(function && image, "owned unwind entry");

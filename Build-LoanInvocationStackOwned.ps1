@@ -1,11 +1,13 @@
 [CmdletBinding()]
-param()
+param([string] $OutputDirectory = '')
 $ErrorActionPreference = 'Stop'
 $locator = 'C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe'
 $installation = & $locator -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
 if ([string]::IsNullOrWhiteSpace($installation)) { throw 'MSVC x64 tools missing.' }
 $vcvars = Join-Path $installation 'VC\Auxiliary\Build\vcvars64.bat'
-$output = Join-Path $PSScriptRoot 'dist\loan-invocation-stack-owned'
+$output = if ($OutputDirectory) { [IO.Path]::GetFullPath($OutputDirectory) } else {
+    Join-Path $PSScriptRoot 'dist\loan-invocation-stack-owned'
+}
 New-Item -ItemType Directory -Force -Path $output | Out-Null
 $asmSource = Join-Path $PSScriptRoot 'native\loan_invocation_stack_owned.asm'
 $asmObject = Join-Path $output 'loan_invocation_stack_owned_asm.obj'
