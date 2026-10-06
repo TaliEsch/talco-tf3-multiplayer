@@ -58,6 +58,8 @@ Historical entries are not current claims.
   approval. This does not extend authority to unrelated files, applications or
   remote devices. Use live tests promptly when engine behavior is the unresolved
   question; use focused offline checks for logic that does not need the game.
+- For sandboxed Steam, every launch requires the arrow beside Connect → This
+  Device → Play; otherwise Steam attempts Remote Play.
 - Before a TF3 run, define the question and required evidence briefly. Batch
   compatible checks and reuse a healthy session when it preserves isolation;
   use fresh processes, epochs or disposable saves when the test requires them.
