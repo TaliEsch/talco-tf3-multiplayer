@@ -10,6 +10,22 @@ struct Snapshot {
     std::uint64_t game = 0, manager = 0;
     DWORD thread_id = 0;
 };
+enum class CaptureFailure : DWORD {
+    none = 0, arguments = 1, invocation = 2, manager_field = 3,
+    manager_read = 4, thread_field = 5, thread_read = 6, thread_owner = 7,
+    manager_reread = 8, manager_changed = 9, thread_reread = 10, thread_changed = 11
+};
+// Detached diagnostics only. A failed capture never publishes a Snapshot.
+// Facts are copied only after their existing read succeeds; unavailable facts
+// remain zero. No report address can be used as a retained lifetime witness.
+struct CaptureReport {
+    CaptureFailure failure = CaptureFailure::none;
+    bool invocation_checked = false;
+    tf3loaninvocation::Result invocation_result = tf3loaninvocation::Result::invalid_site;
+    tf3loaninvocation::WalkReport walk{};
+    std::uint64_t game = 0, manager = 0, manager_after = 0;
+    DWORD thread_id = 0, thread_after = 0;
+};
 inline bool Field(std::uint64_t base, std::uint64_t offset,
     std::size_t bytes, std::uint64_t* address) noexcept {
     constexpr std::uint64_t limit = 0x00007fffffffffffULL;
@@ -21,24 +37,42 @@ inline bool Field(std::uint64_t base, std::uint64_t offset,
 // The reader must reject unreadable, uncommitted and guard pages without
 // dereferencing them. It must not call Lua or retain addresses after return.
 // A readable pointer alone cannot establish engine object lifetime.
-inline bool CaptureCurrent(const tf3loaninvocation::Site& site, ReadSpan read, Snapshot* output) noexcept {
-    if (!read || !output) return false;
+inline bool CaptureCurrent(const tf3loaninvocation::Site& site, ReadSpan read, Snapshot* output,
+    CaptureReport* report = nullptr) noexcept {
+    if (report) *report = {};
+    const auto reject = [&](CaptureFailure failure) noexcept {
+        if (report) report->failure = failure;
+        return false;
+    };
+    if (!read || !output) return reject(CaptureFailure::arguments);
     CONTEXT context{};
-    if (tf3loaninvocation::CaptureCurrent(site, &context) !=
-        tf3loaninvocation::Result::found) return false;
+    const auto invocation = tf3loaninvocation::CaptureCurrent(
+        site, &context, 64, report ? &report->walk : nullptr);
+    if (report) {
+        report->invocation_checked = true;
+        report->invocation_result = invocation;
+    }
+    if (invocation != tf3loaninvocation::Result::found) return reject(CaptureFailure::invocation);
+    if (report) report->game = context.R13;
     std::uint64_t manager_field = 0, manager = 0, thread_field = 0;
-    if (!Field(context.R13, 0x1f0, sizeof manager, &manager_field) ||
-        !read(manager_field, &manager, sizeof manager) ||
-        !Field(manager, 0xa8, sizeof(DWORD), &thread_field)) return false;
+    if (!Field(context.R13, 0x1f0, sizeof manager, &manager_field))
+        return reject(CaptureFailure::manager_field);
+    if (!read(manager_field, &manager, sizeof manager)) return reject(CaptureFailure::manager_read);
+    if (report) report->manager = manager;
+    if (!Field(manager, 0xa8, sizeof(DWORD), &thread_field)) return reject(CaptureFailure::thread_field);
     DWORD thread_id = 0;
-    if (!read(thread_field, &thread_id, sizeof thread_id) ||
-        !thread_id || thread_id != GetCurrentThreadId()) return false;
+    if (!read(thread_field, &thread_id, sizeof thread_id)) return reject(CaptureFailure::thread_read);
+    if (report) report->thread_id = thread_id;
+    if (!thread_id || thread_id != GetCurrentThreadId()) return reject(CaptureFailure::thread_owner);
     std::uint64_t fresh_manager = 0;
     DWORD fresh_thread = 0;
-    const bool valid = read(manager_field, &fresh_manager, sizeof fresh_manager) &&
-        fresh_manager == manager && read(thread_field, &fresh_thread, sizeof fresh_thread) &&
-        fresh_thread == thread_id;
-    if (!valid) return false;
+    if (!read(manager_field, &fresh_manager, sizeof fresh_manager))
+        return reject(CaptureFailure::manager_reread);
+    if (report) report->manager_after = fresh_manager;
+    if (fresh_manager != manager) return reject(CaptureFailure::manager_changed);
+    if (!read(thread_field, &fresh_thread, sizeof fresh_thread)) return reject(CaptureFailure::thread_reread);
+    if (report) report->thread_after = fresh_thread;
+    if (fresh_thread != thread_id) return reject(CaptureFailure::thread_changed);
     *output = {context.R13, manager, thread_id};
     return true;
 }

@@ -18,6 +18,7 @@ bool missing_metadata_case = false;
 bool simulation_case = false;
 bool simulation_expected = true;
 std::uint64_t simulation_game = 0;
+tf3loansimulation::CaptureFailure simulation_failure = tf3loansimulation::CaptureFailure::none;
 bool deny_simulation_read = false;
 unsigned nesting = 0;
 void Require(bool value, const char* label) { if (!value) throw std::runtime_error(label); }
@@ -44,6 +45,97 @@ bool ReadSelected(std::uint64_t address, void* output, std::size_t bytes) noexce
         std::memcpy(output, &selected_change_value, bytes);
     }
     return true;
+}
+unsigned simulation_reads = 0, simulation_fail_at = 0, simulation_change_at = 0;
+std::uint64_t simulation_change_value = 0;
+bool ReadSimulation(std::uint64_t address, void* output, std::size_t bytes) noexcept {
+    ++simulation_reads;
+    if (simulation_reads == simulation_fail_at) return false;
+    if (!ReadOwned(address, output, bytes)) return false;
+    if (simulation_reads == simulation_change_at) {
+        if (bytes > sizeof simulation_change_value) return false;
+        std::memcpy(output, &simulation_change_value, bytes);
+    }
+    return true;
+}
+bool Unchanged(const tf3loansimulation::Snapshot& snapshot) {
+    return snapshot.game == 0xabcdef && snapshot.manager == 0x123456 && snapshot.thread_id == 123;
+}
+void CheckSimulationReport() {
+    using Failure = tf3loansimulation::CaptureFailure;
+    using Result = tf3loaninvocation::Result;
+    tf3loansimulation::Snapshot snapshot{0xabcdef, 0x123456, 123};
+    tf3loansimulation::CaptureReport report{};
+    report.game = report.manager = report.manager_after = 1;
+    report.thread_id = report.thread_after = 1;
+    Require(tf3loansimulation::CaptureCurrent(site, ReadOwned, &snapshot, &report) == simulation_expected &&
+        report.failure == simulation_failure && report.invocation_checked &&
+        report.invocation_result == Result::found && report.game == simulation_game,
+        "simulation report identifies qualified frame and precise decoder outcome"); ++cases;
+    Require(simulation_expected ? report.manager == snapshot.manager && report.manager_after == snapshot.manager &&
+        report.thread_id == snapshot.thread_id && report.thread_after == snapshot.thread_id :
+        Unchanged(snapshot) && report.manager_after == 0 && report.thread_after == 0,
+        "simulation report preserves rejected output and resets unavailable facts"); ++cases;
+    if (simulation_failure == Failure::thread_owner) {
+        Require(report.manager != 0 && report.thread_id != GetCurrentThreadId(),
+            "thread ownership report retains observed rejected owner"); ++cases;
+    }
+    if (simulation_failure == Failure::thread_field) {
+        Require(report.manager == 0 && report.thread_id == 0,
+            "null manager report never reads thread"); ++cases;
+    }
+    if (simulation_expected) {
+        const auto manager = snapshot.manager;
+        const Failure failures[] = {Failure::manager_read, Failure::thread_read,
+            Failure::manager_reread, Failure::thread_reread};
+        for (unsigned i = 1; i <= 4; ++i) {
+            simulation_reads = 0; simulation_fail_at = i;
+            snapshot = {0xabcdef, 0x123456, 123};
+            Require(!tf3loansimulation::CaptureCurrent(site, ReadSimulation, &snapshot, &report) &&
+                report.failure == failures[i - 1] && report.invocation_checked &&
+                report.invocation_result == Result::found && simulation_reads == i && Unchanged(snapshot),
+                "each simulation read failure is precise and stops without publishing"); ++cases;
+            Require(report.manager == (i > 1 ? manager : 0) &&
+                report.thread_id == (i > 2 ? GetCurrentThreadId() : 0) &&
+                report.manager_after == (i > 3 ? manager : 0) && report.thread_after == 0,
+                "failed-read report contains only successfully observed facts"); ++cases;
+        }
+        simulation_fail_at = 0;
+        for (unsigned i = 3; i <= 4; ++i) {
+            simulation_reads = 0; simulation_change_at = i;
+            simulation_change_value = i == 3 ? manager + 8 : GetCurrentThreadId() ^ 0x40000000;
+            snapshot = {0xabcdef, 0x123456, 123};
+            Require(!tf3loansimulation::CaptureCurrent(site, ReadSimulation, &snapshot, &report) &&
+                report.failure == (i == 3 ? Failure::manager_changed : Failure::thread_changed) &&
+                report.invocation_result == Result::found && simulation_reads == i && Unchanged(snapshot),
+                "changed simulation reread denied with precise report"); ++cases;
+            Require(report.manager == manager && report.thread_id == GetCurrentThreadId() &&
+                (i == 3 ? report.manager_after == simulation_change_value && report.thread_after == 0 :
+                    report.manager_after == manager && report.thread_after == simulation_change_value),
+                "changed reread report retains both observed values"); ++cases;
+        }
+        simulation_change_at = 0;
+        simulation_reads = 0;
+        Require(tf3loansimulation::CaptureCurrent(site, ReadSimulation, &snapshot, &report) &&
+            report.failure == Failure::none && simulation_reads == 4,
+            "successful reported capture retains four-read budget"); ++cases;
+        const auto wrong = tf3loaninvocation::Site{site.image_base, site.begin_rva, site.end_rva, site.return_rva + 1};
+        snapshot = {0xabcdef, 0x123456, 123};
+        simulation_reads = 0;
+        Require(!tf3loansimulation::CaptureCurrent(wrong, ReadSimulation, &snapshot, &report) &&
+            report.failure == Failure::invocation && report.invocation_checked &&
+            report.invocation_result == Result::wrong_return && simulation_reads == 0 &&
+            report.game == 0 && report.manager == 0 && Unchanged(snapshot),
+            "wrong-return report performs no object read or snapshot publication"); ++cases;
+    }
+    snapshot = {0xabcdef, 0x123456, 123};
+    Require(!tf3loansimulation::CaptureCurrent(site, nullptr, &snapshot, &report) &&
+        report.failure == Failure::arguments && !report.invocation_checked &&
+        report.invocation_result == Result::invalid_site && report.game == 0 && Unchanged(snapshot),
+        "missing reader report cannot imply frame capture"); ++cases;
+    Require(!tf3loansimulation::CaptureCurrent(site, ReadOwned, nullptr, &report) &&
+        report.failure == Failure::arguments && !report.invocation_checked,
+        "missing output report cannot imply frame capture"); ++cases;
 }
 void CheckSelectedState() {
     // Owned storage exercises the decoder, not a real engine lifetime/lock.
@@ -130,21 +222,35 @@ void CheckSelectedState() {
 }
 __declspec(noinline) void CaptureNested() {
     CONTEXT output{};
-    const auto result = tf3loaninvocation::CaptureCurrent(site, &output);
+    tf3loaninvocation::WalkReport walk{};
+    const auto result = tf3loaninvocation::CaptureCurrent(site, &output, 64, &walk);
     Require(result == tf3loaninvocation::Result::found, "recover current invocation");
+    Require(walk.frames_examined > 0 && walk.frames_examined <= 64 && walk.has_function &&
+        walk.rip == output.Rip && walk.image_base == site.image_base &&
+        walk.begin_rva == site.begin_rva && walk.end_rva == site.end_rva,
+        "selected frame report identifies exact qualified metadata"); ++cases;
     Require(output.R13 == expected_descriptor && output.Rbp >= 0x80 &&
         *reinterpret_cast<const std::uint64_t*>(output.Rbp - 0x80) == expected_wrapper,
         "recover native descriptor and wrapper"); ++cases;
     CONTEXT unchanged{}; unchanged.R13 = 0xabcdef;
     const auto wrong = tf3loaninvocation::Site{site.image_base, site.begin_rva, site.end_rva, site.return_rva + 1};
-    Require(tf3loaninvocation::CaptureCurrent(wrong, &unchanged) == tf3loaninvocation::Result::wrong_return &&
+    Require(tf3loaninvocation::CaptureCurrent(wrong, &unchanged, 64, &walk) == tf3loaninvocation::Result::wrong_return &&
         unchanged.R13 == 0xabcdef, "nearest wrong return publishes nothing"); ++cases;
-    Require(tf3loaninvocation::CaptureCurrent(site, &unchanged, 1) == tf3loaninvocation::Result::depth_limit &&
+    Require(walk.frames_examined > 0 && walk.frames_examined <= 64 && walk.has_function &&
+        walk.rip == site.image_base + site.return_rva && walk.image_base == site.image_base &&
+        walk.begin_rva == site.begin_rva && walk.end_rva == site.end_rva,
+        "wrong-return report retains actual nearest return and metadata"); ++cases;
+    Require(tf3loaninvocation::CaptureCurrent(site, &unchanged, 1, &walk) == tf3loaninvocation::Result::depth_limit &&
         unchanged.R13 == 0xabcdef, "bounded search publishes nothing"); ++cases;
+    Require(walk.frames_examined == 1 && walk.rip != 0 && walk.has_function && walk.image_base != 0 &&
+        walk.begin_rva < walk.end_rva && walk.rip >= walk.image_base + walk.begin_rva &&
+        walk.rip < walk.image_base + walk.end_rva,
+        "depth-limit report identifies last budgeted frame"); ++cases;
 }
 }
 extern "C" __declspec(noinline) void LoanOwnedCallback() {
     if (simulation_case) {
+        CheckSimulationReport();
         Require(tf3loansimulation::MatchesCurrent(site, ReadOwned) == simulation_expected,
             "owned simulation identity result"); ++cases;
         tf3loansimulation::Snapshot snapshot{};
@@ -180,9 +286,21 @@ extern "C" __declspec(noinline) void LoanOwnedCallback() {
 }
 extern "C" __declspec(noinline) void LoanOwnedMissingMetadataCallback() {
     CONTEXT output{}; output.R13 = 0xabcdef;
-    Require(tf3loaninvocation::CaptureCurrent(site, &output) ==
+    tf3loaninvocation::WalkReport walk{99, 1, 2, 3, 4, true};
+    Require(tf3loaninvocation::CaptureCurrent(site, &output, 64, &walk) ==
         tf3loaninvocation::Result::missing_metadata && output.R13 == 0xabcdef,
         "unregistered frame cannot expose older invocation"); ++cases;
+    Require(walk.frames_examined > 0 && walk.frames_examined <= 64 && walk.rip != 0 &&
+        !walk.has_function && walk.image_base == 0 && walk.begin_rva == 0 && walk.end_rva == 0,
+        "missing-metadata report clears metadata from earlier frames"); ++cases;
+    tf3loansimulation::Snapshot snapshot{0xabcdef, 0x123456, 123};
+    tf3loansimulation::CaptureReport report{};
+    simulation_reads = 0;
+    Require(!tf3loansimulation::CaptureCurrent(site, ReadSimulation, &snapshot, &report) &&
+        report.failure == tf3loansimulation::CaptureFailure::invocation && report.invocation_checked &&
+        report.invocation_result == tf3loaninvocation::Result::missing_metadata &&
+        simulation_reads == 0 && report.game == 0 && Unchanged(snapshot),
+        "missing-metadata report performs no object read or snapshot publication"); ++cases;
 }
 int main(int argc, char**) {
     if (argc != 1) return 2;
@@ -215,6 +333,7 @@ int main(int argc, char**) {
         simulation_game = reinterpret_cast<std::uint64_t>(game.data());
         LoanOwnedInvocation(reinterpret_cast<std::uint64_t>(game.data()), expected_wrapper);
         simulation_expected = false;
+        simulation_failure = tf3loansimulation::CaptureFailure::thread_owner;
         thread_id = 0;
         std::memcpy(manager.data() + 0xa8, &thread_id, sizeof thread_id);
         LoanOwnedInvocation(reinterpret_cast<std::uint64_t>(game.data()), expected_wrapper);
@@ -222,9 +341,25 @@ int main(int argc, char**) {
         std::memcpy(manager.data() + 0xa8, &thread_id, sizeof thread_id);
         LoanOwnedInvocation(reinterpret_cast<std::uint64_t>(game.data()), expected_wrapper);
         std::memset(game.data() + 0x1f0, 0, sizeof manager_pointer);
+        simulation_failure = tf3loansimulation::CaptureFailure::thread_field;
         LoanOwnedInvocation(reinterpret_cast<std::uint64_t>(game.data()), expected_wrapper);
+        simulation_failure = tf3loansimulation::CaptureFailure::manager_field;
+        simulation_game = 0;
+        LoanOwnedInvocation(0, expected_wrapper);
         simulation_case = false;
         Require(!tf3loansimulation::MatchesCurrent(site, ReadOwned), "simulation witness absent after return"); ++cases;
+        tf3loansimulation::Snapshot missing_snapshot{0xabcdef, 0x123456, 123};
+        tf3loansimulation::CaptureReport missing_report{};
+        Require(!tf3loansimulation::CaptureCurrent(site, ReadOwned, &missing_snapshot, &missing_report) &&
+            missing_report.failure == tf3loansimulation::CaptureFailure::invocation &&
+            missing_report.invocation_checked && missing_report.invocation_result == tf3loaninvocation::Result::missing &&
+            missing_report.game == 0 && Unchanged(missing_snapshot),
+            "returned simulation frame reports missing without publishing"); ++cases;
+        Require(!tf3loansimulation::CaptureCurrent({}, ReadOwned, &missing_snapshot, &missing_report) &&
+            missing_report.failure == tf3loansimulation::CaptureFailure::invocation &&
+            missing_report.invocation_checked && missing_report.invocation_result == tf3loaninvocation::Result::invalid_site &&
+            missing_report.game == 0 && Unchanged(missing_snapshot),
+            "invalid simulation site reports invocation rejection without publishing"); ++cases;
         std::uint64_t field = 0;
         Require(!tf3loansimulation::Field(0, 0x1f0, 8, &field) &&
             !tf3loansimulation::Field(0x7fffffffffffULL, 0x1f0, 8, &field) &&
@@ -233,8 +368,15 @@ int main(int argc, char**) {
         CONTEXT output{}; output.R13 = 0xabcdef;
         Require(tf3loaninvocation::CaptureCurrent(site, &output) == tf3loaninvocation::Result::missing &&
             output.R13 == 0xabcdef, "returned callback is absent"); ++cases;
-        Require(tf3loaninvocation::CaptureCurrent({}, &output) == tf3loaninvocation::Result::invalid_site &&
+        tf3loaninvocation::WalkReport walk{99, 1, 2, 3, 4, true};
+        Require(tf3loaninvocation::CaptureCurrent({}, &output, 64, &walk) == tf3loaninvocation::Result::invalid_site &&
             output.R13 == 0xabcdef, "invalid adapter publishes nothing"); ++cases;
+        Require(walk.frames_examined == 0 && walk.rip == 0 && walk.image_base == 0 &&
+            walk.begin_rva == 0 && walk.end_rva == 0 && !walk.has_function,
+            "invalid-site report contains no examined frame"); ++cases;
+        Require(tf3loaninvocation::CaptureCurrent(site, &output, 65, &walk) ==
+            tf3loaninvocation::Result::invalid_site && output.R13 == 0xabcdef && walk.frames_examined == 0,
+            "diagnostic report does not widen maximum frame budget"); ++cases;
         printf("{\"scope\":\"loan-invocation-stack-owned\",\"cases\":%u,\"passed\":true,\"activationPermitted\":false,\"tf3Qualified\":false}\n", cases);
         return 0;
     } catch (const std::exception& e) { fprintf(stderr,"loan_invocation_stack_owned_failed: %s\n",e.what());return 1; }
