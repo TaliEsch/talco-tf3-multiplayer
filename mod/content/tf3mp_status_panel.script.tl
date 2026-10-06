@@ -2512,23 +2512,17 @@ local Tf3MpStatusPanel = react.RegisterPluginRecipe(game_bar_widgets.GameBarInfo
   return builtin.BoxLayout {
     orientation = builtin.type.Orientation.Horizontal,
     children = {
-      builtin.Component {
+      builtin.TextView {
         meta = {
-          tooltip = _("Gameplay is not synchronized. Diagnostics are active by default. Launcher Debug can enable an experimental LOCAL vehicle stop/start test. File access failures disable the bridge until the UI is reopened."),
+          class = "font-scale-headline",
         },
-        layout = builtin.BoxLayout {
-          orientation = builtin.type.Orientation.Horizontal,
-          children = {
-            builtin.TextView {
-              meta = { class = "font-scale-headline" },
-              text = _("TF3MP"),
-            },
-            builtin.TextView {
-              meta = { class = "font-scale-headline" },
-              text = "update " .. tostring(current.updateCount) .. " / " .. bridgeStatus:old(),
-            },
-          },
+        text = "TF3MP",
+      },
+      builtin.TextView {
+        meta = {
+          class = "font-scale-headline",
         },
+        text = "update " .. tostring(current.updateCount) .. " / " .. bridgeStatus:old(),
       },
     },
   }
