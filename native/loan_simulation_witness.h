@@ -47,7 +47,7 @@ inline bool CaptureCurrent(const tf3loaninvocation::Site& site, ReadSpan read, S
     if (!read || !output) return reject(CaptureFailure::arguments);
     CONTEXT context{};
     const auto invocation = tf3loaninvocation::CaptureCurrent(
-        site, &context, 64, report ? &report->walk : nullptr);
+        site, &context, tf3loaninvocation::kMaxWalkFrames, report ? &report->walk : nullptr);
     if (report) {
         report->invocation_checked = true;
         report->invocation_result = invocation;

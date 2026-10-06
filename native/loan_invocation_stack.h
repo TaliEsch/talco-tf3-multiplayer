@@ -3,6 +3,7 @@
 #include <cstdint>
 
 namespace tf3loaninvocation {
+inline constexpr unsigned kMaxWalkFrames = 128;
 // Supplied only by an independently qualified image adapter, never by Lua.
 struct Site { std::uint64_t image_base; std::uint32_t begin_rva, end_rva, return_rva; };
 enum class Result { found, invalid_site, missing, wrong_return, invalid_stack, depth_limit, unwind_fault, missing_metadata };

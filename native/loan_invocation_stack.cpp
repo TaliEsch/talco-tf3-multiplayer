@@ -57,7 +57,7 @@ Result CaptureCurrent(const Site& site, CONTEXT* output, unsigned max_frames, Wa
     if (!output || !site.image_base || site.begin_rva >= site.end_rva ||
         site.return_rva < site.begin_rva || site.return_rva >= site.end_rva ||
         site.image_base > (std::numeric_limits<std::uint64_t>::max)() - site.end_rva ||
-        !max_frames || max_frames > 64) return Result::invalid_site;
+        !max_frames || max_frames > kMaxWalkFrames) return Result::invalid_site;
     // No destructors or Lua longjmp across this scope. Faults publish no frame.
     __try { return Walk(site, output, max_frames, report); }
     __except ((GetExceptionCode() == EXCEPTION_ACCESS_VIOLATION ||
