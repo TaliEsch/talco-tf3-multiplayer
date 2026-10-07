@@ -1,5 +1,6 @@
 import { createAsyncEngineMailbox } from './async-engine-mailbox.mjs';
 import { AsyncSessionParticipant } from './async-session-participant.mjs';
+import {canonicalJson} from './canonical.mjs';
 
 // Local composition only. Caller owns authenticated transport and must establish
 // common save/build identity and actual control coverage before remote admission.
@@ -31,6 +32,8 @@ export async function createEngineSessionAdapter({directory,bridge,playerId,comp
     },onExecutionEvidence:evidence=>{executionEvidence=evidence;}});
   let participant,lease,closed=false,lastCounter=-1,polling=null,closing=null,nativeHaltPromise=null,orderlyStop=null;
   let nativeHaltState='not_requested',nativeConnectionLost=false;
+  let parkedObservation=null,parkedCounter=-1,parkedFreshAt=0,parkedDeadline=0,parkedSentAt=-Infinity;
+  let parkedTick=-1,parkedPayload=null;
   // This adapter has not issued a native hold, so the only legal fail-stop
   // coordinate for a freshly bound production gate is generation zero.  A
   // failed terminal request is never retried at another coordinate.
@@ -124,6 +127,41 @@ export async function createEngineSessionAdapter({directory,bridge,playerId,comp
     if(s.counter>lastCounter){lastCounter=s.counter;participant.observe({updateCount:s.updateCount,held:s.speedup===0});}
     return participant.phase!=='halted';
   }
+  function pollParked() {
+    if(closed||nativeHaltState!=='confirmed'||participant.fault!==null)return false;
+    const s=bridge.engineObservation?.sample;
+    const fail=code=>{nativeHaltState='unknown';participant.halt(code);return false;};
+    if(!healthy()||bridge.engineObservation?.available!==true||!s
+      ||s.nonce!==bridge.nonce||s.companyEntity!==companies.get(playerId)
+      ||!Number.isSafeInteger(s.counter)||s.counter<parkedCounter
+      ||!Number.isSafeInteger(s.tickCount)||s.tickCount<parkedTick
+      ||!Number.isSafeInteger(s.updateCount)||s.updateCount<0)
+      return fail('TERMINAL_OBSERVATION_INVALID');
+    const payload=canonicalJson(s);
+    if(s.counter===parkedCounter&&parkedPayload!==null&&payload!==parkedPayload)
+      return fail('TERMINAL_OBSERVATION_CONFLICT');
+    if(parkedObservation===null){
+      if(s.counter<=parkedCounter){
+        return now()<parkedDeadline?true:fail('TERMINAL_PAUSED_OBSERVATION_UNKNOWN');
+      }
+      // Native parking freezes the simulation thread without changing GAME_SPEED.
+      // Its correlated receipt and fresh, fixed clocks are the terminal witness.
+      parkedObservation={updateCount:s.updateCount,tickCount:s.tickCount,roundId:checkpointEvidence?.receipt?.roundId};
+      if(typeof parkedObservation.roundId!=='string')return fail('TERMINAL_ROUND_UNKNOWN');
+    }
+    if(s.updateCount!==parkedObservation.updateCount||s.tickCount!==parkedObservation.tickCount)
+      return fail('TERMINAL_WORLD_ADVANCED');
+    if(s.counter>parkedCounter){
+      parkedCounter=s.counter;parkedTick=s.tickCount;parkedPayload=payload;parkedFreshAt=now();
+    }
+    if(now()-parkedFreshAt>=3000)return fail('TERMINAL_OBSERVATION_STALE');
+    if(now()-parkedSentAt>=1000){
+      try{send('participant_heartbeat',{roundId:parkedObservation.roundId,updateCount:s.updateCount});}
+      catch{return fail('TERMINAL_HEARTBEAT_DELIVERY_UNKNOWN');}
+      parkedSentAt=now();
+    }
+    return true;
+  }
   function check() {
     if(closed)return false;
     // Stopped sessions still need fresh observations to retain/revoke halt proof.
@@ -146,6 +184,15 @@ export async function createEngineSessionAdapter({directory,bridge,playerId,comp
     get checkpointEvidence(){return checkpointEvidence===null?null:structuredClone(checkpointEvidence);},
     get acceptedExecutionState(){return acceptedExecutionState===null?null:structuredClone(acceptedExecutionState);},
     receive(kind,payload){
+      if(orderlyStop){
+        if(kind!=='coordination_heartbeat'||!payload||Array.isArray(payload)
+          ||Object.keys(payload).join(',')!=='roundId'
+          ||payload.roundId!==checkpointEvidence?.receipt?.roundId){
+          nativeHaltState='unknown';
+          participant.halt('TERMINAL_UNEXPECTED_FRAME');return false;
+        }
+        return nativeHaltState==='pending'||pollParked();
+      }
       if(!check())return false;
       if(!lease.active){participant.halt('ENGINE_LEASE_NOT_ACTIVE');return false;}
       const accepted=participant.receive(kind,payload);
@@ -155,7 +202,7 @@ export async function createEngineSessionAdapter({directory,bridge,playerId,comp
       if(closed)return Promise.resolve(false);
       // The completed local run parks the engine itself. No mailbox operation
       // can complete afterward, and a stopped lease is expected here.
-      if(orderlyStop)return Promise.resolve(nativeHaltState==='confirmed');
+      if(orderlyStop)return Promise.resolve(nativeHaltState==='pending'||pollParked());
       if(polling)return polling;
       polling=(async()=>{
         check();participant.poll();
@@ -228,6 +275,10 @@ export async function createEngineSessionAdapter({directory,bridge,playerId,comp
       // still issue the game-side halt immediately through participant.halt().
       if(code==='LOCAL_RUN_COMPLETE'&&nativeRuntime){
         if(!orderlyStop)orderlyStop=nativeHalt(code).then(state=>{
+          parkedCounter=bridge.engineObservation?.sample?.counter??-1;
+          parkedTick=bridge.engineObservation?.sample?.tickCount??-1;
+          parkedPayload=bridge.engineObservation?.sample?canonicalJson(bridge.engineObservation.sample):null;
+          parkedDeadline=now()+3000;
           stopRenewal();
           if(state!=='confirmed')participant.halt('NATIVE_HALT_UNKNOWN');
         });
