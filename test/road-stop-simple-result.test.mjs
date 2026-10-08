@@ -68,6 +68,23 @@ test('accepts TF3 native debit into debt only when the exact target balance chan
 test('accepts the completed proposal exact stop ID when the callback omits that object',()=>{
   assert.deepEqual(run('entities={{25,1}}'),{before:'observed',after:'verified',stop:81,cost:67500,calls:0});
 });
+test('accepts declared entity and Revision pairs after copying their entity IDs',()=>{
+  assert.deepEqual(run('entities={{25,{num={1,2,3}}},{81,{num={0,0,1}}}}'),
+    {before:'observed',after:'verified',stop:81,cost:67500,calls:0});
+});
+test('rejects an additional changed edge object in declared Revision pairs',()=>{
+  assert.equal(run('entities={{25,{num={1,2,3}}},{81,{num={0,0,1}}},{82,{num={0,0,1}}}};components.EDGE_OBJECT[82]={param=.5}').after,'unknown');
+});
+test('malformed nonempty callback vectors cannot become empty affected lists',()=>{
+  for(const entities of [
+    '{{25,{num={1,2}}}}',
+    '{{25,{num={1,2,3.5}}}}',
+    '{{25,{num={1,2,3,4}}}}',
+    '{{25,{num={1,2,3}}},extra=true}',
+    '{{25,false}}',
+    '{25,false}',
+  ]) assert.equal(run(`entities=${entities}`).after,'unknown',entities);
+});
 test('locates the unique TF3 stop after an empty or scalar callback vector',()=>{
   for(const entities of ['{}','{25,81}','{{25,-1}}']){
     assert.deepEqual(run(`entities=${entities}`),{before:'observed',after:'verified',stop:81,cost:67500,calls:0});
@@ -117,8 +134,8 @@ test('world debit and unique owned Stop qualify incomplete optional callback fie
     'data.resultProposalData.costs=0',
     'data.resultProposalData=nil',
     'data.proposal.streetProposal.edgeObjectsToAdd={}',
-    'entities=nil',
   ]) assert.equal(run(change).after,'verified',change);
+  assert.equal(run('entities=nil').after,'unknown');
 });
 test('changing the bound road or company between snapshots leaves the outcome unknown',()=>{
   for(const change of ['input.companyEntity=11','input.edgeEntity=25',

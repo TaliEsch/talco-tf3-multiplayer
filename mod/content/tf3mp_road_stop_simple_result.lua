@@ -15,6 +15,15 @@ local function dense(v, limit)
   end
   return count == #v
 end
+local function revision(v)
+  -- Older callbacks exposed an integer; the public TF3 API declares Revision.num.
+  if integer(v) then return math.abs(v) <= 2147483647 end
+  if not native(v) or not dense(v.num, 3) or #v.num ~= 3 then return false end
+  for _, number in ipairs(v.num) do
+    if not integer(number) or number < 0 or number > 2147483647 then return false end
+  end
+  return true
+end
 local function component(api, id, name)
   local kind = api.type.ComponentType[name]
   if kind == nil then fail() end
@@ -153,17 +162,16 @@ function M.capture(data, success, resultEntities)
     return native(proposal) and proposal.costs
   end)
   local callbackCost = costOk and integer(cost) and cost ~= 0 and math.abs(cost) or nil
+  if not dense(resultEntities, 64) then return nil end
   local affected = {}
-  if dense(resultEntities, 64) then
-    for _, item in ipairs(resultEntities) do
-      if type(item) == "table" then
-        if not dense(item, 2) or #item ~= 2 or not entity(item[1])
-          or not integer(item[2]) then affected = {}; break end
-        affected[#affected+1] = {item[1], item[2]}
-      else
-        if not entity(item) then affected = {}; break end
-        affected[#affected+1] = item
-      end
+  for _, item in ipairs(resultEntities) do
+    if type(item) == "table" then
+      if not dense(item, 2) or #item ~= 2 or not entity(item[1])
+        or not revision(item[2]) then return nil end
+      affected[#affected+1] = item[1]
+    else
+      if not entity(item) then return nil end
+      affected[#affected+1] = item
     end
   end
   local resultOk, resultId = pcall(function()
@@ -239,12 +247,7 @@ local function verify(api, before, input, data, success, resultEntities, progres
   end
   progress.stage = "result_entities"
   local affected = {}
-  for _, item in ipairs(resultEntities) do
-    local id = item
-    if type(item) == "table" then
-      if not dense(item, 2) or #item ~= 2 or not integer(item[2]) then fail() end
-      id = item[1]
-    end
+  for _, id in ipairs(resultEntities) do
     if not entity(id) or affected[id] then fail() end
     affected[id] = true
   end

@@ -146,7 +146,7 @@ export async function validateReviewPackage(root) {
     ['tf3mp_depot_build_order_readback.lua', 'ee8fafa52736e95d639cebf657aecc11454ca179c710a88b55e3d73068904a9f'],
     ['tf3mp_road_stop_simple_prepare.lua', 'b9de96bbb92f212b3d8cc83d97564f2b7a814cfd6aa65ac4116ad9208add382c'],
     ['tf3mp_road_stop_simple_dispatch.lua', 'c3b689756b181097b62ecc2b0477d490075a9e4e1d477be7ddb587f1632d5a6b'],
-    ['tf3mp_road_stop_simple_result.lua', '4983caba98be57ad1cc69d9dfe919ceb75f52a454f9d6d8099b892dd61c9cdac'],
+    ['tf3mp_road_stop_simple_result.lua', '536ca7ea1ab8ec8a2dbf33e27ac7fec67c3bddd457191e55522899a733b6c076'],
   ]) {
     const source = await readFile(path.join(absoluteRoot, 'content', file), 'utf8');
     if (createHash('sha256').update(source.replace(/\r\n/g, '\n')).digest('hex') !== digest)
