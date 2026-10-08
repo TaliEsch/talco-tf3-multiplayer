@@ -21,6 +21,20 @@ test("sale receipt balances may be signed while entity and credit fields stay no
   assert.throws(() => parseFlatDataFile(source.replace('referenceCompanyEntity=7', 'referenceCompanyEntity=-7')));
 });
 
+test("road preview accepts only the opted-in temporary edge sentinel", () => {
+  const source = `function data() return {schemaVersion=1,kind="road_stop_preaction_probe",nonce="${NONCE}",observationId=1,companyEntity=28619,edgeEntity=24416,updateCount=775,code="shape",commandCode="prepared",commandStage="none",added=1,removed=1,temporaryEdgeEntity=-1,firstAddedObjectCount=0,nodeConfigsAddCount=2,nodeConfigsAddShape="dense",nodeConfigsRemoveCount=2,nodeConfigsRemoveShape="dense",} end`;
+  assert.throws(() => parseFlatDataFile(source), /invalid scalar for temporaryEdgeEntity/);
+  const value = parseFlatDataFile(source, { allowTemporaryEdgeEntitySentinel: true });
+  assert.equal(value.temporaryEdgeEntity, -1);
+  assert.throws(() => parseFlatDataFile(source.replace("temporaryEdgeEntity=-1", "temporaryEdgeEntity=-2"),
+    { allowTemporaryEdgeEntitySentinel: true }), /invalid userdata IPC/);
+  assert.throws(() => parseFlatDataFile(source.replace("edgeEntity=24416", "edgeEntity=-1"),
+    { allowTemporaryEdgeEntitySentinel: true }), /invalid userdata IPC/);
+  assert.throws(() => parseFlatDataFile(source.replace("temporaryEdgeEntity=-1,", "temporaryEdgeEntity=-1,temporaryEdgeEntity=-1,"),
+    { allowTemporaryEdgeEntitySentinel: true }), /duplicate field temporaryEdgeEntity/);
+  assert.throws(() => parseFlatDataFile(source, { allowTemporaryEdgeEntitySentinel: "yes" }), /sentinel option must be boolean/);
+});
+
 test("probe parser rejects code, nesting, duplicates, unknown fields and oversize input", () => {
   const validFields = `schemaVersion=1,nonce="${NONCE}",counter=0,kind="probe",`;
   for (const source of [

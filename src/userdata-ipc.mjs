@@ -11,7 +11,8 @@ function fail(message) {
   throw new TypeError(`invalid userdata IPC: ${message}`);
 }
 
-export function parseFlatDataFile(source) {
+export function parseFlatDataFile(source, { allowTemporaryEdgeEntitySentinel = false } = {}) {
+  if (typeof allowTemporaryEdgeEntitySentinel !== "boolean") fail("sentinel option must be boolean");
   if (typeof source !== "string") fail("source must be text");
   if (Buffer.byteLength(source, "utf8") > MAX_USERDATA_IPC_BYTES) fail("file exceeds 4096 bytes");
   const wrapper = source.match(/^\s*function\s+data\s*\(\s*\)\s*return\s*\{([\s\S]*?)\}\s*end\s*$/);
@@ -43,12 +44,16 @@ export function parseFlatDataFile(source) {
     } else {
       const signedBalance = ['originalBefore','originalAfter','referenceBefore',
         'referenceAfter','targetBefore','targetAfter'].includes(key);
-      const valueMatch = body.slice(offset).match(signedBalance
+      const signedTemporaryEdge = allowTemporaryEdgeEntitySentinel && key === "temporaryEdgeEntity";
+      const valueMatch = body.slice(offset).match(signedBalance || signedTemporaryEdge
         ? /^(true|false|0|-?[1-9][0-9]*)/
         : /^(true|false|0|[1-9][0-9]*)/);
       if (!valueMatch) fail(`invalid scalar for ${key}`);
       value = valueMatch[1] === "true" ? true : valueMatch[1] === "false" ? false : Number(valueMatch[1]);
       if (typeof value === "number" && !Number.isSafeInteger(value)) fail(`${key} is not a safe integer`);
+      if (typeof value === "number" && value < 0 && !(signedBalance || (signedTemporaryEdge && value === -1))) {
+        fail(`${key} is negative outside its allowlist`);
+      }
       offset += valueMatch[1].length;
     }
     skipWhitespace();
