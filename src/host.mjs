@@ -161,6 +161,10 @@ export function startHost({ secret, sessionId = randomUUID(), bind = DEFAULT_BIN
             send(socket, "test_echo", { value: body.payload.value }, peer.player.playerId);
           }
           else if (body.kind === "action_request" || body.kind === "speed_request") {
+            if(body.kind==='speed_request'&&body.payload?.commandType!=='simulation.speed'){
+              send(socket,'command_rejected',{requestMessageId:body.messageId,code:'BAD_COMMAND_ENVELOPE'},peer.player.playerId);
+              continue;
+            }
             // Legacy relay has no engine-held construction boundary. The
             // production coordinator requires every participant to prepare,
             // execute and report the road postcondition before release.
