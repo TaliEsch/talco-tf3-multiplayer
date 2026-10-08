@@ -106,6 +106,45 @@ export async function requirePlainDirectory(directory) {
   return resolved;
 }
 
+const LUA_BASENAME = /^[A-Za-z][A-Za-z0-9_]{0,127}\.lua$/;
+const TEMP_BASENAME = /^\.[A-Za-z][A-Za-z0-9_-]{0,127}\.tmp$/;
+const OBSERVATION_MODE = "steam25754343-observation";
+
+// The default preserves the original private-directory layout. The current
+// build's allowlisted userdata location is selected only by an explicit mode.
+export async function createUserdataStorageContext(directory, { mode = "legacy" } = {}) {
+  if (mode !== "legacy" && mode !== OBSERVATION_MODE) fail("unknown userdata storage mode");
+  const canonicalDirectory = await requirePlainDirectory(directory);
+  let engineDirectory = canonicalDirectory;
+  if (mode === OBSERVATION_MODE) {
+    const candidate = path.join(path.dirname(canonicalDirectory), "mod_presets");
+    const info = await lstat(candidate);
+    if (!info.isDirectory() || info.isSymbolicLink()) fail("mod_presets must be a real directory");
+    engineDirectory = await realpath(candidate);
+    if (path.resolve(candidate).toLowerCase() !== path.resolve(engineDirectory).toLowerCase()
+      || path.dirname(engineDirectory).toLowerCase() !== path.dirname(canonicalDirectory).toLowerCase()
+      || path.basename(engineDirectory).toLowerCase() !== "mod_presets") {
+      fail("mod_presets must be a plain sibling of the bridge directory");
+    }
+  }
+  const checkedLua = name => {
+    if (typeof name !== "string" || !LUA_BASENAME.test(name)) fail("invalid flat Lua basename");
+    return name;
+  };
+  const filePath = name => path.join(engineDirectory,
+    mode === OBSERVATION_MODE ? `.tf3mp_status_1__${checkedLua(name)}` : checkedLua(name));
+  const legacyFilePath = name => path.join(canonicalDirectory, checkedLua(name));
+  const temporaryPath = name => {
+    if (typeof name !== "string" || !TEMP_BASENAME.test(name)) fail("invalid flat temporary basename");
+    return path.join(engineDirectory, name);
+  };
+  const conflictPaths = name => mode === OBSERVATION_MODE
+    ? Object.freeze([legacyFilePath(name), filePath(name)])
+    : Object.freeze([filePath(name)]);
+  return Object.freeze({ mode, canonicalDirectory, engineDirectory,
+    filePath, legacyFilePath, temporaryPath, conflictPaths });
+}
+
 export async function processProbeOnce(directory) {
   const resolvedDirectory = await requirePlainDirectory(directory);
   const outboxPath = path.join(resolvedDirectory, "outbox.lua");
