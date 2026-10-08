@@ -63,3 +63,24 @@ after a second hardware trap has already queued during drain. They do exercise
 the same pending-event retry classifier with two consecutive read failures at
 the active hit. The queued-drain failure path remains an unverified edge and
 must not be treated as a live safety qualification.
+
+## Current build: read-only load qualification (8 October 2026)
+
+Steam build 25754343, executable SHA-256
+`74861ac43b041aebc5179154345b3cf1ec83154c8e6cc58e0d9e02ff5fa602e4`,
+uses load-return RVA `0x32de68`; the previous `0x32de88` site is incompatible.
+Independent static review traced the saved player field at `R14+0x20c`, the
+load callback and initial snapshot propagation before UI initialization.
+
+Build the existing diagnostic with
+`Build-ExternalHardwareLoadProbe.ps1 -Steam25754343LoadObservation`.
+The distinct profile observes only; it rejects loan-resource mode and cannot
+be compiled into the company-assignment program. The default old-build profile
+is retained.
+
+One disposable TF3 run observed the expected saved company at this site,
+completed normal world loading with unchanged paused state and visible balance,
+and verified debug-register restoration, event draining, detach and target
+survival. The source save hash was unchanged; installed files were restored.
+This qualifies read-only observation, not company assignment, current UI cache
+propagation after assignment, vehicle cancellation or paired gameplay.

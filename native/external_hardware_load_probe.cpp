@@ -17,11 +17,18 @@
 #pragma comment(lib, "psapi.lib")
 
 namespace {
+#ifdef TF3_STEAM25754343_LOAD_OBSERVATION
+// Hash-pinned GameState::Load return, before R14 is cleared. Read-only
+// qualification only: this profile must never enable company assignment.
+constexpr DWORD kRva = 0x32de68;
+constexpr char kHash[] = "74861ac43b041aebc5179154345b3cf1ec83154c8e6cc58e0d9e02ff5fa602e4";
+#else
 constexpr DWORD kRva = 0x32de88;
+constexpr char kHash[] = "de1daad3a13f3b7e9f79903361bb43769cf4f15e59271a263aefe1f075f23ef2";
+#endif
 constexpr std::array<BYTE, 3> kBytes{0x45, 0x33, 0xf6};
 constexpr DWORD kLoanResourceRva = 0xf410a7;
 constexpr std::array<BYTE, 3> kLoanResourceBytes{0x90, 0x48, 0x8b};
-constexpr char kHash[] = "de1daad3a13f3b7e9f79903361bb43769cf4f15e59271a263aefe1f075f23ef2";
 constexpr DWORD kLoadTimeoutMs = 120000;
 struct Error : std::runtime_error { using runtime_error::runtime_error; };
 void Check(bool condition, const char* description) {
@@ -397,6 +404,9 @@ bool EmitLoanResource(HANDLE process, DWORD pid, DWORD thread, const CONTEXT& co
     printf("}\n"); fflush(stdout); return candidate;
 }
 int Observe(DWORD pid, bool loanResource = false) {
+#ifdef TF3_STEAM25754343_LOAD_OBSERVATION
+    Check(!loanResource, "current-build profile qualifies loaded-state observation only");
+#endif
     const DWORD rva = loanResource ? kLoanResourceRva : kRva;
     const auto& expected = loanResource ? kLoanResourceBytes : kBytes;
     Handle process(OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ | SYNCHRONIZE, FALSE, pid));

@@ -1,5 +1,8 @@
 // One-use, exact-build, disposable-save company assignment qualification.
 // This is deliberately separate from the observation-only probe.
+#ifdef TF3_STEAM25754343_LOAD_OBSERVATION
+#error Read-only current-build load qualification cannot enable company assignment
+#endif
 #define wmain ReadOnlyProbeMain
 #include "external_hardware_load_probe.cpp"
 #undef wmain
