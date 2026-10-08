@@ -1,5 +1,39 @@
 # Completion audit against the build prompt
 
+## 2026-10-08 — Steam update stopped the fresh construction attempt before attachment
+
+Follow-up offline work traced the new step/common-exit and registration/join
+sites through decoded instructions, RTTI and unwind metadata. The existing
+owned common-exit fixture, privately pinned to the new exact image and chain,
+passed Windows `RtlVirtualUnwind` checks for zero and positive frames. It does
+not qualify live parking, cadence, full XSTATE or activation. Shared receiver,
+class, command-binding and observer-composition dependencies remain unfinished.
+
+The installed public callback declaration also exposed an existing result-list
+gap: revision records were discarded by the road-stop verifier. Commit
+`3a485a6` copies validated entity IDs from declared revision pairs and rejects
+malformed lists; its regression rejects an additional changed edge object.
+Sixteen result checks and 28 order/package checks passed; mod review passed 76
+files with manifest `a52df9575c9c54c34158f9d53fdaa2b660f39c543e54ffa778a249c2c184bd45`.
+This source correction has no new-game execution proof. The integration full
+suite completed: 5,062 total, 5,043 passed, zero failed and 19 skipped. The prior
+fixture failure is resolved. Skipped checks remain unperformed; the green
+offline suite does not establish new-build live compatibility.
+
+The immediate-submission runner passed two composed checks using the archived
+actual preview, authenticated request and native charge shapes. Combined parser
+and composition checks passed 9/9. The prior setup expired before Join launch;
+it sent no construction request and was restored. A subsequent fresh setup
+failed executable identity before native attachment: Steam build 25754343 has
+SHA-256 `74861ac43b041aebc5179154345b3cf1ec83154c8e6cc58e0d9e02ff5fa602e4`.
+Both staged mod/native profiles were restored, with no gameplay mutation.
+
+Independent offline inspection found the old registration/join and simulation
+boundary bytes differ at their recorded RVAs. Existing static inspection also
+rejects the old build profile. Relocation and live qualification are unfinished;
+changing only the executable hash is insufficient. Prior paired gameplay proof
+still concerns the earlier executable. No new-build gameplay claim is made.
+
 ## Build 40401 real-game Stop cancellation — 25 September 2026
 
 The cancellation-only diagnostic loaded in TF3 PID 35228 against executable

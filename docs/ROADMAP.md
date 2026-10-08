@@ -1,6 +1,18 @@
 # TalCo TF3 multiplayer — current delivery plan
 
-## Current priority: playable separate companies — 28 September 2026
+## Current priority — qualify the updated build, then paired road construction
+
+Steam updated the installed executable on 2026-10-08 to build 25754343,
+SHA-256 `74861ac43b041aebc5179154345b3cf1ec83154c8e6cc58e0d9e02ff5fa602e4`.
+The next paired road-stop attempt stopped during prelaunch identity checking;
+no attachment or gameplay mutation occurred. Old registration and boundary
+sites differ in the new image. Current priority is offline relocation and
+build-specific native qualification, then the fresh paired road-stop run with
+immediate submission. Preserve the archived partial construction and reservations.
+Do not repin the new executable using the old addresses without evidence.
+
+
+## Historical priority: playable separate companies — 28 September 2026
 
 The two-instance diagnostic sessions proved one Host-origin ordered Stop
 (run 18) and three matching no-input covered-state checkpoints in one session
