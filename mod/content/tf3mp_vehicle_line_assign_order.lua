@@ -73,7 +73,7 @@ local function context(state,r,api,operation)
     or lease.companyEntity~=localCompany or clock.tickCount<lease.lastTick
     or clock.tickCount>=lease.expiresTick or current.haltTestAttempted==true
     or current.phase2CompanyFault==true or current.nativeVehicleLineAssignAttempted==true
-    or not entity(localCompany) or localCompany==r.companyEntity
+    or not entity(localCompany)
     or api.engine.entityExists(localCompany)~=true
     or not native(api.engine.getComponent(localCompany,api.type.ComponentType.PLAYER)) then return nil end
   return current,binding,clock,intent
@@ -108,11 +108,12 @@ local function prepared(state,r,api)
   local lease=current.watchdogLease or {}
   local receipt=current.preparationReceipt or {}
   local p=current.preparedCommand or {}
-  if receipt.status~="ok" or receipt.operationId~=r.operationId
+  if receipt.status~="ok" or receipt.operation~="prepare"
+    or receipt.operationId~=p.operationId
     or receipt.ownerCompanyEntity~=r.companyEntity
     or (current.coordinationReceipt or {}).operationId~=nil
     or (current.executionReceipt or {}).operationId~=nil then return nil end
-  for _,key in ipairs({"operationId","hostSequence","scheduledUpdate","originPlayerId",
+  for _,key in ipairs({"hostSequence","scheduledUpdate","originPlayerId",
     "companyEntity","entity","lineEntity","clientSequence","requestMessageId","commandType"}) do
     if p[key]~=r[key] then return nil end end
   return current,binding,clock,intent
@@ -133,7 +134,7 @@ function M.arm(state,r,api)
 end
 function M.execute(state,r,api)
   local ok,result=pcall(function()
-    local current,binding,_,intent=prepared(state,r,api)
+    local current,binding,checkedClock,intent=prepared(state,r,api)
     if not current then return false end
     local barrier=current.executionBarrier or {}
     if barrier.phase~="held" or barrier.nonce~=r.nonce
@@ -145,7 +146,8 @@ function M.execute(state,r,api)
     current.nativeVehicleLineAssignAttempted=true;current.phase2CompanyFault=true
     current.executionReceipt={schemaVersion=1,nonce=r.nonce,roundId=r.roundId,
       operationId=r.operationId,operation="executeHeld",status="unknown",
-      stage="latched",hostSequence=r.hostSequence,held=false}
+      stage="latched",hostSequence=r.hostSequence,
+      updateCount=checkedClock.updateCount,held=false}
     state:set(current)
     local clock=api.engine.getComponent(api.engine.util.getWorld(),api.type.ComponentType.GAME_TIME)
     local speed=api.engine.getComponent(api.engine.util.getWorld(),api.type.ComponentType.GAME_SPEED)
@@ -215,5 +217,36 @@ function M.observe(state,api)
     pending=nil;state:set(saved);return true
   end)
   return ok and result==true
+end
+function M.qualifyRelease(current)
+  if type(current)~="table" or current.nativeVehicleLineAssignAttempted~=true
+    or current.phase2CompanyFault~=false then return false end
+  local b=current.coordinationBinding or {}
+  local p=current.preparedCommand or {}
+  local prep=current.preparationReceipt or {}
+  local barrier=current.executionBarrier or {}
+  local r=current.executionReceipt or {}
+  return b.phase=="action_held" and p.commandType=="road.vehicle.assignLine"
+    and type(b.nonce)=="string" and #b.nonce==32 and b.nonce:match("^[a-f0-9]+$")~=nil
+    and identity(b.roundId) and identity(p.operationId)
+    and type(b.players)=="table" and identity(p.originPlayerId)
+    and b.players[p.originPlayerId]==p.companyEntity
+    and identity(p.requestMessageId) and integer(p.clientSequence)
+    and identity(r.operationId) and prep.status=="ok" and prep.operation=="prepare"
+    and prep.operationId==p.operationId and prep.nonce==b.nonce and prep.roundId==b.roundId
+    and barrier.phase=="consumed" and barrier.nonce==b.nonce and barrier.roundId==b.roundId
+    and barrier.operationId==r.operationId and r.nonce==b.nonce and r.roundId==b.roundId
+    and r.status=="ok" and r.operation=="executeHeld" and r.held==true
+    and entity(p.hostSequence) and p.hostSequence==(b.nextSequence or 1)
+    and barrier.hostSequence==p.hostSequence and r.hostSequence==p.hostSequence
+    and integer(p.scheduledUpdate) and barrier.scheduledUpdate==p.scheduledUpdate
+    and prep.schemaVersion==1 and r.schemaVersion==1 and r.stage==nil
+    and integer(prep.updateCount) and prep.updateCount<p.scheduledUpdate
+    and p.scheduledUpdate<=prep.updateCount+600
+    and r.updateCount==p.scheduledUpdate and prep.ownerCompanyEntity==p.companyEntity
+    and entity(p.companyEntity) and r.ownerCompanyEntity==p.companyEntity
+    and r.lineOwnerCompanyEntity==p.companyEntity and r.snapshotVersion==5
+    and entity(p.entity) and r.entity==p.entity and r.vehicleEntity==p.entity
+    and entity(p.lineEntity) and r.lineEntity==p.lineEntity and p.entity~=p.lineEntity
 end
 return M

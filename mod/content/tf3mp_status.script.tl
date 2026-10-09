@@ -37,6 +37,7 @@ local record Tf3MpState
   nativeVehicleReceipt : table
   phase2VehicleReceipt : table
   nativeLineOrderAttempted : boolean
+  completedLineActionReleases : table
   nativeLineRemoveAttempted : boolean
   nativeVehicleLineAssignAttempted : boolean
   nativeStationSlot1Attempted : boolean
@@ -1716,6 +1717,24 @@ local ret : GameScriptWithGui<Tf3MpState, Tf3MpGuiState> = {
       if actionRelease and (held.hostSequence ~= (binding.nextSequence or 1) or held.operation ~= "executeHeld") then return nil end
       if held.status ~= "ok" or held.held ~= true or held.nonce ~= request.nonce or held.roundId ~= request.roundId
         or held.updateCount ~= request.updateCount or clock.updateCount ~= request.updateCount or speed.speedup ~= 0 then return nil end
+      -- Only a fully correlated successful action may retire its diagnostic
+      -- latch, and only after the sole resume attempt is confirmed below.
+      local releasedLineAction : string = ""
+      local releasedLineKey : string = ""
+      if actionRelease then
+        local commandType = (current.preparedCommand or {}).commandType
+        if commandType == "road.line.create" then
+          if lineCreateOrderExecute.qualifyRelease(current) ~= true then return nil end
+          releasedLineAction = "create"
+        elseif commandType == "road.vehicle.assignLine" then
+          if vehicleLineAssignOrder.qualifyRelease(current) ~= true then return nil end
+          releasedLineAction = "assign"
+        end
+      end
+      if releasedLineAction ~= "" then
+        releasedLineKey = request.nonce .. ":" .. tostring(held.hostSequence)
+        if (current.completedLineActionReleases or {})[releasedLineKey] ~= nil then return nil end
+      end
       local receipt : table = { schemaVersion = 1, nonce = request.nonce, roundId = request.roundId, operationId = request.operationId,
         operation = "release", status = "unknown", updateCount = clock.updateCount, held = true }
       current.releaseReceipt = receipt
@@ -1733,6 +1752,26 @@ local ret : GameScriptWithGui<Tf3MpState, Tf3MpGuiState> = {
       if ok and succeeded and afterClock.updateCount == request.updateCount and afterSpeed.speedup == targetSpeed then
         receipt.status = "ok"; receipt.held = false; binding.phase = "running"
         if actionRelease then
+          if releasedLineAction ~= "" then
+            -- These receipts/barriers contain only scalar fields. Copy them so
+            -- later active-slot updates cannot alter the completed evidence.
+            local function detachedReceipt(value : table) : table
+              local copied : table = {}
+              for key, field in pairs(value) do copied[key] = field end
+              return copied
+            end
+            local completions : table = current.completedLineActionReleases or {}
+            completions[releasedLineKey] = {commandType=(current.preparedCommand or {}).commandType,
+              prepareOperationId=(current.preparedCommand or {}).operationId,
+              preparationReceipt=detachedReceipt(current.preparationReceipt or {}),
+              executionReceipt=detachedReceipt(held),
+              executionBarrier=detachedReceipt(current.executionBarrier or {}),
+              releaseReceipt=detachedReceipt(receipt),nextSequence=held.hostSequence + 1,
+              actualSpeedup=afterSpeed.speedup}
+            current.completedLineActionReleases = completions
+            if releasedLineAction == "create" then current.nativeLineOrderAttempted = false end
+            if releasedLineAction == "assign" then current.nativeVehicleLineAssignAttempted = false end
+          end
           binding.nextSequence = held.hostSequence + 1
           current.preparedCommand = {}; current.preparationReceipt = {}; current.executionReceipt = {}
         end

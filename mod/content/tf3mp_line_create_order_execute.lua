@@ -57,12 +57,13 @@ local function context(state,request,api)
     or current.phase2CompanyFault==true or current.nativeLineOrderAttempted==true
     or (current.coordinationReceipt or {}).operationId~=nil
     or (current.executionReceipt or {}).operationId~=nil
-    or preparation.status~="ok" or preparation.nonce~=request.nonce
+    or preparation.status~="ok" or preparation.operation~="prepare"
+    or preparation.operationId~=prepared.operationId
+    or preparation.nonce~=request.nonce
     or preparation.roundId~=request.roundId
     or preparation.ownerCompanyEntity~=request.companyEntity
     or prepared.commandType~="road.line.create"
-    or prepared.operationId~=request.operationId
-    or not entity(localCompany) or localCompany==request.companyEntity then return nil end
+    or not entity(localCompany) then return nil end
   for _,key in ipairs({"hostSequence","scheduledUpdate","originPlayerId",
     "companyEntity","entity","clientSequence","requestMessageId"}) do
     if prepared[key]~=request[key] then return nil end
@@ -114,5 +115,41 @@ end
 function M.observe(state,api)
   local ok,result=pcall(action.observe,state,api)
   return ok and result==true
+end
+-- Pure qualification for retirement at the existing confirmed release seam.
+-- Preparation and execution have distinct operation IDs. The consumed barrier
+-- remains saved after retirement and the coordinator advances nextSequence.
+function M.qualifyRelease(current)
+  if type(current)~="table" or current.nativeLineOrderAttempted~=true
+    or current.phase2CompanyFault~=false then return false end
+  local b=current.coordinationBinding or {}
+  local p=current.preparedCommand or {}
+  local prep=current.preparationReceipt or {}
+  local barrier=current.executionBarrier or {}
+  local r=current.executionReceipt or {}
+  return b.phase=="action_held" and p.commandType=="road.line.create"
+    and type(b.nonce)=="string" and #b.nonce==32 and b.nonce:match("^[a-f0-9]+$")~=nil
+    and identity(b.roundId) and identity(p.operationId)
+    and type(b.players)=="table" and identity(p.originPlayerId)
+    and b.players[p.originPlayerId]==p.companyEntity
+    and identity(p.requestMessageId) and integer(p.clientSequence)
+    and identity(r.operationId) and prep.status=="ok" and prep.operation=="prepare"
+    and prep.operationId==p.operationId and prep.nonce==b.nonce and prep.roundId==b.roundId
+    and barrier.phase=="consumed" and barrier.nonce==b.nonce and barrier.roundId==b.roundId
+    and barrier.operationId==r.operationId and r.nonce==b.nonce and r.roundId==b.roundId
+    and r.status=="ok" and r.operation=="executeHeld" and r.held==true
+    and entity(p.hostSequence) and p.hostSequence==(b.nextSequence or 1)
+    and barrier.hostSequence==p.hostSequence and r.hostSequence==p.hostSequence
+    and integer(p.scheduledUpdate) and barrier.scheduledUpdate==p.scheduledUpdate
+    and prep.schemaVersion==1 and r.schemaVersion==1 and r.stage==nil
+    and integer(prep.updateCount) and prep.updateCount<p.scheduledUpdate
+    and p.scheduledUpdate<=prep.updateCount+600
+    and r.updateCount==p.scheduledUpdate and prep.ownerCompanyEntity==p.companyEntity
+    and entity(p.companyEntity) and r.ownerCompanyEntity==p.companyEntity
+    and r.snapshotVersion==4 and entity(r.lineEntity) and r.entity==r.lineEntity
+    and r.stationA==p.stationA and r.stationB==p.stationB
+    and entity(p.stationA) and entity(p.stationB) and p.stationA~=p.stationB
+    and p.entity==p.stationA and p.lineName=="TalCo disposable service"
+    and r.lineEntity~=p.stationA and r.lineEntity~=p.stationB
 end
 return M

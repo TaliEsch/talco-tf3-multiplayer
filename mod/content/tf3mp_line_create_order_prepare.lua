@@ -65,7 +65,7 @@ local function inspect(state,request,api)
     or request.hostSequence~=(binding.nextSequence or 1)
     or request.scheduledUpdate<=clock.updateCount
     or request.scheduledUpdate>clock.updateCount+600
-    or not entity(localCompany) or localCompany==request.companyEntity
+    or not entity(localCompany)
     or api.engine.entityExists(localCompany)~=true
     or not native(api.engine.getComponent(localCompany,api.type.ComponentType.PLAYER)) then return false end
   local prepared=action.inspect(api,intent)

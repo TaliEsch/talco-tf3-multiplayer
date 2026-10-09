@@ -9,11 +9,12 @@ const source=await readFile(new URL('../mod/content/tf3mp_line_create_order_acti
 function run(change='',callback='callback({resultEntity=700},true,{{700}})'){
   const script=`local action=(function() ${source} end)()
 local sent=0;local callback=nil;local owner=8;local update=108
-local current={coordinationBinding={phase='prepared'},executionBarrier={phase='held',operationId='op',hostSequence=1,scheduledUpdate=108},
- preparedCommand={commandType='road.line.create',operationId='op',hostSequence=1,scheduledUpdate=108,
+local current={coordinationBinding={phase='prepared'},executionBarrier={phase='held',operationId='execute-op',hostSequence=1,scheduledUpdate=108},
+ preparationReceipt={operation='prepare',operationId='prepare-op',status='ok'},
+ preparedCommand={commandType='road.line.create',operationId='prepare-op',hostSequence=1,scheduledUpdate=108,
  companyEntity=8,stationA=101,stationB=102,lineName='TalCo disposable service'}}
 local state={get=function()return current end,set=function(_,value)current=value end}
-local request={nonce='a',roundId='round',operationId='op',hostSequence=1,scheduledUpdate=108,
+local request={nonce='a',roundId='round',operationId='execute-op',hostSequence=1,scheduledUpdate=108,
  companyEntity=8,stationA=101,stationB=102,lineName='TalCo disposable service'}
 local api={type={ComponentType={PLAYER='PLAYER',PLAYER_OWNED='PLAYER_OWNED',STATION='STATION',
  STATION_GROUP='STATION_GROUP',GAME_TIME='GAME_TIME',GAME_SPEED='GAME_SPEED',NAME='NAME',LINE='LINE'},

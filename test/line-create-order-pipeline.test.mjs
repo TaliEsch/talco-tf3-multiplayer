@@ -7,14 +7,24 @@ const {lua,lauxlib,lualib,to_luastring}=fengari;
 const [wire,action,prepare,execute]=await Promise.all([
   'wire','action','prepare','execute'].map(part=>readFile(
     new URL(`../mod/content/tf3mp_line_create_order_${part}.lua`,import.meta.url),'utf8')));
+const status=await readFile(new URL('../mod/content/tf3mp_status.script.tl',import.meta.url),'utf8');
+const releaseStart=status.indexOf('    if src == "tf3mp_status_1::/tf3mp_status.gs" and id == "tf3mp_engine_bridge" and name == "tf3mp_release_checkpoint"');
+const releaseEnd=status.indexOf('    if src == "tf3mp_status_1::/tf3mp_status.gs"',releaseStart+8);
+assert.ok(releaseStart>=0&&releaseEnd>releaseStart);
+const releaseHandler=status.slice(releaseStart,releaseEnd)
+  .replaceAll(' as table','').replaceAll(' : integer','')
+  .replaceAll(' as integer','').replaceAll(' as Engine.Component.GameSpeed','')
+  .replaceAll(' as string','').replaceAll(' : string','').replaceAll(' : table','')
+  .replace('_coordinationReleaseData : GameSetSpeedCommandData, success : boolean, _entities : {{Engine.Entity, Engine.Revision}}',
+    '_coordinationReleaseData, success, _entities');
 
-function run(change=''){
+function run(change='',afterObserve=''){
   const script=`local wire=(function() ${wire} end)()
 local action=(function() ${action} end)()
 ug_require=function(path)if path:find('wire')then return wire end return action end
 local preparer=(function() ${prepare} end)()
 local executor=(function() ${execute} end)()
-local sent=0;local callback=nil;local owner=8;local update=100
+local sent=0;local callback=nil;local owner=8;local update=100;local speedup=0;local resumes=0;local resumeSuccess=true
 local current={coordinationBinding={nonce=string.rep('a',32),roundId='round',phase='running',
  players={['remote']=8,['host']=7},nextSequence=1},
  watchdogLease={nonce=string.rep('a',32),companyEntity=7,phase='active',lastTick=10,expiresTick=20},
@@ -32,7 +42,7 @@ local api={type={ComponentType={PLAYER='PLAYER',PLAYER_OWNED='PLAYER_OWNED',STAT
  entityExists=function(id)return id==7 or id==8 or id==101 or id==102 or id==201 or id==202 or id==700 end,
  getComponent=function(id,kind)
   if kind=='GAME_TIME'then return{updateCount=update,tickCount=15}end
-  if kind=='GAME_SPEED'then return{speedup=0}end
+  if kind=='GAME_SPEED'then return{speedup=speedup}end
   if kind=='PLAYER'and (id==7 or id==8)then return{}end
   if kind=='PLAYER_OWNED'and (id==101 or id==102 or id==700)then return{player=owner}end
   if kind=='STATION'and (id==101 or id==102)then return{}end
@@ -44,10 +54,12 @@ local api={type={ComponentType={PLAYER='PLAYER',PLAYER_OWNED='PLAYER_OWNED',STAT
  end,system={stationGroupSystem={getStationGroup=function(id)return id==101 and 201 or 202 end,
  getCarriers=function()return{{1}}end},lineSystem={getBestLineAssignment=function()
  return{{station=0,terminal=0},{station=0,terminal=0}}end,getLines=function()return sent>0 and {700} or {} end}}},
- cmd={makeLineCreateCmd=function()return{}end,sendCommand=function(_,fn)sent=sent+1;callback=fn end}}
+ cmd={makeLineCreateCmd=function()return{}end,makeGameSetSpeedCmd=function(target)return{releaseSpeed=target}end,
+ sendCommand=function(command,fn)if command.releaseSpeed then resumes=resumes+1;if resumeSuccess then speedup=command.releaseSpeed end;fn({},resumeSuccess);else sent=sent+1;callback=fn end end}}
 ${change}
 local prepared=preparer.handle(state,request,api)
 request.operation='executeHeld'
+request.operationId='execute-op'
 local armed=executor.arm(state,request,api)
 if armed then current.executionBarrier.phase='held' end
 update=108
@@ -55,6 +67,7 @@ local executed=executor.execute(state,request,api)
 local duplicate=executor.execute(state,request,api)
 if callback then callback({resultEntity=700},true,{{700}})end
 local observed=executor.observe(state,api)
+${afterObserve}
 return prepared,armed,executed,duplicate,observed,sent,
  current.executionReceipt.status or '',current.executionReceipt.stage or '',
  current.executionBarrier and current.executionBarrier.phase or '',
@@ -77,6 +90,10 @@ test('line preparation, held one-use send and world receipt form one ordered act
     observed:true,sent:1,status:'ok',stage:'',barrier:'consumed',
     phase:'action_held',line:700});
 });
+test('selected owner can create its own line through the held path',()=>{
+  const result=run('api.engine.util.getPlayer=function()return 8 end;current.watchdogLease.companyEntity=8');
+  assert.equal(result.prepared,true);assert.equal(result.observed,true);assert.equal(result.sent,1);
+});
 test('foreign station ownership rejects before arming',()=>{
   const result=run('owner=9');
   assert.equal(result.prepared,false);assert.equal(result.armed,false);
@@ -94,3 +111,94 @@ test('owner changed after preparation consumes the held attempt without native s
   assert.equal(result.sent,0);assert.equal(result.status,'unknown');
   assert.equal(result.barrier,'consumed');
 });
+function releaseProbe(mode){
+  return `
+assert(prepared and armed and executed and observed)
+assert(current.preparedCommand.nonce==nil and current.preparedCommand.roundId==nil)
+assert(current.preparedCommand.operationId=='op' and current.executionReceipt.operationId=='execute-op')
+local old={};for key,value in pairs(request)do old[key]=value end
+assert(executor.qualifyRelease(current)==true)
+local originalPreparation=current.preparationReceipt
+local originalExecution=current.executionReceipt
+local originalBarrier=current.executionBarrier
+current.nativeVehicleLineAssignAttempted=true -- An unrelated diagnostic latch must survive.
+local validInteger=function(value)return type(value)=='number' and value>=0 and value%1==0 end
+local readClock=function()return{updateCount=update,tickCount=15}end
+local lineCreateOrderExecute=executor
+local vehicleLineAssignOrder={qualifyRelease=function()return false end}
+local function release(param)
+  local src='tf3mp_status_1::/tf3mp_status.gs'
+  local id='tf3mp_engine_bridge'
+  local name='tf3mp_release_checkpoint'
+  ${releaseHandler}
+end
+local releaseRequest={schemaVersion=1,nonce=string.rep('a',32),roundId='round',
+ operationId='release-op',operation='release',updateCount=108}
+if '${mode}'=='unknown' then current.executionReceipt.status='unknown' end
+if '${mode}'=='corrupt' then current.executionReceipt.ownerCompanyEntity=9 end
+if '${mode}'=='failed' then resumeSuccess=false end
+if '${mode}'=='schema' then current.preparationReceipt.schemaVersion=2 end
+if '${mode}'=='time' then current.preparationReceipt.updateCount=108 end
+if '${mode}'=='origin' then current.coordinationBinding.players.remote=9 end
+if '${mode}'=='occupied' then current.completedLineActionReleases={[''..string.rep('a',32)..':1']={status='prior'}} end
+release(releaseRequest)
+assert(current.executionBarrier.phase=='consumed' and current.executionBarrier.operationId=='execute-op')
+assert(current.nativeVehicleLineAssignAttempted==true)
+if '${mode}'=='success' then
+ assert(resumes==1 and current.releaseReceipt.status=='ok' and current.coordinationBinding.phase=='running')
+ assert(current.coordinationBinding.nextSequence==2 and current.nativeLineOrderAttempted==false)
+ assert(next(current.preparedCommand)==nil and next(current.preparationReceipt)==nil and next(current.executionReceipt)==nil)
+ local key=string.rep('a',32)..':1'
+ local archived=current.completedLineActionReleases[key]
+ assert(archived.commandType=='road.line.create' and archived.prepareOperationId=='op')
+ assert(archived.preparationReceipt.status=='ok' and archived.executionReceipt.operationId=='execute-op')
+ assert(archived.executionBarrier.phase=='consumed' and archived.releaseReceipt.status=='ok')
+ assert(archived.nextSequence==2 and archived.actualSpeedup==1)
+ assert(archived.preparationReceipt~=originalPreparation and archived.executionReceipt~=originalExecution)
+ assert(archived.executionBarrier~=originalBarrier and archived.releaseReceipt~=current.releaseReceipt)
+ originalExecution.operationId='changed-after-release';originalBarrier.phase='changed-after-release'
+ assert(archived.executionReceipt.operationId=='execute-op' and archived.executionBarrier.phase=='consumed')
+ originalBarrier.phase='consumed'
+ assert(executor.execute(state,old,api)==false)
+ update=109
+ request.hostSequence=2;request.scheduledUpdate=117;request.operation='prepare'
+ request.operationId='op-2';request.requestMessageId='msg-2';request.clientSequence=2
+ assert(preparer.handle(state,request,api)==true)
+ request.operation='executeHeld';request.operationId='execute-op-2'
+ assert(executor.arm(state,request,api)==true)
+ current.executionBarrier.phase='held';speedup=0;update=117
+ assert(executor.execute(state,request,api)==true and sent==2)
+ assert(executor.execute(state,old,api)==false)
+ local function copy(value)
+  if type(value)~='table' then return value end
+  local result={};for k,v in pairs(value)do result[copy(k)]=copy(v) end;return result
+ end
+ state:set(copy(current));current=state:get() -- Simulate persisted state reloaded into new tables.
+ assert(current.completedLineActionReleases[key].executionBarrier.phase=='consumed')
+ assert(current.completedLineActionReleases[key].executionReceipt.operationId=='execute-op')
+ assert(current.completedLineActionReleases[key].releaseReceipt.status=='ok')
+ assert(current.executionBarrier.operationId=='execute-op-2')
+ assert(executor.execute(state,old,api)==false and sent==2)
+else
+ if '${mode}'=='failed' then
+  assert(resumes==1 and current.releaseReceipt.status=='unknown' and current.coordinationBinding.phase=='release_unknown')
+ else assert(resumes==0 and current.coordinationBinding.phase=='action_held') end
+ assert(current.nativeLineOrderAttempted==true and current.coordinationBinding.nextSequence==1)
+ assert(current.preparedCommand.operationId=='op' and current.executionBarrier.phase=='consumed')
+ if '${mode}'=='occupied' then assert(current.completedLineActionReleases[string.rep('a',32)..':1'].status=='prior')
+ else assert((current.completedLineActionReleases or {})[string.rep('a',32)..':1']==nil) end
+ assert(executor.execute(state,old,api)==false)
+ local nextRequest={};for key,value in pairs(request)do nextRequest[key]=value end
+ nextRequest.operation='prepare';nextRequest.operationId='op-2';nextRequest.hostSequence=2
+ nextRequest.scheduledUpdate=117;nextRequest.clientSequence=2;nextRequest.requestMessageId='msg-2'
+ assert(preparer.handle(state,nextRequest,api)==false and sent==1)
+end
+`;
+}
+for(const mode of ['success','unknown','corrupt','failed','schema','time','origin','occupied']){
+  test(`line release composition: ${mode}`,()=>{
+    const result=run('',releaseProbe(mode));
+    assert.equal(result.observed,true);
+    assert.equal(result.sent,mode==='success'?2:1);
+  });
+}

@@ -93,12 +93,14 @@ local function checkedState(state,request)
   local binding=current.coordinationBinding or {}
   local barrier=current.executionBarrier or {}
   local prepared=current.preparedCommand or {}
+  local preparation=current.preparationReceipt or {}
   if binding.phase~="prepared" or barrier.phase~="held"
     or barrier.operationId~=request.operationId
     or barrier.hostSequence~=request.hostSequence
     or barrier.scheduledUpdate~=request.scheduledUpdate
     or prepared.commandType~="road.line.create"
-    or prepared.operationId~=request.operationId
+    or preparation.status~="ok" or preparation.operation~="prepare"
+    or preparation.operationId~=prepared.operationId
     or prepared.hostSequence~=request.hostSequence
     or prepared.scheduledUpdate~=request.scheduledUpdate
     or prepared.companyEntity~=request.companyEntity
@@ -116,10 +118,12 @@ function M.send(state,request,api)
   current.executionReceipt={schemaVersion=1,nonce=request.nonce,
     roundId=request.roundId,operationId=request.operationId,
     operation="executeHeld",status="unknown",stage="latched",
-    hostSequence=request.hostSequence,held=false}
+    hostSequence=request.hostSequence,updateCount=0,held=false}
   state:set(current)
   local clock=api.engine.getComponent(api.engine.util.getWorld(),api.type.ComponentType.GAME_TIME)
   local speed=api.engine.getComponent(api.engine.util.getWorld(),api.type.ComponentType.GAME_SPEED)
+  if native(clock) and integer(clock.updateCount) then
+    current.executionReceipt.updateCount=clock.updateCount;state:set(current) end
   if not native(clock) or clock.updateCount~=request.scheduledUpdate
     or not native(speed) or speed.speedup~=0 then return false end
   local ok,line,stops=pcall(live,api,request)
