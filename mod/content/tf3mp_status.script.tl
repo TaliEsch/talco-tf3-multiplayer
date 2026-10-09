@@ -2023,6 +2023,13 @@ local ret : GameScriptWithGui<Tf3MpState, Tf3MpGuiState> = {
         local expectedUpdate = request.scheduledUpdate as integer
         local expectedSequence = request.hostSequence as integer
         local expectedOperation = request.operationId as string
+        -- Compare at the held execution boundary, not with a save-era balance:
+        -- operating costs may have accrued before this command was admitted.
+        -- Invalid accounting or a callback delta retains the consumed unknown
+        -- receipt; Start/Stop itself must never debit or credit the borrower.
+        local balanceBefore = api.engine.util.finance.getPlayersBalance(expectedCompany)
+        if balanceBefore == nil or balanceBefore ~= balanceBefore
+          or math.abs(balanceBefore) > 9007199254740991 or balanceBefore % 1 ~= 0 then return end
         api.cmd.sendCommand(api.cmd.makeVehicleSetStoppedByUserCmd(expectedEntity, expectedStopped),
           function(vehicleData : VehicleSetStoppedByUserCommandData, success : boolean, _entities : {{Engine.Entity, Engine.Revision}})
             -- The callback is the native command completion boundary. Keep the
@@ -2046,6 +2053,7 @@ local ret : GameScriptWithGui<Tf3MpState, Tf3MpGuiState> = {
               if afterClock.updateCount ~= expectedUpdate or afterSpeed.speedup ~= 0 then return end
               local balance = api.engine.util.finance.getPlayersBalance(expectedCompany)
               if balance == nil or balance ~= balance or math.abs(balance) > 9007199254740991 or balance % 1 ~= 0 then return end
+              if balance ~= balanceBefore then return end
               savedReceipt.snapshotVersion = 1; savedReceipt.hostSequence = expectedSequence; savedReceipt.entity = expectedEntity
               savedReceipt.ownerCompanyEntity = afterOwner.player; savedReceipt.stopFlag = afterVehicle.userStopped and 1 or 0
               savedReceipt.balance = math.abs(balance); savedReceipt.negative = balance < 0 and 1 or 0
