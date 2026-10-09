@@ -183,13 +183,53 @@ export function startHost({ secret, sessionId = randomUUID(), bind = DEFAULT_BIN
             void (async()=>{
               try {
                 if (!peer.ready) throw new ProtocolError("SAVE_REQUIRED", "authoritative save must be verified before gameplay requests");
-                const entryHostUpdate=!legacyModelRelay?getUpdateCount():null;
+                const admissionRound=coordinator.roundId;
+                const admissionPlayer=peer.player;
+                const admissionCompany=authority.players().find(p=>p.playerId===admissionPlayer.playerId)?.companyEntity;
+                const assertAdmissionContext=()=>{
+                  if(socket.destroyed||!peer.ready||peer.player!==admissionPlayer
+                    ||coordinator.roundId!==admissionRound
+                    ||!authority.players().some(p=>p.playerId===admissionPlayer.playerId
+                      &&p.companyEntity===admissionCompany))
+                    throw new ProtocolError('COORDINATION_NOT_READY','admission participant or round changed');
+                };
+                const admissionDeadline=Date.now()+Math.min(coordinator.timeoutMs,coordinator.heartbeatMs);
+                // Heartbeats and the Host observation arrive independently.
+                // Wait for a real Host sample, never promote its clock to a peer's.
+                // Keep the original coordinator checks and one admission in flight.
+                const admissionUpdate=async(initialUpdate=getUpdateCount())=>{
+                  let update=initialUpdate;
+                  const ahead=()=>[...peers].some(member=>member.player
+                    &&member.clockUpdateCount!==null&&member.clockUpdateCount>update);
+                  const startedAt=Date.now();
+                  let waited=false;
+                  while(!legacyModelRelay&&coordinator.phase==='running'
+                    &&!socket.destroyed&&Number.isSafeInteger(update)&&update>=0
+                    &&ahead()&&Date.now()<admissionDeadline){
+                    if(!waited)logger({level:'info',event:'host_action_clock_wait',
+                      roundId:coordinator.roundId,hostUpdateCount:update});
+                    waited=true;
+                    await new Promise(resolve=>setTimeout(resolve,25));
+                    update=getUpdateCount();
+                  }
+                  if(waited)logger({level:'info',event:'host_action_clock_wait_finished',
+                    roundId:coordinator.roundId,hostUpdateCount:update,
+                    durationMs:Date.now()-startedAt,caughtUp:!ahead()});
+                  if(!legacyModelRelay&&Date.now()>=admissionDeadline){
+                    coordinator.halt('CLOCK_MISMATCH');
+                    throw new ProtocolError('CLOCK_MISMATCH','Host observation did not qualify within the admission budget');
+                  }
+                  return update;
+                };
+                const observedHostUpdate=!legacyModelRelay?getUpdateCount():null;
                 if(!legacyModelRelay){
                   for(const member of peers)if(member.player&&member.clockUpdateCount!==null)
                     logger({level:'info',event:'host_action_clock',roundId:coordinator.roundId,
-                      playerId:member.player.playerId,hostUpdateCount:entryHostUpdate,
+                      playerId:member.player.playerId,hostUpdateCount:observedHostUpdate,
                       peerUpdateCount:member.clockUpdateCount});
                 }
+                const entryHostUpdate=!legacyModelRelay?await admissionUpdate(observedHostUpdate):null;
+                assertAdmissionContext();
                 let verifiedOwner;
                 let verifiedRoad;
                 if(body.kind==='action_request'&&body.payload?.commandType==='vehicle.setRunning'&&inspectVehicleOwner!==null){
@@ -237,7 +277,8 @@ export function startHost({ secret, sessionId = randomUUID(), bind = DEFAULT_BIN
                     throw new ProtocolError('ROAD_PREFLIGHT_UNAVAILABLE','road receipt is stale or mismatched');
                 }
                 // One sampled update drives authority acceptance and proposal.
-                const hostUpdate=getUpdateCount();
+                const hostUpdate=legacyModelRelay?getUpdateCount():await admissionUpdate();
+                assertAdmissionContext();
                 if(verifiedRoad!==undefined
                   &&!ownerProofClockCurrent({issuedUpdate:verifiedRoad.issuedUpdate,
                     receiptUpdate:verifiedRoad.updateCount,hostUpdate,paused:verifiedRoad.paused}))

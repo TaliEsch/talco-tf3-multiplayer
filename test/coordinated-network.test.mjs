@@ -9,10 +9,10 @@ async function until(predicate) {
   for (let i = 0; i < 300; i++) { if (predicate()) return; await new Promise(r => setTimeout(r, 5)); }
   assert.fail("coordination socket test timed out");
 }
-async function fixture(count, { requireReleaseAck = false, leadUpdates, coordinationTimeoutMs } = {}) {
+async function fixture(count, { requireReleaseAck = false, leadUpdates, coordinationTimeoutMs, inspectVehicleOwner = null } = {}) {
   let update = 100;
   const owners = new Map(), clients = [], events=[];
-  const host = startHost({ secret, buildHash, modManifestHash, port: 0, getUpdateCount: () => update, resolveEntityOwner: e => owners.get(e) ?? null, requireReleaseAck, leadUpdates, coordinationTimeoutMs, logger:event=>events.push(event) });
+  const host = startHost({ secret, buildHash, modManifestHash, port: 0, getUpdateCount: () => update, resolveEntityOwner: e => owners.get(e) ?? null, inspectVehicleOwner, requireReleaseAck, leadUpdates, coordinationTimeoutMs, logger:event=>events.push(event) });
   await once(host.server, "listening");
   try {
     for (let i = 0; i < count; i++) {
@@ -48,7 +48,7 @@ test('production-sized Stop lead keeps the two-engine prepare window open',async
   }finally{await f.close();}
 });
 test('ahead peer clock is traced at Stop admission and still fails closed',async()=>{
-  const f=await fixture(2,{leadUpdates:60});
+  const f=await fixture(2,{leadUpdates:60,coordinationTimeoutMs:100});
   try{
     await f.prepare();
     f.clients[0].connection.send('participant_heartbeat',
@@ -62,6 +62,87 @@ test('ahead peer clock is traced at Stop admission and still fails closed',async
     assert.equal(clocks.every(event=>event.hostUpdateCount===100),true);
     assert.equal(f.clients[0].messages.find(m=>m.kind==='session_halted').payload.code,'CLOCK_MISMATCH');
     assert.equal(f.events.some(event=>event.event==='command_proposed'),false);
+  }finally{await f.close();}
+});
+test('admission waits for an actual Host sample while processing control traffic',async()=>{
+  const f=await fixture(2,{leadUpdates:60,coordinationTimeoutMs:1000});
+  try{
+    await f.prepare();
+    const roundId=f.host.coordinator.roundId;
+    f.clients[0].connection.send('participant_heartbeat',{roundId,updateCount:102});
+    f.request();
+    await until(()=>f.events.some(e=>e.event==='host_action_clock_wait'));
+    assert.equal(f.events.some(e=>e.event==='command_proposed'),false);
+    f.clients[1].connection.send('participant_heartbeat',{roundId,updateCount:103});
+    f.clients[0].connection.send('test',{value:'control-during-clock-wait'});
+    await until(()=>f.clients[0].messages.some(m=>m.kind==='test_echo'));
+    f.setUpdate(102);
+    await new Promise(resolve=>setTimeout(resolve,60));
+    assert.equal(f.events.some(e=>e.event==='command_proposed'),false);
+    f.setUpdate(103);
+    await until(()=>f.clients.every(c=>c.messages.some(m=>m.kind==='command_prepare')));
+    const commands=f.events.filter(e=>e.event==='command_proposed');
+    assert.equal(commands.length,1);
+    assert.equal(commands[0].hostSequence,1);
+    assert.equal(commands[0].admissionUpdate,103);
+    assert.equal(commands[0].scheduledUpdate,163);
+    assert.equal(f.events.find(e=>e.event==='host_action_clock_wait_finished').caughtUp,true);
+  }finally{await f.close();}
+});
+test('disconnect during clock catchup cannot admit the waiting action',async()=>{
+  const f=await fixture(2,{coordinationTimeoutMs:1000});
+  try{
+    await f.prepare();
+    f.clients[0].connection.send('participant_heartbeat',
+      {roundId:f.host.coordinator.roundId,updateCount:102});
+    f.request();
+    await until(()=>f.events.some(e=>e.event==='host_action_clock_wait'));
+    f.clients[1].connection.socket.destroy();
+    await until(()=>f.host.coordinator.phase==='halted');
+    f.setUpdate(102);
+    await until(()=>f.clients[0].messages.some(m=>m.kind==='command_rejected'));
+    assert.equal(f.events.some(e=>e.event==='command_proposed'),false);
+    assert.equal(f.clients[0].messages.some(m=>m.kind==='command_prepare'),false);
+  }finally{await f.close();}
+});
+test('real Host catchup precedes ownership inspection and prevents overtaking',async()=>{
+  let reads=0;
+  const f=await fixture(2,{coordinationTimeoutMs:1000,
+    inspectVehicleOwner:async()=>{
+      reads++;return {outcome:'found',entity:2000,company:1000,
+        issuedUpdate:102,updateCount:102,paused:false};
+    }});
+  try{
+    await f.prepare();
+    f.clients[0].connection.send('participant_heartbeat',
+      {roundId:f.host.coordinator.roundId,updateCount:102});
+    f.request();
+    await until(()=>f.events.some(e=>e.event==='host_action_clock_wait'));
+    assert.equal(reads,0);
+    f.request(2);
+    await until(()=>f.clients[0].messages.some(m=>m.kind==='command_rejected'));
+    assert.equal(f.clients[0].messages.find(m=>m.kind==='command_rejected').payload.code,
+      'COMMAND_ADMISSION_BUSY');
+    f.setUpdate(102);
+    await until(()=>f.events.some(e=>e.event==='command_proposed'));
+    assert.equal(reads,1);
+    assert.equal(f.events.filter(e=>e.event==='command_proposed').length,1);
+    assert.equal(f.events.find(e=>e.event==='command_proposed').admissionUpdate,102);
+  }finally{await f.close();}
+});
+test('ownership inspection cannot overrun the fixed admission budget',async()=>{
+  const f=await fixture(2,{coordinationTimeoutMs:100,
+    inspectVehicleOwner:async()=>{
+      await new Promise(resolve=>setTimeout(resolve,130));
+      return {outcome:'found',entity:2000,company:1000,
+        issuedUpdate:100,updateCount:100,paused:false};
+    }});
+  try{
+    await f.prepare();f.request();
+    await until(()=>f.clients[0].messages.some(m=>m.kind==='session_halted'));
+    assert.equal(f.clients[0].messages.find(m=>m.kind==='session_halted').payload.code,
+      'CLOCK_MISMATCH');
+    assert.equal(f.events.some(e=>e.event==='command_proposed'),false);
   }finally{await f.close();}
 });
 for (const count of [2, 4]) test(`${count} socket participants coordinate prepare/commit/apply without legacy relay`, async () => {
