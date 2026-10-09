@@ -41,7 +41,14 @@ export function createControlLease({ nonce, publish, remove, read, held, valid =
       if (receipt) {
         if (["conflict","unavailable"].includes(receipt.outcome)) { await fail("GUI_CONTROL_" + receipt.outcome.toUpperCase()); return; }
         if (phase === "acquire" && receipt.outcome === "acquired") { phase = "locked"; emit("control_test_locked", "TRY_NATIVE_SPEED_INPUTS_WHILE_HELD"); }
-        if (phase === "release" && receipt.outcome === "released") { phase = "released"; await remove(); emit("control_test_released", "NOW_RELEASE_PAUSE_TEST"); }
+        if (phase === "release" && receipt.outcome === "released") {
+          await remove();
+          // Teardown callers observe phase directly. Do not report completion
+          // before request removal, or resurrect a lease closed during removal.
+          if (phase !== "release") return;
+          emit("control_test_released", "NOW_RELEASE_PAUSE_TEST");
+          phase = "released";
+        }
       }
       if (!["locked","released"].includes(phase) && now() >= deadline) await fail("GUI_ACK_TIMEOUT_STOP_HELPER");
     },

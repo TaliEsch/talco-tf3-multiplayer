@@ -49,3 +49,25 @@ test('coordinated controls acquire only while held then remain locked during val
   holding=false;await p.poll();assert.equal(p.phase,'locked');
   valid=false;await p.poll();assert.equal(p.phase,'failed');
 });
+
+for (const closeDuringRemoval of [false, true]) test(`release waits for request removal; concurrent close=${closeDuringRemoval}`, async()=>{
+  let receipt='', finishRemoval, enteredRemoval;
+  const entered=new Promise(resolve=>{enteredRemoval=resolve;});
+  const removal=new Promise(resolve=>{finishRemoval=resolve;});
+  const events=[];
+  let removals=0;
+  const p=createControlLease({nonce,held:()=>true,publish:async()=>{},
+    read:async()=>receipt,logger:event=>events.push(event),
+    remove:async()=>{if(++removals===1){enteredRemoval();await removal;}}});
+  await p.acquire();
+  receipt=lua({schemaVersion:1,kind:'control_receipt',nonce,phase:'acquire',outcome:'acquired'});
+  await p.poll();await p.release();
+  receipt=lua({schemaVersion:1,kind:'control_receipt',nonce,phase:'release',outcome:'released'});
+  const polling=p.poll();await entered;
+  assert.equal(p.phase,'release');
+  assert.equal(events.some(event=>event.event==='control_test_released'),false);
+  if(closeDuringRemoval)await p.close();
+  finishRemoval();await polling;
+  assert.equal(p.phase,closeDuringRemoval?'closed':'released');
+  assert.equal(events.filter(event=>event.event==='control_test_released').length,closeDuringRemoval?0:1);
+});
