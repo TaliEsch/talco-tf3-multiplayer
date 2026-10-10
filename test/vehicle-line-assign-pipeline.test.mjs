@@ -16,11 +16,13 @@ const releaseHandler=status.slice(releaseStart,releaseEnd)
   .replaceAll(' as string','').replaceAll(' : string','').replaceAll(' : table','')
   .replace('_coordinationReleaseData : GameSetSpeedCommandData, success : boolean, _entities : {{Engine.Entity, Engine.Revision}}',
     '_coordinationReleaseData, success, _entities');
-function run(change='',afterObserve=''){
+function run(change='',afterObserve='',beforeObserve=''){
   const script=`local wire=(function() ${wire} end)()
 ug_require=function()return wire end
 local order=(function() ${order} end)()
 local sent=0;local callback=nil;local owner=8;local update=100;local assigned=0;local speedup=0;local resumes=0;local resumeSuccess=true
+local groupAStations={301};local groupBStations={302};local lineStops={{stationGroup=201,station=0,terminal=0},{stationGroup=202,station=0,terminal=0}}
+local stationOwners={[301]=8,[302]=8,[303]=8};local missing={}
 local current={coordinationBinding={nonce=string.rep('a',32),roundId='round',phase='running',
  players={['remote']=8,['host']=7},nextSequence=1},
  watchdogLease={nonce=string.rep('a',32),companyEntity=7,phase='active',lastTick=10,expiresTick=20},
@@ -30,21 +32,25 @@ local request={schemaVersion=1,protocolVersion=2,operation='prepare',commandType
  nonce=string.rep('a',32),roundId='round',operationId='op',originPlayerId='remote',
  requestMessageId='msg',hostSequence=1,scheduledUpdate=108,companyEntity=8,
  entity=101,lineEntity=102,clientSequence=1}
-local api={type={ComponentType={PLAYER='PLAYER',PLAYER_OWNED='PLAYER_OWNED',
+local api={type={ComponentType={PLAYER='PLAYER',PLAYER_OWNED='PLAYER_OWNED',STATION='STATION',STATION_GROUP='STATION_GROUP',
  TRANSPORT_VEHICLE='TRANSPORT_VEHICLE',LINE='LINE',GAME_TIME='GAME_TIME',GAME_SPEED='GAME_SPEED'},
  ['enum']={Carrier={ROAD=1}}},engine={util={getWorld=function()return 0 end,getPlayer=function()return 7 end},
- entityExists=function(id)return id==7 or id==8 or id==101 or id==102 or id==103 end,
+ entityExists=function(id)return not missing[id] and (id==7 or id==8 or id==101 or id==102 or id==103 or id==201 or id==202 or id==301 or id==302 or id==303) end,
  getComponent=function(id,kind)
   if kind=='GAME_TIME'then return{updateCount=update,tickCount=15}end
   if kind=='GAME_SPEED'then return{speedup=speedup}end
   if kind=='PLAYER'and (id==7 or id==8)then return{}end
   if kind=='PLAYER_OWNED'and (id==101 or id==102 or id==103)then return{player=owner}end
+  if kind=='PLAYER_OWNED'and stationOwners[id]then return{player=stationOwners[id]}end
+  if kind=='STATION'and stationOwners[id]then return{}end
+  if kind=='STATION_GROUP'and id==201 then return{stations=groupAStations}end
+  if kind=='STATION_GROUP'and id==202 then return{stations=groupBStations}end
   if kind=='TRANSPORT_VEHICLE'and id==101 then return{carrier=1,line=assigned}end
   if kind=='TRANSPORT_VEHICLE'and id==103 then return{carrier=1,line=0}end
-  if kind=='LINE'and id==102 then return{stops={{stationGroup=201,station=0,terminal=0},
-   {stationGroup=202,station=0,terminal=0}}}end
+  if kind=='LINE'and id==102 then return{stops=lineStops}end
  end,system={lineSystem={getLines=function()return{102}end},
- stationGroupSystem={getCarriers=function()return{{1}}end}}},
+ stationGroupSystem={getStationGroup=function(id)if id==301 or id==303 then return 201 elseif id==302 then return 202 end end,
+  getCarriers=function()return{{1}}end}}},
  cmd={makeVehicleSetLineCmd=function()return{}end,makeGameSetSpeedCmd=function(target)return{releaseSpeed=target}end,
  sendCommand=function(command,fn)if command.releaseSpeed then resumes=resumes+1;if resumeSuccess then speedup=command.releaseSpeed end;fn({},resumeSuccess);else sent=sent+1;callback=fn end end}}
 ${change}
@@ -57,6 +63,7 @@ update=108
 local executed=order.execute(state,request,api)
 local duplicate=order.execute(state,request,api)
 if callback then assigned=102;callback({},true)end
+${beforeObserve}
 local observed=order.observe(state,api)
 ${afterObserve}
 return prepared,armed,executed,duplicate,observed,sent,
@@ -84,6 +91,27 @@ test('selected owner can assign its own vehicle through the held path',()=>{
   const result=run('api.engine.util.getPlayer=function()return 8 end;current.watchdogLease.companyEntity=8');
   assert.equal(result.prepared,true);assert.equal(result.observed,true);assert.equal(result.sent,1);
 });
+for(const success of [true,false]){
+  test(`synchronous assignment callback preserves detached state: ${success}`,()=>{
+    const result=run(`
+local function copy(value)
+ if type(value)~='table' then return value end
+ local out={};for k,v in pairs(value)do out[k]=copy(v) end;return out
+end
+state.get=function()return copy(current)end
+state.set=function(_,value)current=copy(value)end
+api.cmd.sendCommand=function(_,fn)
+ sent=sent+1;assigned=102;fn({},${success})
+end
+`);
+    assert.equal(result.prepared,true);assert.equal(result.armed,true);
+    assert.equal(result.executed,true);assert.equal(result.duplicate,false);
+    assert.equal(result.sent,1);assert.equal(result.barrier,'consumed');
+    assert.equal(result.observed,success);
+    assert.equal(result.status,success?'ok':'unknown');
+    assert.equal(result.stage,success?'':'native_rejected_unknown');
+  });
+}
 test('foreign ownership blocks preparation',()=>{
   const result=run('owner=9');
   assert.equal(result.prepared,false);assert.equal(result.armed,false);assert.equal(result.sent,0);
@@ -93,6 +121,53 @@ test('ownership change after preparation consumes the attempt before native send
   assert.equal(result.prepared,true);assert.equal(result.armed,true);
   assert.equal(result.executed,false);assert.equal(result.duplicate,false);
   assert.equal(result.sent,0);assert.equal(result.status,'unknown');assert.equal(result.barrier,'consumed');
+});
+test('same-owner replacement station after preparation consumes without send',()=>{
+  const result=run(`local prior=order.arm;order.arm=function(...)local ok=prior(...);groupAStations[1]=303;return ok end`);
+  assert.equal(result.prepared,true);assert.equal(result.executed,false);assert.equal(result.sent,0);
+  assert.equal(result.barrier,'consumed');assert.equal(result.stage,'live_owner_type_or_stops_changed');
+});
+test('nonzero station index resolves the actual station entity',()=>{
+  const result=run('groupAStations={999,301};lineStops[1].station=1');
+  assert.equal(result.prepared,true);assert.equal(result.observed,true);assert.equal(result.sent,1);
+});
+test('reverse station-group membership mismatch blocks preparation',()=>{
+  const result=run('api.engine.system.stationGroupSystem.getStationGroup=function()return 202 end');
+  assert.equal(result.prepared,false);assert.equal(result.sent,0);
+});
+test('foreign stop owner blocks preparation',()=>{
+  const result=run('stationOwners[301]=9');assert.equal(result.prepared,false);assert.equal(result.sent,0);
+});
+test('missing group or missing indexed station blocks preparation',()=>{
+  const group=run('missing[201]=true');assert.equal(group.prepared,false);assert.equal(group.sent,0);
+  const station=run('groupAStations[1]=999');assert.equal(station.prepared,false);assert.equal(station.sent,0);
+});
+test('reordered stops after callback cannot produce assignment success',()=>{
+  const result=run('', '', 'lineStops[1],lineStops[2]=lineStops[2],lineStops[1]');
+  assert.equal(result.sent,1);assert.equal(result.observed,false);assert.equal(result.status,'unknown');
+  assert.equal(result.stage,'after_stops_changed');
+});
+test('terminal change after callback cannot produce assignment success',()=>{
+  const result=run('', '', 'lineStops[1].terminal=1');
+  assert.equal(result.sent,1);assert.equal(result.observed,false);assert.equal(result.status,'unknown');
+  assert.equal(result.stage,'after_stops_changed');
+});
+test('stop owner change after callback cannot produce assignment success',()=>{
+  const result=run('', '', 'stationOwners[301]=9');
+  assert.equal(result.sent,1);assert.equal(result.observed,false);assert.equal(result.status,'unknown');
+  assert.equal(result.stage,'after_owner_or_type');
+});
+test('prepared stop binding survives detached state and contains only scalar identities',()=>{
+  const result=run(`
+local function copy(value)if type(value)~='table'then return value end;local out={};for k,v in pairs(value)do out[k]=copy(v)end;return out end
+state.get=function()return copy(current)end;state.set=function(_,value)current=copy(value)end
+`, '', `
+local stops=current.preparedCommand.stops
+assert(#stops==2 and stops[1].entity==301 and stops[1].group==201 and stops[1].station==0 and stops[1].terminal==0)
+assert(stops[2].entity==302 and stops[2].group==202)
+assert(stops[1]~=lineStops[1] and type(stops[1].entity)=='number' and type(stops[1].group)=='number')
+`);
+  assert.equal(result.prepared,true);assert.equal(result.observed,true);
 });
 function releaseProbe(mode){
   return `

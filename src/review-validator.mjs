@@ -141,7 +141,7 @@ export async function validateReviewPackage(root) {
     ['tf3mp_line_create_order_action.lua', 'ac57187622e2159fe3355396ceceba29de8ee12ce46657a92f180ab5e1fa2671'],
     ['tf3mp_line_create_order_execute.lua', '5d9b7e9d4665098904c381ec6bfd344d8486d05419725634d748f7035c32087f'],
     ['tf3mp_line_create_order_prepare.lua', 'e21cb2675973fc1b9ad9f9df0ec68bf572b498bc9da0d770afa6e4a82fabae34'],
-    ['tf3mp_vehicle_line_assign_order.lua', '26604e4ec7fd65bcc979fa0e12d1239c82d1f7d4ee6f65cd34e728648eeb0fcb'],
+    ['tf3mp_vehicle_line_assign_order.lua', '7dc09ab22506bd1c42d564bafdf2bb0b7ef179abfb68085cac2c2ed3e5ce037b'],
     ['tf3mp_line_create_order_wire.lua', '14fc690e53a97eb50e545c3d874adb65d0ec00c8e3b16a7c2e85884b8cc66502'],
     ['tf3mp_line_remove_order.lua', '319c86380d677fd35013644384061cbead10690dff2af85b68e7ecf5b6818a72'],
     ['tf3mp_depot_build_order_readback.lua', 'ee8fafa52736e95d639cebf657aecc11454ca179c710a88b55e3d73068904a9f'],
@@ -440,7 +440,11 @@ export async function validateReviewPackage(root) {
   const assignSource=await readFile(path.join(absoluteRoot,'content','tf3mp_vehicle_line_assign_order.lua'),'utf8');
   for(const marker of ['current.nativeVehicleLineAssignAttempted=true',
     'barrier.phase="consumed"','binding.phase="execution_unknown"',
-    'if not live(api,intent,true) then','api.cmd.makeVehicleSetLineCmd(r.entity,r.lineEntity,0)',
+    'local _,_,liveStopBinding=live(api,intent,true)',
+    'not sameStops(p.stops,liveStopBinding)',
+    'stationOwner.player~=intent.companyEntity',
+    'not sameStops(work.stops,liveStopBinding)',
+    'api.cmd.makeVehicleSetLineCmd(r.entity,r.lineEntity,0)',
     'if vehicle.line~=work.intent.lineEntity then'])
     if(!assignSource.includes(marker))throw new Error('ordered vehicle assignment action is missing a safety check');
   for(const marker of ['state:subscribeToEvent("tf3mp_prepare_vehicle_line_assign")',

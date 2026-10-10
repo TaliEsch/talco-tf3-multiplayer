@@ -7,6 +7,23 @@ local function integer(v)return type(v)=="number" and v==math.floor(v) and v>=0 
 local function entity(v)return integer(v) and v>0 end
 local function native(v)return type(v)=="table" or type(v)=="userdata" end
 local function identity(v)return type(v)=="string" and #v>0 and #v<=128 and v:match("^[A-Za-z0-9_.:-]+$")~=nil end
+-- Persist only scalar identity and ordered topology, never native component references.
+local function copyStops(stops)
+  local copied={}
+  for i,stop in ipairs(stops or {}) do
+    copied[i]={entity=stop.entity,group=stop.group,station=stop.station,terminal=stop.terminal}
+  end
+  return copied
+end
+local function sameStops(a,b)
+  if not native(a) or not native(b) or #a~=#b then return false end
+  for i,stop in ipairs(a) do
+    local other=b[i]
+    if not native(other) or stop.entity~=other.entity or stop.group~=other.group
+      or stop.station~=other.station or stop.terminal~=other.terminal then return false end
+  end
+  return true
+end
 local function valid(r,operation)
   if type(r)~="table" or r.schemaVersion~=1 or r.protocolVersion~=2
     or r.operation~=operation or r.commandType~="road.vehicle.assignLine"
@@ -44,17 +61,28 @@ local function live(api,intent,requireUnassigned)
   for _,id in ipairs(api.engine.system.lineSystem.getLines()) do
     if id==intent.lineEntity then found=true end end
   if not found then return nil end
-  for _,stop in ipairs(line.stops) do
+  local stops={}
+  for i,stop in ipairs(line.stops) do
     if not native(stop) or not entity(stop.stationGroup)
       or not integer(stop.station) or not integer(stop.terminal) then return nil end
+    if api.engine.entityExists(stop.stationGroup)~=true then return nil end
+    local group=api.engine.getComponent(stop.stationGroup,c.STATION_GROUP)
+    if not native(group) or not native(group.stations) then return nil end
+    local stationEntity=group.stations[stop.station+1]
+    if not entity(stationEntity) or api.engine.entityExists(stationEntity)~=true
+      or not native(api.engine.getComponent(stationEntity,c.STATION)) then return nil end
+    local stationOwner=api.engine.getComponent(stationEntity,c.PLAYER_OWNED)
+    if not native(stationOwner) or stationOwner.player~=intent.companyEntity
+      or api.engine.system.stationGroupSystem.getStationGroup(stationEntity)~=stop.stationGroup then return nil end
     local carriers=api.engine.system.stationGroupSystem.getCarriers(stop.stationGroup,stop.station,stop.terminal)
     if not native(carriers) or not native(carriers[1]) then return nil end
     local road=false
     for _,carrier in ipairs(carriers[1]) do
       if carrier==api.type["enum"].Carrier.ROAD then road=true end end
     if not road then return nil end
+    stops[i]={entity=stationEntity,group=stop.stationGroup,station=stop.station,terminal=stop.terminal}
   end
-  return vehicle,line
+  return vehicle,line,stops
 end
 local function context(state,r,api,operation)
   local intent=valid(r,operation)
@@ -90,13 +118,14 @@ function M.prepare(state,r,api)
       operation="prepare",status="unknown",updateCount=clock.updateCount,
       held=speed.speedup==0,ownerCompanyEntity=0}
     current.preparationReceipt=receipt;state:set(current)
-    if r.scheduledUpdate<=clock.updateCount or r.scheduledUpdate>clock.updateCount+600
-      or not live(api,intent,true) then return false end
+    if r.scheduledUpdate<=clock.updateCount or r.scheduledUpdate>clock.updateCount+600 then return false end
+    local _,_,stops=live(api,intent,true)
+    if not stops then return false end
     current.preparedCommand={commandType=r.commandType,operationId=r.operationId,
       hostSequence=r.hostSequence,scheduledUpdate=r.scheduledUpdate,
       originPlayerId=r.originPlayerId,companyEntity=r.companyEntity,
       entity=r.entity,lineEntity=r.lineEntity,clientSequence=r.clientSequence,
-      requestMessageId=r.requestMessageId}
+      requestMessageId=r.requestMessageId,stops=copyStops(stops)}
     receipt.status="ok";receipt.ownerCompanyEntity=r.companyEntity
     binding.phase="prepared";state:set(current);return true
   end)
@@ -154,9 +183,11 @@ function M.execute(state,r,api)
     if not native(clock) or clock.updateCount~=r.scheduledUpdate
       or not native(speed) or speed.speedup~=0 then return false end
     -- This is the final ownership and ROAD type check immediately before send.
-    if not live(api,intent,true) then
-      current.executionReceipt.stage="live_owner_or_type_changed";state:set(current);return false end
-    local work={request=r,intent=intent,callbackSeen=false,accepted=false,attempts=0}
+    local p=current.preparedCommand or {}
+    local _,_,liveStopBinding=live(api,intent,true)
+    if not liveStopBinding or not sameStops(p.stops,liveStopBinding) then
+      current.executionReceipt.stage="live_owner_type_or_stops_changed";state:set(current);return false end
+    local work={request=r,intent=intent,stops=copyStops(p.stops),callbackSeen=false,accepted=false,attempts=0}
     pending=work;current.executionReceipt.stage="send_attempt";state:set(current)
     local sent=pcall(function()
       api.cmd.sendCommand(api.cmd.makeVehicleSetLineCmd(r.entity,r.lineEntity,0),function(_,success)
@@ -177,7 +208,9 @@ function M.execute(state,r,api)
     end)
     if not sent then
       pending=nil;current.executionReceipt.stage="send_failed";state:set(current);return false end
-    if current.executionReceipt.stage=="send_attempt" then
+    -- A synchronous callback may publish a detached newer state. Preserve
+    -- both its accepted-world wait and its rejection instead of overwriting it.
+    if not work.callbackSeen and current.executionReceipt.stage=="send_attempt" then
       current.executionReceipt.stage="await_callback";state:set(current) end
     return true
   end)
@@ -202,9 +235,11 @@ function M.observe(state,api)
     if not native(clock) or clock.updateCount~=work.request.scheduledUpdate
       or not native(speed) or speed.speedup~=0 then
       receipt.stage="after_clock";pending=nil;state:set(saved);return false end
-    local vehicle,line=live(api,work.intent,false)
+    local vehicle,line,liveStopBinding=live(api,work.intent,false)
     if not vehicle or not line then
       receipt.stage="after_owner_or_type";pending=nil;state:set(saved);return false end
+    if not sameStops(work.stops,liveStopBinding) then
+      receipt.stage="after_stops_changed";pending=nil;state:set(saved);return false end
     if vehicle.line~=work.intent.lineEntity then
       if work.attempts<24 then return false end
       receipt.stage="after_assignment_missing";pending=nil;state:set(saved);return false end
