@@ -71,6 +71,18 @@ test('an unknown callback retains bounded failure stage and consumes the attempt
     "assert(receipt.stage=='result_entities');assert(saved.nativeRoadReplayReceipt.stage=='result_entities')"),
     {code:'ENGINE_OUTCOME_UNKNOWN',outcome:'unknown',sends:1,fault:true});
 });
+test('each split result-entity stage survives bounded receipt encoding',()=>{
+  for(const stage of ['result_entity_vector','result_match_map','result_match_entry',
+    'result_match_relation','result_match_edge','result_match_pair',
+    'result_match_attachment','result_match_duplicate','result_match_count',
+    'result_proposal_stop','result_affected_object',
+    'result_affected_missing','result_affected_existence']){
+    const change=`deps.results.after=function()return{code='unknown',stage='${stage}'}end`;
+    const tail=`assert(receipt.stage=='${stage}');assert(saved.nativeRoadReplayReceipt.stage=='${stage}')`;
+    assert.deepEqual(run(change,tail),
+      {code:'ENGINE_OUTCOME_UNKNOWN',outcome:'unknown',sends:1,fault:true},stage);
+  }
+});
 test('unknown callback cannot be retried and consumes the save',()=>{
   assert.deepEqual(run('callback=false','receipt=dispatcher.dispatch(state,request,api,deps)'),
     {code:'REPLAY_CONSUMED_OR_COMPANY_UNKNOWN',outcome:'rejected',sends:1,fault:true});

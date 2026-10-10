@@ -5,7 +5,7 @@ import fengari from 'fengari';
 
 const {lua,lauxlib,lualib,to_luastring}=fengari;
 const source=await readFile(new URL('../mod/content/tf3mp_road_stop_simple_result.lua',import.meta.url),'utf8');
-function run(change='',preChange=''){
+function run(change='',preChange='',withStage=false){
   const script=`local result=(function() ${source} end)()
 local input={edgeEntity=24,companyEntity=10,model='models/stop.mdl',left=true,param=.5}
 local players={10,11};local stops={80};local balances={[10]=100000,[11]=70000}
@@ -41,13 +41,15 @@ local data={resultProposalData={costs=67500},proposal={streetProposal={edgeObjec
 ${change}
 local captured=result.capture(data,success,entities)
 local after=result.afterCaptured(api,before,input,captured)
-return before.code,after.code,after.stopEntity or 0,after.chargedCost or 0,calls`;
+return before.code,after.code,after.stopEntity or 0,after.chargedCost or 0,calls,after.stage or ''`;
   const L=lauxlib.luaL_newstate();lualib.luaL_openlibs(L);
   try{
     lua.lua_sethook(L,()=>lauxlib.luaL_error(L,to_luastring('TEST_INSTRUCTION_LIMIT')),lua.LUA_MASKCOUNT,1_000_000);
     assert.equal(lauxlib.luaL_loadstring(L,to_luastring(script)),lua.LUA_OK,lua.lua_tojsstring(L,-1));
-    assert.equal(lua.lua_pcall(L,0,5,0),lua.LUA_OK,lua.lua_tojsstring(L,-1));
-    return {before:lua.lua_tojsstring(L,-5),after:lua.lua_tojsstring(L,-4),stop:lua.lua_tonumber(L,-3),cost:lua.lua_tonumber(L,-2),calls:lua.lua_tonumber(L,-1)};
+    assert.equal(lua.lua_pcall(L,0,6,0),lua.LUA_OK,lua.lua_tojsstring(L,-1));
+    const observed={before:lua.lua_tojsstring(L,-6),after:lua.lua_tojsstring(L,-5),stop:lua.lua_tonumber(L,-4),cost:lua.lua_tonumber(L,-3),calls:lua.lua_tonumber(L,-2)};
+    if(withStage) observed.stage=lua.lua_tojsstring(L,-1);
+    return observed;
   }finally{lua.lua_close(L);}
 }
 
@@ -103,6 +105,39 @@ api.engine.getComponent=function(id,kind)
 end`;
   assert.deepEqual(run(guard),{before:'observed',after:'verified',stop:81,cost:67500,calls:0});
 });
+test('affected callback vector skips only the confirmed removed source road',()=>{
+  const rejectAbsent=`local originalGet=api.engine.getComponent
+api.engine.getComponent=function(id,kind)
+  if id==24 and exists[id]~=true then error('missing entity') end
+  return originalGet(id,kind)
+end`;
+  const accepted=run(`entities={{24,1},{25,1},{81,1}};${rejectAbsent}`,'',true);
+  assert.equal(accepted.after,'verified');
+  assert.equal(accepted.stage,'');
+  assert.equal(accepted.calls,0);
+  for(const change of [
+    'entities={{25,1},{81,1},{82,1}}',
+    'entities={{25,1},{81,1},{82,1}};exists[82]=false',
+  ]){
+    const observed=run(change,'',true);
+    assert.equal(observed.after,'unknown',change);
+    assert.equal(observed.stage,'result_affected_missing',change);
+    assert.equal(observed.calls,0,change);
+  }
+  for(const change of [
+    'entities={{25,1},{81,1},{82,1}};api.engine.entityExists=function(id)if id==82 then return nil end return exists[id]==true end',
+    'entities={{25,1},{81,1},{82,1}};api.engine.entityExists=function(id)if id==82 then error("unknown") end return exists[id]==true end',
+  ]){
+    const observed=run(change,'',true);
+    assert.equal(observed.after,'unknown',change);
+    assert.equal(observed.stage,'result_affected_existence',change);
+    assert.equal(observed.calls,0,change);
+  }
+  const extra=run('entities={{25,1},{81,1},{82,1}};exists[82]=true;components.EDGE_OBJECT[82]={param=.5}','',true);
+  assert.equal(extra.after,'unknown');
+  assert.equal(extra.stage,'result_affected_object');
+  assert.equal(extra.calls,0);
+});
 test('refuses a mismatched replacement road or preexisting stop on the selected geometry',()=>{
   assert.equal(run('components.BASE_EDGE[25].position1={x=11,y=1,z=2}').after,'unknown');
   assert.equal(run('', 'map[80]=25;components.EDGE_OBJECT[80]={param=.5};components.PLAYER_OWNED[80]={player=10};components.MODEL_INSTANCE_LIST[80]={fatInstances={{modelId=7}}};components.BASE_EDGE[25].objects={{80,1}};exists[25]=true').before,'unknown');
@@ -148,5 +183,37 @@ test('invalid or moving preconditions cannot form a readback baseline',()=>{
   for(const change of ['input.param=0/0','update=0/0','components.BASE_EDGE[24].objects={{80,1}}',
     'players={10,10}','exists[11]=nil','components.PLAYER[11]=nil']){
     assert.equal(run('',change).before,'unknown',change);
+  }
+});
+
+test('bounded callback shapes report the exact failed result-entity predicate',()=>{
+  const cases=[
+    ['entities={{25,1},{25,1}}','result_entity_vector'],
+    ['map={}','result_match_count'],
+    ['api.engine.system.streetSystem.getEdgeObject2EdgeMap=function()return nil end','result_match_map'],
+    ['map[0]=25','result_match_entry'],
+    ['exists[81]=nil','result_match_relation'],
+    ['components.BASE_EDGE[25]=nil','result_match_edge'],
+    ['components.BASE_EDGE[25].objects={{81}}','result_match_pair'],
+    ['components.BASE_EDGE[25].objects={{81,2}}','result_match_attachment'],
+    ['map[82]=26;exists[82]=true;exists[26]=true;components.EDGE_OBJECT[82]={param=.5};components.PLAYER_OWNED[82]={player=10};components.MODEL_INSTANCE_LIST[82]={fatInstances={{modelId=7}}};components.BASE_EDGE[26]={objects={{82,1}},node0=31,node1=32,position0=geo.position0,position1=geo.position1,tangent0=geo.tangent0,tangent1=geo.tangent1}','result_match_duplicate'],
+    ['data.proposal.streetProposal.edgeObjectsToAdd[1].resultEntity=82','result_proposal_stop'],
+    ['entities={{25,1},{81,1},{82,1}};exists[82]=true;components.EDGE_OBJECT[82]={param=.5}','result_affected_object'],
+  ];
+  for(const [change,stage] of cases){
+    const observed=run(change,'',true);
+    assert.equal(observed.after,'unknown',change);
+    assert.equal(observed.stage,stage,change);
+    assert.equal(observed.calls,0,change);
+  }
+});
+
+test('successful recorded callback shapes remain verified without a diagnostic stage',()=>{
+  for(const change of ['', 'entities={{25,1}}', 'entities={}',
+    'entities={{25,{num={1,2,3}}},{81,{num={0,0,1}}}}']){
+    const observed=run(change,'',true);
+    assert.equal(observed.after,'verified',change);
+    assert.equal(observed.stage,'',change);
+    assert.equal(observed.calls,0,change);
   }
 });

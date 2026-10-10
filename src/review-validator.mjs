@@ -123,7 +123,7 @@ export async function validateReviewPackage(root) {
   }
   for (const [file, digest] of [
     ['tf3mp_road_replay_dispatch.lua', 'ca2f6afb3e4ea449f67e9db5d0c57817abf4698abd93985d7acc7688ca81917f'],
-    ['tf3mp_road_replay_execute.lua', 'a11cad7e3ebe1be1a57ff394ba1beb833d0ebd1a9225dc64c15904f4576937cc'],
+    ['tf3mp_road_replay_execute.lua', 'a9ecb62ad5c25b230a26e13d034cfc1d5f6903ef9982ce00c6d3728122758eec'],
     ['tf3mp_road_replay_preflight.lua', '92d02d45d95457fcb786525a0c7d0350f98d2b4b38e90803c6e31bc4409f277a'],
     ['tf3mp_road_replay_prepare.lua', 'b6738a73e3306ca6aa734c63438c91ed5b54ade321eede31c920103eab67ab25'],
     ['tf3mp_road_replay_rebuild.lua', 'f6de6ff3edff7f05199bf34dfeb699bbb81147e26d4f9257e0f81110a24ae028'],
@@ -146,8 +146,8 @@ export async function validateReviewPackage(root) {
     ['tf3mp_line_remove_order.lua', '319c86380d677fd35013644384061cbead10690dff2af85b68e7ecf5b6818a72'],
     ['tf3mp_depot_build_order_readback.lua', 'ee8fafa52736e95d639cebf657aecc11454ca179c710a88b55e3d73068904a9f'],
     ['tf3mp_road_stop_simple_prepare.lua', 'b9de96bbb92f212b3d8cc83d97564f2b7a814cfd6aa65ac4116ad9208add382c'],
-    ['tf3mp_road_stop_simple_dispatch.lua', 'c3b689756b181097b62ecc2b0477d490075a9e4e1d477be7ddb587f1632d5a6b'],
-    ['tf3mp_road_stop_simple_result.lua', '536ca7ea1ab8ec8a2dbf33e27ac7fec67c3bddd457191e55522899a733b6c076'],
+    ['tf3mp_road_stop_simple_dispatch.lua', 'b2762d5d0ea6229d545114ceb14a0b163f7a01d52dcd132a385a4d0f4ca3e6ec'],
+    ['tf3mp_road_stop_simple_result.lua', '0b3a1644dc96355165e61a7ca87a131883a447819994b916ab05b7cf7cbb52a2'],
   ]) {
     const source = await readFile(path.join(absoluteRoot, 'content', file), 'utf8');
     if (createHash('sha256').update(source.replace(/\r\n/g, '\n')).digest('hex') !== digest)

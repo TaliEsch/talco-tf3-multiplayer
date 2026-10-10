@@ -27,7 +27,12 @@ local BEFORE_STAGES = {input=true,held=true,road=true,model=true,existing_stop=t
   roster_binding=true,roster_shape=true,roster_players=true,balances=true}
 local AFTER_STAGES = {result_shape=true,result_hold=true,result_player=true,
   result_road=true,result_model=true,result_cost=true,
-  result_balances=true,result_entities=true,result_stop=true,result_attachment=true}
+  result_balances=true,result_entities=true,result_stop=true,result_attachment=true,
+  result_entity_vector=true,result_match_map=true,result_match_entry=true,
+  result_match_relation=true,result_match_edge=true,result_match_pair=true,
+  result_match_attachment=true,result_match_duplicate=true,result_match_count=true,
+  result_proposal_stop=true,result_affected_object=true,
+  result_affected_missing=true,result_affected_existence=true}
 local function valid(request)
   if not exact(request, REQUEST) or request.schemaVersion ~= 1
     or request.kind ~= "native_road_stop_simple_probe" or not nonce(request.nonce)

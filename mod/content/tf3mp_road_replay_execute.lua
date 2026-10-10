@@ -38,7 +38,12 @@ local function receipt(request,code,outcome)
 end
 local RESULT_STAGES = {result_shape=true,result_hold=true,result_player=true,
   result_road=true,result_model=true,result_cost=true,
-  result_balances=true,result_entities=true,result_stop=true,result_attachment=true}
+  result_balances=true,result_entities=true,result_stop=true,result_attachment=true,
+  result_entity_vector=true,result_match_map=true,result_match_entry=true,
+  result_match_relation=true,result_match_edge=true,result_match_pair=true,
+  result_match_attachment=true,result_match_duplicate=true,result_match_count=true,
+  result_proposal_stop=true,result_affected_object=true,
+  result_affected_missing=true,result_affected_existence=true}
 
 function M.execute(state,request,consent,api,prepare,results)
   local valid,approved = pcall(function()

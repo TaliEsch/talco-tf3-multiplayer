@@ -152,6 +152,12 @@ test('readback failure records a bounded post-send stage without another command
   assert.equal(observed.status,'unknown');
   assert.equal(observed.sends,1);
 });
+test('split result-entity stage is retained after one ordered send',()=>{
+  const observed=run("result.after=function()return{code='unknown',stage='result_match_count'}end");
+  assert.equal(observed.stage,'after_result_match_count');
+  assert.equal(observed.status,'unknown');
+  assert.equal(observed.sends,1);
+});
 
 test('read-only world checks can outlast the callback without replaying Stop',()=>{
   const delayed="local reads=0;result.after=function()reads=reads+1;if reads==1 then return{code='unknown',stage='result_road'}end return{code='verified',stopEntity=73312,edgeEntity=73313,chargedCost=46348,updateCount=108}end";

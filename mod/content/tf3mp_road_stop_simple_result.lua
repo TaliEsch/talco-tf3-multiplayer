@@ -50,12 +50,14 @@ local function sameGeometry(a, b)
   for i = 1, 14 do if a[i] ~= b[i] then return false end end
   return true
 end
-local function matchingStops(api, input, modelId, geometry)
+local function matchingStops(api, input, modelId, geometry, progress)
+  if progress then progress.stage = "result_match_map" end
   local street = api.engine.system and api.engine.system.streetSystem
   local map = street and street.getEdgeObject2EdgeMap()
   if type(map) ~= "table" then fail() end
   local matches, seen = {}, 0
   for objectId, roadId in pairs(map) do
+    if progress then progress.stage = "result_match_entry" end
     seen = seen + 1
     if seen > 500000 or not entity(objectId) or not entity(roadId) then fail() end
     local object = component(api, objectId, "EDGE_OBJECT")
@@ -67,21 +69,26 @@ local function matchingStops(api, input, modelId, geometry)
         if native(models) and dense(models.fatInstances, 64) then
           for _, instance in ipairs(models.fatInstances) do
             if native(instance) and instance.modelId == modelId then
+              if progress then progress.stage = "result_match_relation" end
               if api.engine.entityExists(objectId) ~= true
                 or api.engine.entityExists(roadId) ~= true
                 or street.getEdgeForEdgeObject(objectId) ~= roadId then fail() end
               local edge = component(api, roadId, "BASE_EDGE")
+              if progress then progress.stage = "result_match_edge" end
               if not native(edge) or not dense(edge.objects, 64) then fail() end
               if sameGeometry(geometry, roadGeometry(edge)) then
                 local side = input.left and api.type.enum.EdgeObjectType.STOP_LEFT
                   or api.type.enum.EdgeObjectType.STOP_RIGHT
                 local attached = 0
                 for _, pair in ipairs(edge.objects) do
+                  if progress then progress.stage = "result_match_pair" end
                   if not dense(pair, 2) or #pair ~= 2 then fail() end
                   if pair[1] == objectId and pair[2] == side then attached = attached + 1 end
                 end
+                if progress then progress.stage = "result_match_attachment" end
                 if attached ~= 1 then fail() end
                 matches[#matches+1] = {stop=objectId, road=roadId}
+                if progress then progress.stage = "result_match_duplicate" end
                 if #matches > 1 then fail() end
               end
               break
@@ -245,7 +252,7 @@ local function verify(api, before, input, data, success, resultEntities, progres
       if current ~= prior - cost then fail() end
     elseif current ~= prior then fail() end
   end
-  progress.stage = "result_entities"
+  progress.stage = "result_entity_vector"
   local affected = {}
   for _, id in ipairs(resultEntities) do
     if not entity(id) or affected[id] then fail() end
@@ -255,19 +262,30 @@ local function verify(api, before, input, data, success, resultEntities, progres
   -- completed save showed the replaced road keeps exact endpoint geometry.
   -- Require one newly observed, owned Stop on that geometry instead of
   -- deriving an ID from the callback's incomplete changed-entity vector.
-  local matches = matchingStops(api, input, before.modelId, before.geometry)
+  local matches = matchingStops(api, input, before.modelId, before.geometry, progress)
+  progress.stage = "result_match_count"
   if #matches ~= 1 then fail() end
   local stop, road = matches[1].stop, matches[1].road
   local completed = native(data) and data.proposal or nil
   local completedStreet = native(completed) and completed.streetProposal or nil
   local addedObjects = native(completedStreet) and completedStreet.edgeObjectsToAdd or nil
+  progress.stage = "result_proposal_stop"
   if addedObjects ~= nil then
     if not dense(addedObjects, 1) or #addedObjects ~= 1 or not native(addedObjects[1]) then fail() end
     local resultId = addedObjects[1].resultEntity
     if resultId ~= nil and (not integer(resultId) or resultId > 0 and resultId ~= stop) then fail() end
   end
+  progress.stage = "result_affected_object"
   for id in pairs(affected) do
-    if native(component(api, id, "EDGE_OBJECT")) and id ~= stop then fail() end
+    local existsOk, exists = pcall(api.engine.entityExists, id)
+    if not existsOk or exists ~= true and exists ~= false then
+      progress.stage = "result_affected_existence"; fail()
+    end
+    if exists == false then
+      if id ~= input.edgeEntity or originalExists ~= false then
+        progress.stage = "result_affected_missing"; fail()
+      end
+    elseif native(component(api, id, "EDGE_OBJECT")) and id ~= stop then fail() end
   end
   progress.stage = "result_stop"
   local owner = component(api, stop, "PLAYER_OWNED")
