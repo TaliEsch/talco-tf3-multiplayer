@@ -71,3 +71,32 @@ test('callback mismatch cannot verify or replay',()=>{
   assert.equal(result.sent,1);assert.equal(result.status,'unknown');
   assert.equal(result.barrier,'consumed');assert.equal(result.fault,true);
 });
+
+test('synchronous callback survives detached state snapshots without a second send',()=>{
+  const result=run(`
+local function copy(value)
+ if type(value)~='table' then return value end
+ local out={} for key,item in pairs(value) do out[key]=copy(item) end return out
+end
+state.get=function()return copy(current)end
+state.set=function(_,value)current=copy(value)end
+api.cmd.sendCommand=function(_,fn)sent=sent+1;fn({resultEntity=700},true,{{700,1}})end
+`, '');
+  assert.deepEqual(result,{first:true,second:false,observed:true,sent:1,status:'ok',
+    stage:'',barrier:'consumed',phase:'action_held',fault:false});
+});
+
+test('synchronous native rejection stays unknown and cannot resend',()=>{
+  const result=run(`
+local function copy(value)
+ if type(value)~='table' then return value end
+ local out={} for key,item in pairs(value) do out[key]=copy(item) end return out
+end
+state.get=function()return copy(current)end
+state.set=function(_,value)current=copy(value)end
+api.cmd.sendCommand=function(_,fn)sent=sent+1;fn({},false,{})end
+`, '');
+  assert.equal(result.sent,1);assert.equal(result.second,false);
+  assert.equal(result.status,'unknown');assert.equal(result.stage,'native_rejected_unknown');
+  assert.equal(result.fault,true);
+});

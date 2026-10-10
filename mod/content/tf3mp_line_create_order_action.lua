@@ -163,7 +163,9 @@ function M.send(state,request,api)
     end)
   end)
   if not sent then pending=nil;current.executionReceipt.stage="send_failed";state:set(current);return false end
-  if current.executionReceipt.stage=="send_attempt" then
+  -- A synchronous callback may have published a newer detached state value.
+  -- Never overwrite its completion/rejection with the pre-send snapshot.
+  if not work.callbackSeen and current.executionReceipt.stage=="send_attempt" then
     current.executionReceipt.stage="await_callback";state:set(current)
   end
   return true
