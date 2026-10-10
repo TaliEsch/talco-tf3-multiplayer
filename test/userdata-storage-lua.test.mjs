@@ -141,3 +141,29 @@ app.loadUserdata=function() reads=reads+1;error('invalid Lua payload') end
 assert(not pcall(storage.loadUserdata,'tf3mp_status_1','ack') and reads==1)
 `,{qualifiedPrefix:true}));
 
+test('recorded bridge missing-file read recovers freshly but persistent loss and action errors fail',()=>runLua(`
+local storage=userdataStorageModule.new(userdataStorageModule.prefixProfile)
+local reads=0
+local path='C:/Users/olihf/Downloads/Temp/tf3mp-isolated-steam/userdata/109855567/3493540/local/mod_presets/'
+app.loadUserdata=function(directory,name)
+ reads=reads+1
+ if reads<3 then error('cannot open '..path..name..'.lua: No such file or directory') end
+ return {schemaVersion=1,mode='watchdog_test',nonce=string.rep('a',32)}
+end
+assert(storage.loadUserdata('tf3mp_status_1','bridge').mode=='watchdog_test' and reads==3)
+reads=0
+app.loadUserdata=function(directory,name)
+ reads=reads+1;error('cannot open '..path..name..'.lua: No such file or directory')
+end
+local ok,err=pcall(storage.loadUserdata,'tf3mp_status_1','bridge')
+assert(not ok and string.find(err,'No such file or directory',1,true) and reads==3)
+reads=0
+assert(not pcall(storage.loadUserdata,'tf3mp_status_1','vehicle_command') and reads==1)
+reads=0
+app.loadUserdata=function() reads=reads+1;error('cannot open other.lua: No such file or directory') end
+assert(not pcall(storage.loadUserdata,'tf3mp_status_1','bridge') and reads==1)
+reads=0
+app.loadUserdata=function() reads=reads+1;return {} end
+local exists,reason=storage.exists('tf3mp_status_1','bridge')
+assert(exists==false and reason=='empty_unavailable' and reads==3)
+`,{qualifiedPrefix:true}));

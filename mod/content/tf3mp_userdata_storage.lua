@@ -48,7 +48,7 @@ function M.new(profile)
     -- These pure-data publications are atomically replaced by the helper.
     -- A Windows open can briefly fail during replacement. Never retry action
     -- requests, return cached data, or accept an empty read as evidence.
-    if profile ~= PREFIX_PROFILE or (name ~= "ack" and name ~= "bridge_inventory") then
+    if profile ~= PREFIX_PROFILE or (name ~= "bridge" and name ~= "ack" and name ~= "bridge_inventory") then
       return app.loadUserdata(physicalDirectory(), fileName)
     end
     for attempt = 1, 3 do
@@ -59,7 +59,8 @@ function M.new(profile)
         local transient = type(value) == "string"
           and string.find(value, "cannot open", 1, true) ~= nil
           and string.find(value, fileName .. ".lua", 1, true) ~= nil
-          and string.find(value, "Permission denied", 1, true) ~= nil
+          and (string.find(value, "Permission denied", 1, true) ~= nil
+            or string.find(value, "No such file or directory", 1, true) ~= nil)
         if not transient or attempt == 3 then error(value, 0) end
       end
     end
