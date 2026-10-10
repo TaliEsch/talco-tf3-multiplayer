@@ -89,6 +89,45 @@ test('admission waits for an actual Host sample while processing control traffic
     assert.equal(f.events.find(e=>e.event==='host_action_clock_wait_finished').caughtUp,true);
   }finally{await f.close();}
 });
+test('recorded bc4c moving peer clock cannot be satisfied by overtaking its original sample',async()=>{
+  const f=await fixture(2,{leadUpdates:60,coordinationTimeoutMs:900});
+  try{
+    await f.prepare();
+    const roundId=f.host.coordinator.roundId;
+    f.setUpdate(716);
+    f.clients[0].connection.send('participant_heartbeat',{roundId,updateCount:725});
+    f.request();
+    await until(()=>f.events.some(e=>e.event==='host_action_clock_wait'));
+    assert.ok(f.events.some(e=>e.event==='host_action_clock'
+      &&e.hostUpdateCount===716&&e.peerUpdateCount===725));
+    const hostTrajectory=[723,728,733,738,743,748,753,758,763];
+    const peerTrajectory=[729,734,740,744,750,755,760,764,770];
+    for(let i=0;i<hostTrajectory.length;i++){
+      const value=`bc4c-clock-${i}`;
+      f.clients[0].connection.send('participant_heartbeat',
+        {roundId,updateCount:peerTrajectory[i]});
+      f.clients[0].connection.send('test',{value});
+      await until(()=>f.clients[0].messages.some(m=>m.kind==='test_echo'
+        &&m.payload.value===value));
+      f.setUpdate(hostTrajectory[i]);
+      assert.ok(hostTrajectory[i]<peerTrajectory[i]);
+      assert.equal(f.events.some(e=>e.event==='command_proposed'),false);
+      await new Promise(resolve=>setTimeout(resolve,30));
+    }
+    f.setUpdate(765);
+    assert.ok(765>725 && 765<peerTrajectory.at(-1));
+    await until(()=>f.clients[0].messages.some(m=>m.kind==='session_halted'));
+    assert.equal(f.clients[0].messages.find(m=>m.kind==='session_halted').payload.code,
+      'CLOCK_MISMATCH');
+    assert.equal(f.events.some(e=>e.event==='command_proposed'),false);
+    assert.equal(f.clients[0].messages.some(m=>m.kind==='command_prepare'),false);
+    assert.equal(f.clients[0].messages.filter(m=>m.kind==='test_echo'
+      &&m.payload.value?.startsWith('bc4c-clock-')).length,peerTrajectory.length);
+    const finished=f.events.find(e=>e.event==='host_action_clock_wait_finished');
+    assert.equal(finished.caughtUp,false);
+    assert.equal(finished.hostUpdateCount,765);
+  }finally{await f.close();}
+});
 test('disconnect during clock catchup cannot admit the waiting action',async()=>{
   const f=await fixture(2,{coordinationTimeoutMs:1000});
   try{
