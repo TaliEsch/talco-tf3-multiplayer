@@ -290,3 +290,27 @@ test('Join cannot arm if its selected game company differs from its grant',async
   await assert.rejects(router.start(77),/CONTEXT_UNAVAILABLE/);
   assert.equal(arms,0);assert.equal(halts,0);
 });
+
+for(const stopped of [0,1])test(`foreign Join ${stopped===0?'Start':'Stop'} is rejected before native permission or transport`,async()=>{
+  const effects=[];
+  const connection={playerId:'join',socket:{destroyed:false},
+    subscribe:()=>{effects.push('subscribe');return()=>{};},send:()=>effects.push('send')};
+  const bridge={connected:true,
+    engineObservation:{available:true,sample:{companyEntity:28619,updateCount:898,speedup:1}},
+    inspectVehicleOwner:async request=>{
+      assert.deepEqual(request,{entity:27989,company:28619});
+      throw new Error('VEHICLE_OWNER_NOT_CONFIRMED');
+    },
+    openSingleStopPermit:async()=>effects.push('permit'),
+    closeSingleStopPermit:async()=>effects.push('close')};
+  const client={requireCapability:()=>{},
+    control:async()=>effects.push('control'),armVehicleCancel:async()=>effects.push('arm')};
+  const router=createJoinCancelledStop({connection,companyGrant:{companyEntity:28619},
+    joinBootstrap:{failed:false,attachment:{ready:true,adapter:{phase:'running'}}},
+    bridge,nativeGate:{ready:true,client},halt:()=>effects.push('halt'),
+    stopped,enableExperimentalStart:stopped===0});
+  await assert.rejects(router.start(27989),/^Error: VEHICLE_OWNER_NOT_CONFIRMED$/);
+  assert.deepEqual(effects,[]);
+  await assert.rejects(router.start(27989),/ALREADY_ATTEMPTED/);
+  assert.deepEqual(effects,[]);
+});
