@@ -1,5 +1,26 @@
 # Completion audit against the build prompt
 
+## 11 October: paired connector checkpoint and verified Host save pass
+
+Pair 4f158, session 33b59246-ca60-449b-b639-06047dae9b78, loads the authenticated
+source under Host 15702 and Join 28619. Independent sequence-1 receipts match at
+held update 595, native charge 26,698 and Host balance 20,453,551. Created nodes
+28748/28749 and edges 28753/28754/28757/28760 match in both games.
+The corrected resume gate proceeds to fresh repeat checkpoint index 2 at update
+604, with matching hash
+813830d9377683aab4dc94d1052d9e2cf5f3267b5e948ef6658dd365174b24e3.
+Covered town growth, economy, topology, vehicles, companies and lines/services
+match; Host balance is 20,450,240 and Join remains zero. The subsequent 3,311
+Host balance change is observed, not attributed to a particular expense here.
+Hidden RNG state remains unavailable; coverage is comparison-ready, not complete.
+The Host save is 19,077,628 bytes, independently hashed to
+12488f2ea721d8c6fb72b882cc43132ab7e56af9390d71353171661d90083605.
+Both native terminal events correlate with their halt requests; both 52-sample
+halt windows retain update 604. Both cleanup results pass, exact processes exit,
+and recorded Host/Join installed baselines restore. Fresh-process reload,
+retained connector identity and duplicate-barrier observation remain unperformed.
+This establishes construction/checkpoint/save, not a functioning road service.
+
 ## 2026-10-08 — Steam update stopped the fresh construction attempt before attachment
 
 Follow-up offline work traced the new step/common-exit and registration/join
