@@ -38,22 +38,28 @@ local function roadTerminal(api,group,station,terminal)
   return false
 end
 local function lineFor(api,stops)
-  local line=api.type.Line.new();line.stops={}
+  local line=api.type.Line.new();local selectedStops={}
   for _,selected in ipairs(stops) do
     local stop=api.type.Line.Stop.new()
     stop.stationGroup=selected.group;stop.station=selected.station
     stop.terminal=-1;stop.alternativeTerminals={}
-    line.stops[#line.stops+1]=stop
+    selectedStops[#selectedStops+1]=stop
   end
+  line.stops=selectedStops
   local assignments=api.engine.system.lineSystem.getBestLineAssignment(-1,line,true)
   if not native(assignments) or #assignments~=2 then fail("TERMINAL_ASSIGNMENT_MISSING") end
+  local assignedStops={}
   for i,assignment in ipairs(assignments) do
     if not native(assignment) or assignment.station~=stops[i].station
       or not roadTerminal(api,stops[i].group,assignment.station,assignment.terminal) then
       fail("ROAD_TERMINAL_UNAVAILABLE")
     end
-    line.stops[i].station=assignment.station;line.stops[i].terminal=assignment.terminal
+    local stop=api.type.Line.Stop.new()
+    stop.stationGroup=stops[i].group;stop.station=assignment.station
+    stop.terminal=assignment.terminal;stop.alternativeTerminals={}
+    assignedStops[i]=stop
   end
+  line.stops=assignedStops
   return line
 end
 local function live(api,request)

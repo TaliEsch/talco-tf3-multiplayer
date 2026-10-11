@@ -66,6 +66,32 @@ test('changed station owner prevents submission and preserves consumed unknown',
     status:'unknown',stage:'live_STATION_OWNER_CHANGED',barrier:'consumed',
     phase:'execution_unknown',fault:true});
 });
+
+test('line construction assigns detached native stop arrays instead of mutating getters',()=>{
+  const result=run(`
+local function cloneStops(value)
+ local out={}
+ for i,stop in ipairs(value)do
+  local item={}for key,field in pairs(stop)do item[key]=field end
+  out[i]=item
+ end
+ return out
+end
+api.type.Line.new=function()
+ local stored={}
+ return setmetatable({}, {
+  __index=function(_,key)if key=='stops'then return cloneStops(stored)end end,
+  __newindex=function(_,key,value)assert(key=='stops');stored=cloneStops(value)end})
+end
+api.engine.system.lineSystem.getBestLineAssignment=function(_,line)
+ assert(#line.stops==2,'LINE_STOPS_NOT_ASSIGNED')
+ assert(line.stops[1].terminal==-1 and line.stops[2].terminal==-1)
+ return {{station=0,terminal=0},{station=0,terminal=0}}
+end
+`);
+  assert.equal(result.first,true);assert.equal(result.sent,1);
+  assert.equal(result.observed,true);assert.equal(result.status,'ok');
+});
 test('callback mismatch cannot verify or replay',()=>{
   const result=run('', 'callback({resultEntity=701},true,{{701}})');
   assert.equal(result.sent,1);assert.equal(result.status,'unknown');
