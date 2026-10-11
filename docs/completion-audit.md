@@ -1,5 +1,23 @@
 # Completion audit against the build prompt
 
+## 12 October: fresh connector reload and covered comparison pass
+
+Fresh Host process a143713 loads the verified paired connector save at paused
+update 604. Fourteen independent fresh observations span 11,209 ms. Retained
+nodes 28748/28749, edges 28753/28754/28757/28760, spur 28836, ownership and
+consumed sequence/history correlate with the saved execution/archive identities.
+Covered checkpoint hash 813830d9377683aab4dc94d1052d9e2cf5f3267b5e948ef6658dd365174b24e3
+matches the original paired checkpoint; Host balance is 20,450,240, Join zero.
+The save hash remains unchanged. No construction or financial mutation is sent.
+This establishes retained history, not an actively attempted duplicate dispatch.
+Native halt request 164 correlates with its terminal event and 17 cold-terminal
+owner observations. Controller restoration succeeds. The runner leaves closure
+to the operator; subsequent exact-process retirement and installed-baseline
+restoration succeed. No TF3 process remains. Thirty-one focused checks and mod
+review pass. The current full regression is pending, not claimed green.
+Hidden RNG remains unavailable; single-Host reload does not qualify separate-PC
+networking, a complete road service or full-game friend readiness.
+
 ## 12 October: connector reload reaches a specific graph rejection
 
 Follow-up fresh process 61f865 narrows the existing getter's rejection to
