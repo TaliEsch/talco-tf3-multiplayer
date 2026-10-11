@@ -164,9 +164,21 @@ function M.send(state,request,api)
         -- ignores the first ICommandData argument for line creation.
         -- Keep the single-result contract and fresh identity requirement;
         -- the callback still needs independent world verification below.
-        if type(entities)~="table" or #entities~=1 or not native(entities[1]) then
-          receipt.stage="callback_entities";pending=nil;state:set(saved);return end
-        local id=entities[1][1]
+        if not native(entities) then
+          receipt.stage="callback_entities_type_"..type(entities);pending=nil;state:set(saved);return end
+        local countOk,count=pcall(function()return #entities end)
+        if not countOk then
+          receipt.stage="callback_entities_count_access";pending=nil;state:set(saved);return end
+        if count~=1 then
+          receipt.stage="callback_entities_count";pending=nil;state:set(saved);return end
+        local pairOk,pair=pcall(function()return entities[1] end)
+        if not pairOk then
+          receipt.stage="callback_entities_pair_access";pending=nil;state:set(saved);return end
+        if not native(pair) then
+          receipt.stage="callback_entities_pair_"..type(pair);pending=nil;state:set(saved);return end
+        local idOk,id=pcall(function()return pair[1] end)
+        if not idOk then
+          receipt.stage="callback_identity_access";pending=nil;state:set(saved);return end
         if not entity(id) or before[id] then
           receipt.stage="callback_identity";pending=nil;state:set(saved);return end
         work.callback=id;receipt.stage="await_world";state:set(saved)

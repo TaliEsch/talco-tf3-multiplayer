@@ -48,6 +48,7 @@ return first,second,observed,sent,current.executionReceipt and current.execution
  current.coordinationBinding.phase,current.phase2CompanyFault`;
   const L=lauxlib.luaL_newstate();lualib.luaL_openlibs(L);
   try{
+    lua.lua_newuserdata(L,0);lua.lua_setglobal(L,to_luastring('nativeEntitiesFixture'));
     lua.lua_sethook(L,()=>lauxlib.luaL_error(L,to_luastring('TEST_INSTRUCTION_LIMIT')),lua.LUA_MASKCOUNT,1_000_000);
     assert.equal(lauxlib.luaL_loadstring(L,to_luastring(script)),lua.LUA_OK,lua.lua_tojsstring(L,-1));
     assert.equal(lua.lua_pcall(L,0,9,0),lua.LUA_OK,lua.lua_tojsstring(L,-1));
@@ -69,6 +70,13 @@ test('stock callback entity pair does not require ICommandData resultEntity',()=
     assert.equal(result.sent,1);assert.equal(result.second,false);
   }
 });
+test('native userdata callback container retains single-result and world verification',()=>{
+  const result=run('',`debug.setmetatable(nativeEntitiesFixture,{
+    __len=function()return 1 end,__index=function(_,key)if key==1 then return {700,1} end end
+  });callback({},true,nativeEntitiesFixture)`);
+  assert.equal(result.status,'ok');assert.equal(result.observed,true);
+  assert.equal(result.sent,1);assert.equal(result.second,false);
+});
 test('invalid or multiple callback entities remain consumed unknown',()=>{
   for(const callback of ['callback({},true,{})','callback({},true,{{700,1},{701,1}})',
     'callback({},true,{{0,1}})']){
@@ -76,6 +84,23 @@ test('invalid or multiple callback entities remain consumed unknown',()=>{
     assert.equal(result.status,'unknown');assert.equal(result.observed,false);
     assert.equal(result.sent,1);assert.equal(result.second,false);
     assert.equal(result.barrier,'consumed');assert.equal(result.fault,true);
+  }
+});
+test('callback container failures identify the rejecting predicate without resend',()=>{
+  for(const [callback,stage] of [
+    ['callback({},true,nil)','callback_entities_type_nil'],
+    ['callback({},true,{})','callback_entities_count'],
+    ['callback({},true,{{700,1},{701,1}})','callback_entities_count'],
+    ['callback({},true,{700})','callback_entities_pair_number'],
+    ['callback({},true,{{0,1}})','callback_identity'],
+    ['callback({},true,setmetatable({}, {__len=function()error("count")end}))','callback_entities_count_access'],
+    ['callback({},true,setmetatable({}, {__len=function()return 1 end,__index=function()error("pair")end}))','callback_entities_pair_access'],
+    ['callback({},true,{setmetatable({}, {__index=function()error("id")end})})','callback_identity_access'],
+  ]){
+    const result=run('',callback);
+    assert.equal(result.stage,stage);assert.equal(result.status,'unknown');
+    assert.equal(result.observed,false);assert.equal(result.sent,1);
+    assert.equal(result.second,false);assert.equal(result.barrier,'consumed');
   }
 });
 test('changed station owner prevents submission and preserves consumed unknown',()=>{
