@@ -74,12 +74,12 @@ local function mat4(types, value)
   end
   return call(types.Mat4f, cols[1], cols[2], cols[3], cols[4])
 end
-local function map(v, build)
+local function map(v, build, keyId)
   if not array(v) then fail() end
   local out = {}
   for _, pair in ipairs(v) do
     if not array(pair) or #pair ~= 2 then fail() end
-    local key = int(pair[1]); if out[key] ~= nil then fail() end
+    local key = (keyId or int)(pair[1]); if out[key] ~= nil then fail() end
     out[key] = build(pair[2])
   end
   return out
@@ -97,7 +97,8 @@ local function lane(enums, v)
   end
   return out
 end
-local function edge(types, components, enums, v, initialized)
+local function edge(types, components, enums, v, initialized, id)
+  id = id or int
   if type(v) ~= "table" then fail() end
   -- Stock track_builder.tl writes SegmentAndEntity.new().comp directly.
   local out = initialized or call0(components.BaseEdge)
@@ -105,11 +106,11 @@ local function edge(types, components, enums, v, initialized)
   out.typeIndex = int(v.typeIndex)
   out.objects = list(v.objects, function(pair)
     if not array(pair) or #pair ~= 2 then fail() end
-    return {int(pair[1]), named(enums, "EdgeObjectType", pair[2], {STOP_LEFT=true,STOP_RIGHT=true,SIGNAL=true})}
+    return {id(pair[1]), named(enums, "EdgeObjectType", pair[2], {STOP_LEFT=true,STOP_RIGHT=true,SIGNAL=true})}
   end)
   out.laneConfigs = list(v.laneConfigs, function(x) return lane(enums, x) end)
   out.roadDevelopmentLocked = bool(v.roadDevelopmentLocked)
-  out.node0, out.node1 = int(v.node0), int(v.node1)
+  out.node0, out.node1 = id(v.node0), id(v.node1)
   out.position0, out.position1 = vec3(types, v.position0), vec3(types, v.position1)
   out.tangent0, out.tangent1 = vec3(types, v.tangent0), vec3(types, v.tangent1)
   if v.laneConfig == nil then
@@ -126,10 +127,11 @@ local function edge(types, components, enums, v, initialized)
   out.roadTemplate, out.roadStyle = string_(v.roadTemplate), string_(v.roadStyle)
   return out
 end
-local function segment(types, components, enums, v)
+local function segment(types, components, enums, v, id, ownedId)
+  id, ownedId = id or int, ownedId or owner
   if type(v) ~= "table" or int(v.type) ~= 0 or type(v.streetEdge) ~= "table" then fail() end
   local out = call0(types.SegmentAndEntity)
-  out.entity, out.comp, out.type = int(v.entity), edge(types, components, enums, v.comp, out.comp), 0
+  out.entity, out.comp, out.type = id(v.entity), edge(types, components, enums, v.comp, out.comp, id), 0
   local street = out.streetEdge or call0(components.BaseEdgeStreet)
   street.precedenceNode0 = precedence(types, v.streetEdge.precedenceNode0)
   street.precedenceNode1 = precedence(types, v.streetEdge.precedenceNode1)
@@ -146,16 +148,16 @@ local function segment(types, components, enums, v)
   end
   if v.playerOwned ~= nil then
     if type(v.playerOwned) ~= "table" then fail() end
-    local owned = initializedOwner or call0(components.PlayerOwned); owned.player = owner(v.playerOwned.player); out.playerOwned = owned
+    local owned = initializedOwner or call0(components.PlayerOwned); owned.player = ownedId(v.playerOwned.player); out.playerOwned = owned
   end
   return out
 end
-local function node(types, components, v)
+local function node(types, components, v, id)
   if type(v) ~= "table" or type(v.comp) ~= "table" then fail() end
   local out = call0(types.NodeAndEntity)
   -- Stock NodeAndEntity wrappers also initialize this component.
   local base = out.comp or call0(components.BaseNode)
-  out.entity, base.position, out.comp = int(v.entity), vec3(types, v.comp.position), base
+  out.entity, base.position, out.comp = (id or int)(v.entity), vec3(types, v.comp.position), base
   return out
 end
 local function edgeObject(types, v)
@@ -172,7 +174,8 @@ local function trafficLightState(types, v)
   out.duration, out.minDuration, out.canSkip = number(v.duration), number(v.minDuration), bool(v.canSkip)
   return out
 end
-local function nodeConfig(types, enums, v)
+local function nodeConfig(types, enums, v, id)
+  id = id or int
   if type(v) ~= "table" or type(v.comp) ~= "table" then fail() end
   -- BaseNodeLaneConnectionAndEntity is the public Proposal wrapper.  Its comp
   -- is intentionally initialized by that native constructor; BaseNodeConfig
@@ -180,12 +183,12 @@ local function nodeConfig(types, enums, v)
   local out = call0(types.BaseNodeLaneConnectionAndEntity)
   if type(out.comp) ~= "table" and type(out.comp) ~= "userdata" then fail() end
   local source, comp = v.comp, out.comp
-  out.entity = int(v.entity)
+  out.entity = id(v.entity)
   comp.laneConnections = list(source.laneConnections, function(connection)
     if type(connection) ~= "table" then fail() end
-    return {segment0=int(connection.segment0), lane0=int(connection.lane0), segment1=int(connection.segment1), lane1=int(connection.lane1), withRoad=bool(connection.withRoad), withTram=bool(connection.withTram)}
+    return {segment0=id(connection.segment0), lane0=int(connection.lane0), segment1=id(connection.segment1), lane1=int(connection.lane1), withRoad=bool(connection.withRoad), withTram=bool(connection.withTram)}
   end)
-  comp.crosswalks = list(source.crosswalks, int)
+  comp.crosswalks = list(source.crosswalks, id)
   comp.trafficLightPreference = named(enums, "TrafficLightPreference", source.trafficLightPreference, {YES=true,NO=true,AUTO=true})
   if type(source.trafficLightConfig) ~= "table" then fail() end
   local lights = call0(types.TrafficLightConfig)
@@ -204,6 +207,95 @@ local function nodeConfig(types, enums, v)
   comp.userModifiedTrafficLightStates = bool(source.userModifiedTrafficLightStates)
   out.comp = comp
   return out
+end
+
+local function connector(capture, types, components, options)
+  if type(capture) ~= "table" or capture.schemaVersion ~= 1 or capture.builderId ~= "streetBuilder"
+    or capture.stage ~= "create" or capture.sourceSchema ~= "Proposal.StreetProposal" then fail() end
+  if type(types) ~= "table" or type(components) ~= "table" or type(options) ~= "table"
+    or options.qualifiedStreetProposalSchema ~= "Proposal.StreetProposal"
+    or type(options.entityMap) ~= "table" then fail() end
+  -- The published Proposal.StreetProposal has neither of these fields. The
+  -- captured nulls mean absent in that exact schema, not empty SimpleStreetProposal lists.
+  local data = capture.proposal
+  local s = type(data) == "table" and data.street
+  if type(s) ~= "table" or s.edgeObjectsToRemove ~= nil or s.node2rcType ~= nil then fail() end
+  local ids, destinations = options.entityMap, {}
+  for source, target in pairs(ids) do
+    if not integer(source) or source <= 0 or not integer(target) or target <= 0
+      or destinations[target] then fail() end
+    destinations[target] = true
+  end
+  local placeholders = {[-1]=true,[-2]=true,[-4]=true,[-5]=true,[-6]=true,[-7]=true}
+  local function id(value)
+    value = int(value)
+    if value < 0 and placeholders[value] then return value end
+    if value <= 0 or ids[value] == nil then fail() end
+    return ids[value]
+  end
+  local expectedOwner = owner(options.expectedOwner)
+  local function ownedId(value)
+    value = int(value)
+    if value == 0 then return 0 end
+    value = owner(value)
+    local mapped = id(value)
+    if mapped ~= expectedOwner then fail() end
+    return mapped
+  end
+  if not array(s.addedNodes) or #s.addedNodes ~= 2 or not array(s.removedNodes) or #s.removedNodes ~= 1
+    or not array(s.addedSegments) or #s.addedSegments ~= 4
+    or not array(s.removedSegments) or #s.removedSegments ~= 2
+    or not array(s.edgeObjectsToAdd) or #s.edgeObjectsToAdd ~= 0
+    or not array(s.new2oldEdgeObjects) or #s.new2oldEdgeObjects ~= 0
+    or not array(s.old2newEdgeObjects) or #s.old2newEdgeObjects ~= 0
+    or not array(s.nodeConfigsToAdd) or #s.nodeConfigsToAdd ~= 5
+    or not array(s.nodeConfigsToRemove) or #s.nodeConfigsToRemove ~= 3
+    or not array(data.toAdd) or #data.toAdd ~= 0
+    or not array(data.toRemove) or #data.toRemove ~= 0
+    or not array(data.old2new) or #data.old2new ~= 0 then fail() end
+  local terrain = data.terrain and data.terrain.baseHeightMod
+  if type(terrain) ~= "table" or int(terrain.width) ~= 0 or int(terrain.height) ~= 0 then fail() end
+  if s.addedNodes[1].entity ~= -1 or s.addedNodes[2].entity ~= -5
+    or s.addedSegments[1].entity ~= -2 or s.addedSegments[2].entity ~= -4
+    or s.addedSegments[3].entity ~= -6 or s.addedSegments[4].entity ~= -7 then fail() end
+  local oldNode = owner(s.removedNodes[1].entity)
+  if owner(s.removedSegments[1].entity) == owner(s.removedSegments[2].entity)
+    or s.removedSegments[1].comp.node0 ~= oldNode
+    or s.removedSegments[1].comp.node1 ~= s.addedSegments[2].comp.node1
+    or s.removedSegments[2].comp.node0 ~= s.addedSegments[3].comp.node0
+    or s.removedSegments[2].comp.node1 ~= oldNode
+    or s.addedSegments[1].comp.node1 ~= -1
+    or s.addedSegments[2].comp.node0 ~= -1
+    or s.addedSegments[3].comp.node1 ~= -5
+    or s.addedSegments[4].comp.node0 ~= -5
+    or s.addedSegments[4].comp.node1 ~= -1 then fail() end
+  if type(s.addedSegments[1].playerOwned) ~= "table"
+    or id(owner(s.addedSegments[1].playerOwned.player)) ~= expectedOwner then fail() end
+  local function publicOwner(value)
+    if value ~= nil and (type(value) ~= "table" or value.player ~= 0) then fail() end
+  end
+  for i = 2, 4 do publicOwner(s.addedSegments[i].playerOwned) end
+  for i = 1, 2 do publicOwner(s.removedSegments[i].playerOwned) end
+  local proposal = call0(types.Proposal)
+  proposal.proposal = {
+    addedNodes=list(s.addedNodes, function(v) return node(types, components, v, id) end),
+    removedNodes=list(s.removedNodes, function(v) return node(types, components, v, id) end),
+    addedSegments=list(s.addedSegments, function(v) return segment(types, components, types.enum, v, id, ownedId) end),
+    removedSegments=list(s.removedSegments, function(v) return segment(types, components, types.enum, v, id, ownedId) end),
+    edgeObjectsToAdd={}, new2oldEdgeObjects={}, old2newEdgeObjects={},
+    nodeConfigsToAdd=list(s.nodeConfigsToAdd, function(v) return nodeConfig(types, types.enum, v, id) end),
+    nodeConfigsToRemove=list(s.nodeConfigsToRemove, id)
+  }
+  proposal.toAdd, proposal.toRemove, proposal.old2new = {}, {}, {}
+  local grid = proposal.terrain and proposal.terrain.baseHeightMod
+  if grid ~= nil then
+    if grid.width ~= 0 or grid.height ~= 0 then fail() end
+    grid.x0, grid.y0 = int(terrain.x0), int(terrain.y0)
+  else
+    grid = call(types.GridVec2f, int(terrain.x0), int(terrain.y0), 0, 0)
+  end
+  proposal.terrain = {baseHeightMod=grid}
+  return {code="unregistered", proposal=proposal}
 end
 
 local function rebuild(capture, types, components)
@@ -245,9 +337,12 @@ local function rebuild(capture, types, components)
   return {code="unregistered", proposal=proposal}
 end
 
-function M.rebuild(capture, types, components)
+function M.rebuild(capture, types, components, options)
   -- Setter/getter exceptions can contain native internals. Export no raw error.
-  local ok, result = pcall(rebuild, capture, types, components)
+  local ok, result = pcall(function()
+    local implementation = type(capture) == "table" and capture.builderId == "streetBuilder" and connector or rebuild
+    return implementation(capture, types, components, options)
+  end)
   if not ok then fail() end
   return result
 end
