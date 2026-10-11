@@ -1,5 +1,33 @@
 # Completion audit against the build prompt
 
+## 12 October: connector reload reaches a specific graph rejection
+
+Follow-up fresh process 61f865 narrows the existing getter's rejection to
+`removed_presence`. That combined check covers three removed IDs and input
+shape; its displayed node ID does not identify the actual failed predicate.
+The installed API declares a boolean, so no absence check is relaxed. Next
+sample those three existence results once, retaining their types and using the
+same samples for qualification. Native halt request 112 correlates with its
+terminal event and 17 cold-terminal owner observations; controller and recorded
+installed baseline restoration pass. No mutation was issued. Eight composed
+graph/reload tests and three panel compilation checks pass; mod review passes.
+
+Fresh process a5b862 loads the verified connector save at paused update 604;
+the stock balance is 20,450,240. Its fresh observer receipt rejects
+`retained_graph`; canonical-world comparison is therefore not reached.
+No construction or financial mutation is issued. Native halt request 268 has
+a correlated terminal event and 17 cold-terminal owner observations; controller
+restoration exits zero. The exact process is retired and the recorded installed
+baseline restores. This is not a successful persistence or duplicate test.
+Independent Astra review finds no established broken predicate. The same graph
+code passed at construction update 595, while saved-ID and retained-spur checks
+also participate in the reload rejection. A bounded first-failure substage in
+the existing read-only getter is the next decisive observation; no checks are
+relaxed. Earlier subscription migration, held-update equality and roster-carrier
+corrections have focused offline evidence. Nine focused checks and seven lease
+publication checks pass. The attempted full suite did not exit and was stopped;
+it is incomplete, not a green regression result.
+
 ## 11 October: paired connector checkpoint and verified Host save pass
 
 Pair 4f158, session 33b59246-ca60-449b-b639-06047dae9b78, loads the authenticated
