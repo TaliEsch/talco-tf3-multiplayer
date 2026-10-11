@@ -162,15 +162,11 @@ function M.send(state,request,api)
         if success~=true then receipt.stage="native_rejected_unknown";pending=nil;state:set(saved);return end
         -- Stock TF3 manager_window.tl consumes resultEntities[1][1] and
         -- ignores the first ICommandData argument for line creation.
-        -- Keep the single-result contract and fresh identity requirement;
-        -- the callback still needs independent world verification below.
+        -- Mission vehicle_util uses the same first-pair convention. Callback
+        -- list length is not documented as the number of new lines: enforce
+        -- exactly one fresh line through the independent world delta below.
         if not native(entities) then
           receipt.stage="callback_entities_type_"..type(entities);pending=nil;state:set(saved);return end
-        local countOk,count=pcall(function()return #entities end)
-        if not countOk then
-          receipt.stage="callback_entities_count_access";pending=nil;state:set(saved);return end
-        if count~=1 then
-          receipt.stage="callback_entities_count";pending=nil;state:set(saved);return end
         local pairOk,pair=pcall(function()return entities[1] end)
         if not pairOk then
           receipt.stage="callback_entities_pair_access";pending=nil;state:set(saved);return end

@@ -77,8 +77,8 @@ test('native userdata callback container retains single-result and world verific
   assert.equal(result.status,'ok');assert.equal(result.observed,true);
   assert.equal(result.sent,1);assert.equal(result.second,false);
 });
-test('invalid or multiple callback entities remain consumed unknown',()=>{
-  for(const callback of ['callback({},true,{})','callback({},true,{{700,1},{701,1}})',
+test('invalid callback first entity remains consumed unknown',()=>{
+  for(const callback of ['callback({},true,{})',
     'callback({},true,{{0,1}})']){
     const result=run('',callback);
     assert.equal(result.status,'unknown');assert.equal(result.observed,false);
@@ -89,18 +89,44 @@ test('invalid or multiple callback entities remain consumed unknown',()=>{
 test('callback container failures identify the rejecting predicate without resend',()=>{
   for(const [callback,stage] of [
     ['callback({},true,nil)','callback_entities_type_nil'],
-    ['callback({},true,{})','callback_entities_count'],
-    ['callback({},true,{{700,1},{701,1}})','callback_entities_count'],
+    ['callback({},true,{})','callback_entities_pair_nil'],
     ['callback({},true,{700})','callback_entities_pair_number'],
     ['callback({},true,{{0,1}})','callback_identity'],
-    ['callback({},true,setmetatable({}, {__len=function()error("count")end}))','callback_entities_count_access'],
-    ['callback({},true,setmetatable({}, {__len=function()return 1 end,__index=function()error("pair")end}))','callback_entities_pair_access'],
+    ['callback({},true,setmetatable({}, {__index=function()error("pair")end}))','callback_entities_pair_access'],
     ['callback({},true,{setmetatable({}, {__index=function()error("id")end})})','callback_identity_access'],
   ]){
     const result=run('',callback);
     assert.equal(result.stage,stage);assert.equal(result.status,'unknown');
     assert.equal(result.observed,false);assert.equal(result.sent,1);
     assert.equal(result.second,false);assert.equal(result.barrier,'consumed');
+  }
+});
+test('stock first-pair identity permits extra result revisions but only one new world line',()=>{
+  const callback='callback({},true,{{700,1},{701,1}})';
+  const valid=run('',callback);
+  assert.equal(valid.status,'ok');assert.equal(valid.observed,true);
+  const extra=run('api.engine.system.lineSystem.getLines=function()return sent>0 and {700,701} or {} end',callback);
+  assert.equal(extra.status,'unknown');assert.equal(extra.stage,'after_extra_line');
+  assert.equal(extra.sent,1);assert.equal(extra.second,false);
+});
+test('stock first-pair access does not require a native length operation',()=>{
+  const result=run('',`debug.setmetatable(nativeEntitiesFixture,{
+    __len=function()error('no length contract')end,
+    __index=function(_,key)if key==1 then return {700,1} end end
+  });callback({},true,nativeEntitiesFixture)`);
+  assert.equal(result.status,'ok');assert.equal(result.observed,true);
+  assert.equal(result.sent,1);assert.equal(result.second,false);
+});
+test('first-pair selection never falls back and preserves every prior world line',()=>{
+  const wrong=run('', 'callback({},true,{{701,1},{700,1}})');
+  assert.equal(wrong.status,'unknown');assert.equal(wrong.observed,false);
+  const stale=run('api.engine.system.lineSystem.getLines=function()return sent>0 and {600,700} or {600} end',
+    'callback({},true,{{600,1},{700,1}})');
+  assert.equal(stale.stage,'callback_identity');assert.equal(stale.status,'unknown');
+  const lost=run('api.engine.system.lineSystem.getLines=function()return sent>0 and {700} or {600} end');
+  assert.equal(lost.stage,'after_prior_line_missing');assert.equal(lost.status,'unknown');
+  for(const result of [wrong,stale,lost]){
+    assert.equal(result.sent,1);assert.equal(result.second,false);assert.equal(result.barrier,'consumed');
   }
 });
 test('changed station owner prevents submission and preserves consumed unknown',()=>{
