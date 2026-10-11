@@ -160,10 +160,15 @@ function M.send(state,request,api)
           or barrierNow.phase~="consumed" or barrierNow.operationId~=work.operationId then return end
         work.callbackSeen=true
         if success~=true then receipt.stage="native_rejected_unknown";pending=nil;state:set(saved);return end
-        local id=data and data.resultEntity
-        if not entity(id) or before[id] or type(entities)~="table"
-          or #entities~=1 or not native(entities[1]) or entities[1][1]~=id then
-          receipt.stage="callback_shape";pending=nil;state:set(saved);return end
+        -- Stock TF3 manager_window.tl consumes resultEntities[1][1] and
+        -- ignores the first ICommandData argument for line creation.
+        -- Keep the single-result contract and fresh identity requirement;
+        -- the callback still needs independent world verification below.
+        if type(entities)~="table" or #entities~=1 or not native(entities[1]) then
+          receipt.stage="callback_entities";pending=nil;state:set(saved);return end
+        local id=entities[1][1]
+        if not entity(id) or before[id] then
+          receipt.stage="callback_identity";pending=nil;state:set(saved);return end
         work.callback=id;receipt.stage="await_world";state:set(saved)
       end)
     end)

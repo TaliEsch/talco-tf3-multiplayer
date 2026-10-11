@@ -6,7 +6,7 @@ import fengari from 'fengari';
 const {lua,lauxlib,lualib,to_luastring}=fengari;
 const source=await readFile(new URL('../mod/content/tf3mp_line_create_order_action.lua',import.meta.url),'utf8');
 
-function run(change='',callback='callback({resultEntity=700},true,{{700}})'){
+function run(change='',callback='callback({},true,{{700,1}})'){
   const script=`local action=(function() ${source} end)()
 local sent=0;local callback=nil;local owner=8;local update=108
 local current={coordinationBinding={phase='prepared'},executionBarrier={phase='held',operationId='execute-op',hostSequence=1,scheduledUpdate=108},
@@ -60,6 +60,23 @@ return first,second,observed,sent,current.executionReceipt and current.execution
 test('one held line create is consumed and verified by correlated callback and world',()=>{
   assert.deepEqual(run(),{first:true,second:false,observed:true,sent:1,status:'ok',
     stage:'',barrier:'consumed',phase:'action_held',fault:false});
+});
+test('stock callback entity pair does not require ICommandData resultEntity',()=>{
+  for(const callback of ['callback(nil,true,{{700,1}})',
+    'callback({resultEntity=999},true,{{700,1}})']){
+    const result=run('',callback);
+    assert.equal(result.observed,true);assert.equal(result.status,'ok');
+    assert.equal(result.sent,1);assert.equal(result.second,false);
+  }
+});
+test('invalid or multiple callback entities remain consumed unknown',()=>{
+  for(const callback of ['callback({},true,{})','callback({},true,{{700,1},{701,1}})',
+    'callback({},true,{{0,1}})']){
+    const result=run('',callback);
+    assert.equal(result.status,'unknown');assert.equal(result.observed,false);
+    assert.equal(result.sent,1);assert.equal(result.second,false);
+    assert.equal(result.barrier,'consumed');assert.equal(result.fault,true);
+  }
 });
 test('changed station owner prevents submission and preserves consumed unknown',()=>{
   assert.deepEqual(run('owner=9',''),{first:false,second:false,observed:false,sent:0,
