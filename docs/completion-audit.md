@@ -1,5 +1,26 @@
 # Completion audit against the build prompt
 
+## 12 October: paired assigned-save reload passes binding and covered agreement
+
+Fresh pair 6afe loads the verified assigned save in both TF3 games, with Host
+company 15702 and Join 28619. Both initialize, hold update 644 and independently
+report vehicle 27989 / line 28014 owned by 15702. Vehicle state is `EN_ROUTE`,
+stateRaw 1, stop flag 0, depot 27999 in both. Covered checkpoint hashes match
+`dd5d5795a0c15caec0674e669afcc981e6916aa0ac488c0b00a499ff14013047`;
+balances remain 20,450,240 and 0. No financial, construction or vehicle mutation
+was authorized in this read-only profile. Both correlated native halts and
+complete cleanup pass, including receiver quiescence, adapter drain and restored
+controllers. Exact processes were retired and installed baselines restored.
+
+The required retained archive comparison now uses detached shallow parent-index
+records preserving typed keys, scalars and empty tables under existing budgets.
+The captured depth failure and relevant composed checks pass 57/57. Live binding
+and comparison now pass; this is not proof of new ordered Stop/Start, physical
+depot departure or revenue. Hidden RNG coverage remains unavailable. The full
+suite remains open because its previously recorded resume-event hang prevented
+a complete run; no green full-suite claim is made. Private game evidence remains
+outside the public repository.
+
 ## 12 October: assigned reload reaches post-completion history, readiness times out
 
 Fresh pair 4a92 loads the verified assignment checkpoint under Host 15702 and

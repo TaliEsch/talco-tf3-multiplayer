@@ -2,6 +2,21 @@
 
 ## Latest reload checkpoint — 12 October 2026
 
+Latest 6afe passes paired assigned-save reload: both bindings complete, covered
+state matches at update 644, balances remain 20,450,240 / 0, and both independently
+read vehicle 27989 / line 28014 owner 15702. Vehicle is `EN_ROUTE`, stop flag 0,
+depot 27999 in both games. Both native halts and complete cleanup pass. Processes
+are retired and installed baselines restored. The shallow retained-routing
+comparison fixes the captured depth-9 rejection while preserving complete value
+comparison and unchanged encoder/native limits (57 focused checks plus live
+binding proof). Next use the existing Host-ordered Stop/Start path on this save
+and observe resumed operation. Do not label EN_ROUTE alone as observed physical
+depot departure or sustained service/revenue. Keep spent grants and histories.
+Hidden RNG and the incomplete full regression run remain explicit limitations.
+
+
+## Latest reload checkpoint — 12 October 2026
+
 Latest 4a92 reaches confirmed serviced completion and post-completion retained
 history in both instances; initial binding/readiness then times out. Review the
 actual `bindSession` status comparison with the full assignment predecessor

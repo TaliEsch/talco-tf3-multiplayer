@@ -2,6 +2,21 @@
 
 ## Latest reload checkpoint — 12 October 2026
 
+Fresh pair 6afe passes assigned-save reload in both TF3 instances: authenticated
+binding, held covered checkpoint agreement at update 644, unchanged balances
+20,450,240 / 0, and independent ownership of vehicle 27989 and line 28014 by
+company 15702. Both report vehicle `EN_ROUTE`, stop flag 0 and depot 27999.
+Both native halts, receiver quiescence, adapter drain and controller restoration
+pass; processes are retired and installed baselines restored. The shallow
+retained-routing comparison correction passes 57 focused checks and this live
+gate without increasing encoder/native limits. Next: existing Host-ordered
+Stop/Start on the retained service and observed resumed operation, then costs
+and revenue. This does not prove physical depot departure, sustained simulation
+or hidden RNG agreement. The road-service loop and full gameplay remain open.
+
+
+## Latest reload checkpoint — 12 October 2026
+
 Fresh pair 4a92 clears the retained assignment completion path: both games
 reach post-completion history readback at update 644. Initial binding/readiness
 still does not publish before `COORDINATION_TIMEOUT`; both engines halt.
