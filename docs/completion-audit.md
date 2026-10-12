@@ -1,5 +1,20 @@
 # Completion audit against the build prompt
 
+## 12 October: paired ordered Stop/Start, resumed agreement and save pass
+
+Fresh pair 4d69 passes Stop sequence 1 at update 716 and Start sequence 2 at
+806. Independent resumed vehicle/line receipts retain company 15702 and report
+`EN_ROUTE`, stop flag 0. Both games agree on covered update 828, hash
+`99631f37ba4c5c879703e5a0c6a28752b60d738e4d8dc3bd37a6c871e1adda36`,
+with balances 20,450,240 / 0. Host checkpoint save is 19,182,250 bytes, SHA-256
+`e766085a556b5d7cae8af6fe5998195844e07dee9dea77e53bfd15bf46c907a5`.
+Both terminal records have no fault and confirm correlated native halt; both
+cleanup receipts pass. Stock Host UI shows the vehicle outside its depot and
+moving at 20 km/h after Start. The corrected unpublished-source guard and
+resumed acknowledgment pass this actual paired path. No fresh reload of this
+save, sustained service revenue, hidden RNG agreement or full-session acceptance
+is claimed. Earlier unknown operations remain spent and cannot be retried.
+
 ## 12 October: streamlined paired setup passes; Join request replacement fails
 
 Fresh 4b22 loads the assigned save in both real instances, initializes the

@@ -1,5 +1,16 @@
 # Native-integration review handoff — 23 September 2026
 
+Fresh 4d69 qualifies the corrected request-publication and resumed agreement
+paths in two TF3 instances: Stop sequence 1/update 716, Start sequence 2/update
+806, matching covered checkpoint 828 and verified Host save SHA-256
+`e766085a556b5d7cae8af6fe5998195844e07dee9dea77e53bfd15bf46c907a5`.
+Both terminal faults are null; independent native halts and cleanup pass.
+Next qualify fresh-process reload, then sustained service costs/revenue.
+Hidden RNG remains unavailable. Preserve previous unknown reservations;
+this result does not authorize replaying them or prove full gameplay readiness.
+
+The following reviews retain superseded next-action wording as history.
+
 ## Latest paired setup checkpoint — 12 October 2026
 
 Fresh 4b22 clears assigned-company paired setup and covered update 644. Join
