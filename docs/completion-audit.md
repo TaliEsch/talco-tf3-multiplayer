@@ -1,5 +1,60 @@
 # Completion audit against the build prompt
 
+## 12 October: saved connector pair initializes and creates its service line
+
+Fresh pair 297042 loads the verified connector save at update 604 under Host
+15702 and Join 28619. The reviewed current-selection correction passes both
+lease initialization and coordinated release. Host-ordered line creation
+executes in both games at update 622: line 28014 belongs to 15702, connects
+stations 28809 and 28614, and both held receipts have state hash
+83c3351bc4dfb58513cd5afa4b1ffe8ec34bcf77eccae3e86bb256346e09c68c.
+Both games report clean inter-stop path flags. Host assignment preparation
+then finds currentDepot=bestDepot=27999 for vehicle 27989 and that line.
+The preparation-only runner deliberately withholds its acknowledgement;
+no assignment executes and no resulting service checkpoint is saved.
+
+Astra review supports a fresh bounded assignment with each instance's own
+correlated positive depot lookup before its acknowledgement. The existing
+coordinator still requires both acknowledgements. A separate panel defect
+spent assignment world-read attempts while waiting for its callback; assignment
+now follows the existing await_world-only budget rule, retaining 24 reads and
+the original coordinator deadline. Fifty-seven focused checks and mod review
+pass; eight captured-shape depot acknowledgement cases pass offline. These
+changes have not yet passed live assignment or operation/revenue acceptance.
+
+Both native halts and controller restorations confirm. Receiver quiescence
+remains unconfirmed (cleanupPassed=false); subsequent exact-process retirement
+and recorded installed baseline restoration pass for both games. Hidden RNG
+remains outside covered comparison. Full gameplay and friend rehearsal remain open.
+
+## 12 October: saved connector Join selection rejects before service execution
+
+Pair 928fec loads the same verified connector checkpoint at paused update 604
+under Host 15702 and authenticated Join 28619. Host qualification passes with
+four saved admissions. The connector dispatcher correction is installed, but
+Join watchdog request 1 still rejects releasedRouting before a service mutation.
+Fresh independent Astra review reproduces a deterministic role mismatch: the
+new connector qualifier compares current Join selection with historical Host
+localPlayerId. Structural qualification passes; the live selection predicate
+rejects before graph inspection.
+
+The correction retains historical origin/owner/archive identity, requires the
+current selection in the unique covered roster and rechecks selection stability
+after graph/balance reads. Outer rollover independently authenticates current
+selection against its request before and after capture. Seventeen focused checks,
+the captured-shape composition and mod review pass; live confirmation remains
+required. The dependency fingerprint and graph callback remain explicit mock
+boundaries in that composition test.
+
+Both native halts and controller restorations confirm. Receiver quiescence is
+unconfirmed, so cleanupPassed remains false. Subsequent exact-process retirement
+and installed baseline restoration pass. No line or assignment executes.
+History preflight now uses the established Host-side physical profile route;
+participant preflight requires its session/profile/binder-bound receipt. The
+unchanged native qualifier reports 255 journals, nine unknown outcomes and all
+historical processes retired after one exact released journal is preserved under
+a hash-bound retired name. No unknown journal or native limit is cleared.
+
 ## 12 October: paired service reaches the saved-action routing rejection
 
 Pair 0c5f92 clears the observed-menu acknowledgment, actual Host qualification
