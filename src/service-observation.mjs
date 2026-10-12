@@ -3,6 +3,11 @@ import {parseFlatDataFile} from './userdata-ipc.mjs';
 const MAX_INT=2147483647;
 const entity=value=>Number.isSafeInteger(value)&&value>0&&value<=MAX_INT;
 const unsigned=value=>Number.isSafeInteger(value)&&value>=0;
+// Selection and ownership may identify the same company. Assets remain
+// distinct; this transport shape never grants engine observation authority.
+const distinctAssets=value=>value.vehicleEntity!==value.lineEntity
+  &&[value.originalCompany,value.targetCompany].every(company=>
+    company!==value.vehicleEntity&&company!==value.lineEntity);
 const requestKeys=['schemaVersion','kind','nonce','requestId','action','originalCompany','targetCompany','vehicleEntity','lineEntity','issuedTick','expiresTick'];
 const identityKeys=['nonce','requestId','action','originalCompany','targetCompany','vehicleEntity','lineEntity','issuedTick','expiresTick'];
 const rawKeys=['startGameTime','startUpdateCount','endGameTime','endUpdateCount','accountNetWindowStart','accountNetWindowEnd','accountNet','intervalNet','intervalMaintenanceVehicle','intervalMaintenanceInfrastructure','intervalMaintenanceOther','intervalMaintenanceVehicleMaintenance','startVisitedMask','endVisitedMask','startStopIndex','endStopIndex'];
@@ -17,7 +22,7 @@ export function serviceObservationRequest({nonce,requestId,action,sample,binding
     ||!sample||sample.speedup!==0||!entity(sample.companyEntity)||!unsigned(sample.tickCount)||sample.tickCount>MAX_INT-300
     ||!binding||binding.originalCompany!==sample.companyEntity
     ||![binding.originalCompany,binding.targetCompany,binding.vehicleEntity,binding.lineEntity].every(entity)
-    ||new Set([binding.originalCompany,binding.targetCompany,binding.vehicleEntity,binding.lineEntity]).size!==4)
+    ||!distinctAssets(binding))
     throw new Error('VERIFIED_PAUSED_SERVICE_REQUIRED');
   return Object.freeze({schemaVersion:1,kind:'phase2_service_observation',nonce,requestId,action,
     originalCompany:binding.originalCompany,targetCompany:binding.targetCompany,vehicleEntity:binding.vehicleEntity,lineEntity:binding.lineEntity,
@@ -78,7 +83,7 @@ export function correlateRawServiceInterval(start,end){
     ||end.action!=='end'||end.outcome!=='raw_end_captured'||end.code!=='RAW_END_CAPTURED'
     ||!entity(start.requestId)||!entity(end.requestId)||end.requestId<=start.requestId
     ||[start.originalCompany,start.targetCompany,start.vehicleEntity,start.lineEntity].some(value=>!entity(value))
-    ||new Set([start.originalCompany,start.targetCompany,start.vehicleEntity,start.lineEntity]).size!==4
+    ||!distinctAssets(start)
     ||['originalCompany','targetCompany','vehicleEntity','lineEntity'].some(key=>start[key]!==end[key])
     ||end.tickCount<=start.tickCount||end.updateCount<=start.updateCount||end.gameTime<=start.gameTime
     ||start.startUpdateCount!==start.updateCount||start.startGameTime!==start.gameTime
