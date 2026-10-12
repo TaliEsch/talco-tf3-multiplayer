@@ -1,5 +1,14 @@
 # Native-integration review handoff — 23 September 2026
 
+## Latest paired assignment checkpoint — 12 October 2026
+
+Current pair a36d passes durable assignment completion in both TF3 instances:
+vehicle 27989, line 28014, owner 15702, held update 635, Host sequence 2.
+Covered checkpoints match at 644 and a new Host save is verified. Both native
+halts and cleanup pass. The next engine question is ordered departure from the
+depot on the reloaded common save; inter-stop path checks do not prove it.
+No native ABI or permission relaxation was needed for assignment completion.
+
 ## Activation and bounded live result — 23 September 2026
 
 The one-use arm in `inprocess_vehicle_observer.cpp` now retains the original

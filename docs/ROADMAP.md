@@ -1,5 +1,16 @@
 # TalCo TF3 multiplayer — current delivery plan
 
+## Latest paired assignment checkpoint — 12 October 2026
+
+Pair a36d passes assignment in both real games: vehicle 27989 and line 28014
+belong to company 15702, and both independently report the assignment at held
+update 635, Host sequence 2. Covered state matches at 644 and a new Host save
+is verified. Both native halts and cleanup pass. Next: reload that checkpoint
+and qualify ordered departure through the existing Start path, then service
+costs/revenue. Inter-stop paths pass; depot departure remains unverified.
+Hidden RNG coverage remains unavailable. The road-service loop remains open.
+
+
 ## Current priority — qualify the updated build, then paired road construction
 
 Steam updated the installed executable on 2026-10-08 to build 25754343,

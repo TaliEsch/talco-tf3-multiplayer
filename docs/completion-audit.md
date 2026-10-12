@@ -1,5 +1,22 @@
 # Completion audit against the build prompt
 
+## 12 October: paired assignment and common checkpoint pass
+
+Fresh pair a36d initializes from the verified connector checkpoint under Host
+company 15702 and Join company 28619. Both create line 28014 at update 622 and
+independently verify vehicle 27989, owner 15702, on that line at held update
+635, Host sequence 2. The durable callback witness now has paired live evidence;
+there is no second assignment send. Both covered checkpoints match at held
+update 644 with hash
+`dd5d5795a0c15caec0674e669afcc981e6916aa0ac488c0b00a499ff14013047`.
+Verified Host save SHA-256:
+`06c1f2e0eed8843af1bce8f929088e36f830711fa0472896448c690c5bd8d90a`
+(19,104,068 bytes). Host balance is 20,450,240; Join balance is 0.
+Both native halts, receiver quiescence, adapter drain and controller restoration
+pass. Inter-stop path checks pass; their scope excludes depot connectivity.
+Departure, revenue and fresh-process reload of this new save remain open.
+Hidden RNG remains unavailable; covered matching is not full coverage.
+
 ## 12 October: saved connector pair initializes and creates its service line
 
 Fresh pair 297042 loads the verified connector save at update 604 under Host
