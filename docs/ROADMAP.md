@@ -1,5 +1,19 @@
 # TalCo TF3 multiplayer — current delivery plan
 
+## Latest reload checkpoint — 12 October 2026
+
+Fresh assigned-save reload a17d clears the previous `releasedRouting` lease
+rejection, but does not complete initialization: the serviced completion reader
+calls the assignment qualifier with the existing structural `api=false` mode,
+which the new qualifier does not yet support. It rejects with
+`SERVICED_FIRST_PURCHASE_ROUTING_UNVERIFIED`, then times out and disconnects.
+Connect structural completion and line-family archive authority through the
+existing adapter, using the captured scalar receipts and predecessor chain.
+Then requalify this read-only reload before the existing ordered Stop/Start
+departure experiment. Preserve its unknown resume reservation. No gameplay
+mutation occurred; both native halts/controllers confirm, full cleanup does not.
+
+
 ## Latest paired assignment checkpoint — 12 October 2026
 
 Pair a36d passes assignment in both real games: vehicle 27989 and line 28014

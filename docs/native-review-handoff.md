@@ -1,5 +1,19 @@
 # Native-integration review handoff — 23 September 2026
 
+## Latest reload checkpoint — 12 October 2026
+
+Latest a17d clears the original assignment-routing lease rejection, then fails
+serviced completion with `SERVICED_FIRST_PURCHASE_ROUTING_UNVERIFIED`.
+Independent review establishes the caller supplies structural `api=false`, while
+the new assignment qualifier unconditionally dereferences the native API. Reuse
+the existing explicit structural/archived-owner convention, then connect line
+archive authority and admission-correlated predecessor traversal in the existing
+loan adapter. Verify completion → rebind → authority as one composition before
+another read-only paired reload. Preserve the dispatch-unknown grant; no phase,
+deadline, native-limit or retry relaxation is justified. Both engines halted and
+installed baselines restored; receiver quiescence remains unconfirmed.
+
+
 ## Latest paired assignment checkpoint — 12 October 2026
 
 Current pair a36d passes durable assignment completion in both TF3 instances:

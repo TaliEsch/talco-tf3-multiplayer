@@ -1,5 +1,23 @@
 # Completion audit against the build prompt
 
+## 12 October: assignment routing clears lease; completion composition remains open
+
+Fresh pair a17d loads the verified assigned save at update 644 with Host balance
+20,450,240 and Join balance 0 under their respective companies. Host publishes
+the fresh lease after the completed-assignment routing correction. Initialization
+then fails: the existing serviced completion sampler supplies `api=false` for
+structural validation, but the assignment qualifier requires the native API and
+returns nil. Recorded rejection is `SERVICED_FIRST_PURCHASE_ROUTING_UNVERIFIED`;
+completion timeout leads to participant disconnect. Rebind, covered reload
+agreement and departure are not claimed. Independent review additionally finds
+missing line-family authority and predecessor traversal in the existing adapter.
+The correction must compose these paths without admitting an invalid phase or
+clearing the spent unknown grant. Both native halts/controller restoration pass;
+receiver quiescence and complete cleanup do not. Both exact processes are retired
+and installed baselines restored. No gameplay mutation occurred. Focused routing
+and adjacent execution tests pass 39/39; the private reload checks pass 15/15.
+Mod review passes with 81 source files. These checks do not prove full reload.
+
 ## 12 October: paired assignment and common checkpoint pass
 
 Fresh pair a36d initializes from the verified connector checkpoint under Host
