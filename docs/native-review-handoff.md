@@ -2,6 +2,21 @@
 
 ## Latest reload checkpoint — 12 October 2026
 
+Latest 4a92 reaches confirmed serviced completion and post-completion retained
+history in both instances; initial binding/readiness then times out. Review the
+actual `bindSession` status comparison with the full assignment predecessor
+archive before another run. Captured connector coordinates reproduce a depth-9
+rejection against its depth-8 limit. Complete shallow archive comparison passes
+57 focused checks and mod review; paired live confirmation remains open.
+Do not relax detector limits. Earlier structural
+`api=false` and line-family authority corrections pass 80 focused checks.
+Both native halts/controllers restore; adapter drain confirms, receiver quiescence
+does not. Processes are retired and installed baselines restored. Keep the spent
+grant and all saved histories. Departure and complete reload remain unverified.
+
+
+## Latest reload checkpoint — 12 October 2026
+
 Latest a17d clears the original assignment-routing lease rejection, then fails
 serviced completion with `SERVICED_FIRST_PURCHASE_ROUTING_UNVERIFIED`.
 Independent review establishes the caller supplies structural `api=false`, while

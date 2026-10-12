@@ -1,5 +1,23 @@
 # Completion audit against the build prompt
 
+## 12 October: assigned reload reaches post-completion history, readiness times out
+
+Fresh pair 4a92 loads the verified assignment checkpoint under Host 15702 and
+Join 28619 at update 644, balances 20,450,240 and 0. Both reach the retained
+history read issued after confirmed serviced resume completion. The early
+`SERVICED_FIRST_COMPLETED_ENTRY_CHANGED` sample is not the terminal cause.
+Neither publishes initial checkpoint/readiness before `COORDINATION_TIMEOUT`.
+Independent review narrows the next transition to the existing `bindSession`
+handler's full status comparison and binding receipt; the exact silent predicate
+was then reproduced with captured required values: an archived connector
+coordinate reaches depth 9 and the unchanged depth-8 encoder rejects it before
+the binding completion reader (zero reads/writes). This subset witness passes
+1/1 and establishes the encoding failure; a complete runtime status dump was
+not retained. The representation correction and paired readiness remain open.
+No gameplay mutation ran. Both native halts,
+adapter drain and controller restoration confirm; receiver quiescence and full
+cleanup do not. Both exact processes were retired and installed baselines restored.
+
 ## 12 October: assignment routing clears lease; completion composition remains open
 
 Fresh pair a17d loads the verified assigned save at update 644 with Host balance

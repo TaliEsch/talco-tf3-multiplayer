@@ -2,6 +2,20 @@
 
 ## Latest reload checkpoint — 12 October 2026
 
+Fresh pair 4a92 clears the retained assignment completion path: both games
+reach post-completion history readback at update 644. Initial binding/readiness
+still does not publish before `COORDINATION_TIMEOUT`; both engines halt.
+The composed `bindSession` reproduction now identifies a required archived
+connector coordinate at depth 9 under the comparison wrapper, beyond the
+unchanged depth-8 encoder limit. Preserve complete comparison coverage and
+unknown reservations while correcting the retained-archive representation. The
+previous assignment routing correction passes 80 focused checks, but complete
+paired initialization and departure remain open. Both processes are retired
+and installed baselines restored; receiver quiescence remains unconfirmed.
+
+
+## Latest reload checkpoint — 12 October 2026
+
 Fresh assigned-save reload a17d clears the previous `releasedRouting` lease
 rejection, but does not complete initialization: the serviced completion reader
 calls the assignment qualifier with the existing structural `api=false` mode,
