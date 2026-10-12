@@ -1388,20 +1388,31 @@ export async function startGameBridge({ directory, logger = () => {}, intervalMs
       pending=operation.catch(()=>{});return operation;
     },
     get serviceObservationState(){return Object.freeze({phase:serviceObservationPhase,binding:serviceBinding});},
-    requestServiceObservation(action){
+    requestServiceObservation(action,{binding:assignedBinding}={}){
       const operation=pending.then(async()=>{
+        // An assigned-service caller supplies only requested asset IDs. The
+        // existing engine collector authenticates the saved assignment and
+        // current held authority; this does not manufacture a Phase2 receipt.
+        const assignedStart=action==='start'&&assignedBinding!==undefined
+          &&serviceBinding===null&&serviceObservationPhase==='unavailable';
+        if(assignedBinding!==undefined&&!assignedStart)
+          throw new Error('VERIFIED_SERVICE_OBSERVATION_REQUIRED');
+        const binding=assignedStart?assignedBinding:serviceBinding;
         if(stopped||!connected||!observations.status.available||serviceObservation
-          ||!serviceBinding||!['start','end'].includes(action)
-          ||serviceObservationPhase!==(action==='start'?'ready':'observing')
+          ||!binding||!['start','end'].includes(action)
+          ||(!assignedStart&&serviceObservationPhase!==(action==='start'?'ready':'observing'))
           ||phase2Station||phase2Service||phase2Vehicle||phase2Depot||phase2Funding||roadReplay
           ||companyProbe||companyInspection||haltTest||pauseTest||probe||vehicleTest||selectionId)
           throw new Error('VERIFIED_SERVICE_OBSERVATION_REQUIRED');
         const sample=observations.status.sample;
-        if(action==='start'&&sample.updateCount!==serviceBinding.updateCount)throw new Error('SERVICE_START_CONTEXT_CHANGED');
+        if(action==='start'&&sample.updateCount!==binding.updateCount)throw new Error('SERVICE_START_CONTEXT_CHANGED');
         if(action==='end'&&sample.updateCount<=serviceObservationStart.updateCount)throw new Error('SIMULATION_DID_NOT_ADVANCE');
-        const request=serviceObservationRequest({nonce,requestId:requestSequence+1,action,sample,binding:serviceBinding});
+        const request=serviceObservationRequest({nonce,requestId:requestSequence+1,action,sample,binding});
         // Consume the endpoint before awaiting publication. This is not a native
         // mutation, but replacing an uncertain baseline would invalidate evidence.
+        if(assignedStart)serviceBinding=Object.freeze({originalCompany:request.originalCompany,
+          targetCompany:request.targetCompany,vehicleEntity:request.vehicleEntity,
+          lineEntity:request.lineEntity,updateCount:sample.updateCount});
         serviceObservationPhase='pending';requestSequence++;
         serviceObservation={request,context:{originalCompany:sample.companyEntity,updateCount:sample.updateCount},deadline:Date.now()+companyTimeoutMs};
         await publish(directory,'phase2_service_observation_request.lua',request);

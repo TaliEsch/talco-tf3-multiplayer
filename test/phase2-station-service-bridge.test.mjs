@@ -111,6 +111,7 @@ for(const mode of ['verified','unknown_station','balance_changed','update_change
           tickCount:121,updateCount:90,gameTime:200,...raw,endGameTime:200,endUpdateCount:90,accountNetWindowEnd:200,
           intervalNet:500,intervalMaintenanceVehicle:-100,endVisitedMask:3,endStopIndex:1}));
         await until(()=>bridge.serviceObservationState.phase==='finished');
+        await until(()=>eventCount('phase2_service_observation_result')===2);
         const evidence=events.filter(e=>e.event==='phase2_service_observation_result');
         assert.equal(evidence.length,2);assert.equal(evidence[1].intervalMaintenanceVehicle,-100);
         assert.equal(evidence[1].serviceAccountingVerified,false);assert.equal(evidence[1].nonce,undefined);
@@ -119,3 +120,68 @@ for(const mode of ['verified','unknown_station','balance_changed','update_change
     }finally{await bridge.close();await rm(root,{recursive:true,force:true});}
   });
 }
+
+test('assigned-service observation starts from caller binding for Host and Join and ends on the same fresh binding',async()=>{
+  for(const selectedCompany of [15702,28619]){
+    const root=await mkdtemp(path.join(os.tmpdir(),'tf3mp-assigned-service-'));
+    const directory=path.join(root,'tf3mp_status_1'),events=[];
+    const bridge=await startGameBridge({directory,intervalMs:5,companyTimeoutMs:2500,logger:e=>events.push(e)});
+    const sample={schemaVersion:1,kind:'engine_observation',nonce:bridge.nonce,counter:1,tickCount:100,
+      updateCount:80,speedup:0,companyEntity:selectedCompany,balance:5000,balanceKnown:1,balanceNegative:0};
+    const binding={originalCompany:selectedCompany,targetCompany:15702,vehicleEntity:27989,lineEntity:28014,updateCount:80};
+    const requestPath=path.join(directory,'phase2_service_observation_request.lua');
+    const receiptPath=path.join(directory,'phase2_service_observation_receipt.lua');
+    const raw={startGameTime:100,startUpdateCount:80,endGameTime:0,endUpdateCount:0,
+      accountNetWindowStart:0,accountNetWindowEnd:100,accountNet:0,intervalNet:0,
+      intervalMaintenanceVehicle:0,intervalMaintenanceInfrastructure:0,intervalMaintenanceOther:0,
+      intervalMaintenanceVehicleMaintenance:0,startVisitedMask:0,endVisitedMask:0,startStopIndex:0,endStopIndex:0};
+    try{
+      await writeFile(path.join(directory,'telemetry.lua'),lua({schemaVersion:1,kind:'telemetry',nonce:bridge.nonce,counter:1,tickCount:100,updateCount:80}));
+      await writeFile(path.join(directory,'engine_observation.lua'),lua(sample));
+      await until(()=>bridge.engineObservation.available);
+      assert.equal(bridge.serviceObservationState.phase,'unavailable');
+      await assert.rejects(bridge.requestServiceObservation('start',{binding:{...binding,originalCompany:selectedCompany===15702?28619:15702}}),
+        /VERIFIED_PAUSED_SERVICE_REQUIRED/);
+      await assert.rejects(bridge.requestServiceObservation('start',{binding:{...binding,updateCount:81}}),
+        /SERVICE_START_CONTEXT_CHANGED/);
+      await assert.rejects(readFile(requestPath),{code:'ENOENT'});
+
+      await bridge.requestServiceObservation('start',{binding});
+      const start=parseFlatDataFile(await readFile(requestPath,'utf8'));
+      assert.equal(start.requestId,1);
+      assert.equal(start.action,'start');
+      assert.equal(start.originalCompany,selectedCompany);
+      assert.equal(start.targetCompany,15702);
+      assert.equal(start.vehicleEntity,27989);
+      assert.equal(start.lineEntity,28014);
+      assert.equal(start.issuedTick,100);
+      await assert.rejects(bridge.requestServiceObservation('start',{binding}),/VERIFIED_SERVICE_OBSERVATION_REQUIRED/);
+      await assert.rejects(bridge.requestServiceObservation('start',{binding:{...binding,lineEntity:28015}}),
+        /VERIFIED_SERVICE_OBSERVATION_REQUIRED/);
+      assert.equal(parseFlatDataFile(await readFile(requestPath,'utf8')).requestId,start.requestId);
+
+      await writeFile(receiptPath,lua({...start,kind:'phase2_service_observation_receipt',outcome:'raw_start_captured',
+        code:'RAW_START_CAPTURED',tickCount:101,updateCount:80,gameTime:100,...raw}));
+      await until(()=>bridge.serviceObservationState.phase==='observing');
+      await assert.rejects(bridge.requestServiceObservation('end',{binding}),/VERIFIED_SERVICE_OBSERVATION_REQUIRED/);
+
+      await writeFile(path.join(directory,'engine_observation.lua'),lua({...sample,counter:2,tickCount:120,updateCount:90}));
+      await until(()=>bridge.engineObservation.sample?.updateCount===90);
+      await bridge.requestServiceObservation('end');
+      const end=parseFlatDataFile(await readFile(requestPath,'utf8'));
+      assert.equal(end.requestId,2);
+      assert.equal(end.action,'end');
+      for(const key of ['nonce','originalCompany','targetCompany','vehicleEntity','lineEntity'])
+        assert.equal(end[key],start[key],`end request keeps ${key} from fresh start`);
+      await writeFile(receiptPath,lua({...end,kind:'phase2_service_observation_receipt',outcome:'raw_end_captured',
+        code:'RAW_END_CAPTURED',tickCount:121,updateCount:90,gameTime:200,...raw,
+        startGameTime:100,startUpdateCount:80,endGameTime:200,endUpdateCount:90,
+        accountNetWindowStart:100,accountNetWindowEnd:200}));
+      await until(()=>bridge.serviceObservationState.phase==='finished');
+      const results=events.filter(e=>e.event==='phase2_service_observation_result');
+      assert.equal(results.length,2);
+      assert.deepEqual(results.map(e=>e.outcome),['raw_start_captured','raw_end_captured']);
+      assert.ok(results.every(e=>e.gameplayVerified===false&&e.serviceAccountingVerified===false));
+    }finally{await bridge.close();await rm(root,{recursive:true,force:true});}
+  }
+});
