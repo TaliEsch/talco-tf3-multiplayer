@@ -123,17 +123,29 @@ export function decodeAsyncEngineRequest(source, nonce, {enableDepotBuild=false,
   return r;
 }
 
-export async function isUnpublishedEngineSource(temporary,source) {
+export async function isUnpublishedEngineSource(temporary,source,creationIdentity=null) {
   if(typeof source!=='string'||Buffer.byteLength(source)>4096)return false;
   const before=await lstat(temporary,{bigint:true});
   if(!before.isFile()||before.isSymbolicLink()||before.nlink!==1n||before.size!==BigInt(Buffer.byteLength(source)))return false;
+  // Sandboxie reports different IDs for path and handle queries. Compare each
+  // against its own exclusive-creation witness, never bytes alone or a guessed
+  // conversion between those representations.
+  if(creationIdentity!==null){
+    const expected=creationIdentity.path;
+    if(!expected?.isFile()||expected.isSymbolicLink()||expected.nlink!==1n
+      ||expected.size!==before.size||expected.ino!==before.ino
+      ||expected.dev!==before.dev)return false;
+  }
   const pending=await open(temporary,'r');
   try {
     const actual=await pending.stat({bigint:true});
     // Windows lstat may report dev=0 while fstat supplies a volume serial.
     // Compare available device identities and exact bigint file IDs, not rounded numbers.
-    if(!actual.isFile()||actual.nlink!==1n||actual.ino!==before.ino||actual.size!==before.size
-      ||before.dev!==0n&&actual.dev!==0n&&actual.dev!==before.dev)return false;
+    const expected=creationIdentity===null?before:creationIdentity.handle;
+    if(!expected?.isFile()||expected.nlink!==1n||expected.size!==before.size
+      ||!actual.isFile()||actual.nlink!==1n||actual.ino!==expected.ino||actual.size!==before.size
+      ||(creationIdentity!==null?actual.dev!==expected.dev
+        :expected.dev!==0n&&actual.dev!==0n&&actual.dev!==expected.dev))return false;
     const bytes=Buffer.alloc(4097);
     const {bytesRead}=await pending.read(bytes,0,bytes.length,0);
     return bytesRead===Buffer.byteLength(source)&&bytes.subarray(0,bytesRead).equals(Buffer.from(source));
@@ -189,9 +201,12 @@ export async function createAsyncEngineMailbox({directory,nonce=randomBytes(16).
         try {
           publicationStage='temporary_open';
           const h=await open(temporary,"wx",0o600);
+          let creationIdentity;
           try {
             publicationStage='temporary_write';await h.writeFile(source);
             publicationStage='temporary_sync';await h.sync();
+            creationIdentity=Object.freeze({handle:await h.stat({bigint:true}),
+              path:await lstat(temporary,{bigint:true})});
           } finally { await h.close(); }
           cancelled();
           publicationStage='replace';
@@ -201,7 +216,7 @@ export async function createAsyncEngineMailbox({directory,nonce=randomBytes(16).
               await requirePlainDirectory(directory);await regularOrAbsent(requestPath);
               cancelled();await rename(temporary,requestPath);
             },
-            verifyUnpublished:()=>isUnpublishedEngineSource(temporary,source),
+            verifyUnpublished:()=>isUnpublishedEngineSource(temporary,source,creationIdentity),
           });
         } finally { await unlink(temporary).catch(() => {}); }
       }).catch(error=>{
