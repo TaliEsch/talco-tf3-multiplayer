@@ -11,7 +11,10 @@ with balances 20,450,240 / 0. Host checkpoint save is 19,182,250 bytes, SHA-256
 Both terminal records have no fault and confirm correlated native halt; both
 cleanup receipts pass. Stock Host UI shows the vehicle outside its depot and
 moving at 20 km/h after Start. The corrected unpublished-source guard and
-resumed acknowledgment pass this actual paired path. No fresh reload of this
+resumed acknowledgment pass this actual paired path. Independent review also
+rehashes the saved file and confirms the exact resumed acknowledgment precedes
+the checkpoint. This run does not prove that an OS-denial recovery branch fired;
+that branch has owned Sandboxie fixture evidence. No fresh reload of this
 save, sustained service revenue, hidden RNG agreement or full-session acceptance
 is claimed. Earlier unknown operations remain spent and cannot be retried.
 

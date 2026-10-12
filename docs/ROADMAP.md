@@ -1,6 +1,20 @@
 # TalCo TF3 multiplayer — current delivery plan
 
-## Latest paired setup checkpoint — 12 October 2026
+## Current priority
+
+Fresh pair 4d69 passes Host-ordered Stop (sequence 1, update 716), Start
+(sequence 2, update 806), independent resumed-operation agreement and matching
+covered checkpoint 828. Both company balances remain 20,450,240 / 0. Host save
+`e766085a556b5d7cae8af6fe5998195844e07dee9dea77e53bfd15bf46c907a5`
+is verified (19,182,250 bytes); both native halts and cleanup receipts pass.
+This qualifies the unpublished-source correction and resumed acknowledgment
+in this live path. Next: fresh-process reload of this checkpoint, then sustained
+road-service operation, costs and revenue. Hidden RNG remains unavailable;
+full gameplay and friend-session acceptance remain open.
+
+The following entries retain the preceding investigation.
+
+## Historical paired setup checkpoint — 12 October 2026
 
 Fresh 4b22 clears setup and independently matches both assigned-company games
 at covered update 644. It halts before Start on Join control-request publication:
@@ -87,19 +101,9 @@ costs/revenue. Inter-stop paths pass; depot departure remains unverified.
 Hidden RNG coverage remains unavailable. The road-service loop remains open.
 
 
-## Current priority — qualify the updated build, then paired road construction
+## Historical priority — qualify the updated build, then paired road construction
 
-Fresh pair 4d69 passes Host-ordered Stop (sequence 1, update 716), Start
-(sequence 2, update 806), independent resumed-operation agreement and matching
-covered checkpoint 828. Both company balances remain 20,450,240 / 0. Host save
-`e766085a556b5d7cae8af6fe5998195844e07dee9dea77e53bfd15bf46c907a5`
-is verified (19,182,250 bytes); both native halts and cleanup receipts pass.
-This qualifies the unpublished-source correction and resumed acknowledgment
-in this live path. Next: fresh-process reload of this checkpoint, then sustained
-road-service operation, costs and revenue. Hidden RNG remains unavailable;
-full gameplay and friend-session acceptance remain open.
 
-The following entries retain the preceding investigation.
 
 Steam updated the installed executable on 2026-10-08 to build 25754343,
 SHA-256 `74861ac43b041aebc5179154345b3cf1ec83154c8e6cc58e0d9e02ff5fa602e4`.
