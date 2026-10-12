@@ -1,5 +1,19 @@
 # Native-integration review handoff — 23 September 2026
 
+## Latest paired control checkpoint — 12 October 2026
+
+Latest 5875 confirms Stop/Start independently in both games, Start sequence 2
+at update 808. Resumed vehicle readbacks at 819 / 818 show EN_ROUTE, stop flag 0
+and owner 15702; line ownership is independently unchanged. Covered state matches
+at 830 and Host save is verified. Final acceptance fails on the resumed-readback
+acknowledgment race: Host starts checkpoint before Join qualifies the peer record,
+then Join's running-only guard prevents lookup while held. Correct the barrier;
+do not relax native limits or retry completed actions. Join halt confirms, both
+native parked events correlate, but Host final confirmation and full receiver
+quiescence do not pass. Processes are retired and installed baselines restored.
+Fresh reload, physical depot departure, revenue and hidden RNG remain open.
+
+
 ## Latest reload checkpoint — 12 October 2026
 
 Latest 6afe passes paired assigned-save reload: both bindings complete, covered

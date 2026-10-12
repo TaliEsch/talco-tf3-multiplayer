@@ -1,5 +1,19 @@
 # TalCo TF3 multiplayer — current delivery plan
 
+## Latest paired control checkpoint — 12 October 2026
+
+Pair 5875 independently confirms Host-ordered Stop and Start in both games;
+Start completes at update 808, sequence 2. Both subsequently report `EN_ROUTE`,
+stop flag 0 and unchanged vehicle/line ownership. Covered state matches at 830,
+balances remain 20,450,240 / 0, and the Host checkpoint save is verified.
+The final paired acceptance fails: Host begins the checkpoint before Join
+acknowledges both resumed-operation readbacks; Join then stops looking for the
+peer record once held. Correct that acknowledgment race and qualify clean
+terminal teardown in a fresh session. Preserve completed action reservations.
+Processes are retired and installed baselines restored. Full cleanup, fresh
+reload of this save, physical depot departure and service revenue remain open.
+
+
 ## Latest reload checkpoint — 12 October 2026
 
 Fresh pair 6afe passes assigned-save reload in both TF3 instances: authenticated

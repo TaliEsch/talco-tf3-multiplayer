@@ -1,5 +1,30 @@
 # Completion audit against the build prompt
 
+## 12 October: paired assigned-service Stop/Start and matching saved state; final acknowledgment fails
+
+Fresh pair 5875 independently confirms ordered Stop and Start in both TF3 games.
+Start is sequence 2, completion update 808. Host vehicle readback at 819 and Join
+at 818 report `EN_ROUTE`, stop flag 0, vehicle 27989 owned by 15702 and depot
+27999; independent line readbacks at 821 / 820 confirm line 28014 owner 15702.
+Stock Host UI reports movement. Both covered checkpoints at update 830 have
+hash `f2d2fd17b68d16371d24f97d4b1ed341f5ce214177027ebdadd85362e20bdb76`;
+company balances remain 20,450,240 / 0. Host save hash is
+`3a36b2ee07ec120c577784af1868018bff5240d60854de6ab91e08273a9a755b`,
+19,182,525 bytes. Assignment identity relies on the retained assignment receipt
+and covered state, rather than a fresh vehicle-to-line field.
+
+This is not a clean final pass. Join reports `HOST_PURCHASE_STOP_START_UNKNOWN_NO_RETRY`
+because its resumed pair acknowledgment remains false: Host starts checkpoint 3
+after seeing Join's readback, before Join sees Host's later readback. The Join
+qualifier then refuses peer lookup while held. Host subsequently reports
+`TERMINAL_UNEXPECTED_FRAME`. Both native terminal events are correlated and valid;
+Join final halt confirms, Host final cleanup confirmation does not. Receiver
+quiescence fails. Private evidence was archived, exact pinned processes retired
+and installed baselines restored. No completed mutation is retried. Next correct
+the paired acknowledgment barrier, then qualify complete teardown and fresh reload.
+Hidden RNG state, physical depot departure, sustained service costs/revenue and
+the full gameplay acceptance remain open.
+
 ## 12 October: paired assigned-save reload passes binding and covered agreement
 
 Fresh pair 6afe loads the verified assigned save in both TF3 games, with Host
