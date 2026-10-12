@@ -1,5 +1,24 @@
 # Native-integration review handoff — 23 September 2026
 
+## Latest paired setup checkpoint — 12 October 2026
+
+Fresh 4b22 clears assigned-company paired setup and covered update 644. Join
+then faults on control-request `prepare` publication with `EPERM` at `replace`,
+22 milliseconds after its authenticated command frame. Existing replacement
+retry requires strict proof that the exact source remains unpublished; review
+that identity check under Sandboxie. No Start click or completion is claimed.
+Both native halts/controller restoration confirm; receiver quiescence does
+not. Games are retired and installed baselines restored. Preserve unknown
+delivery and qualify the corrected acknowledgment after resolving this gate.
+
+The 5875 acknowledgment fix passes composed actual-record checks but remains
+unverified live. Fresh b2b9 exceeded setup rendezvous before controller/action
+authorization; the click guard sent nothing. Join binding consumed 335.700
+seconds of the unchanged 480-second setup allowance; bridge connection arrived
+after expiration. Streamline preparation and loading before another attempt.
+Host halt confirms, Join native halt/full cleanup does not; both processes are
+retired and installed baselines restored. Preserve all spent reservations.
+
 ## Latest paired control checkpoint — 12 October 2026
 
 Latest 5875 confirms Stop/Start independently in both games, Start sequence 2

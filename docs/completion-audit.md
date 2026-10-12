@@ -1,5 +1,37 @@
 # Completion audit against the build prompt
 
+## 12 October: streamlined paired setup passes; Join request replacement fails
+
+Fresh 4b22 loads the assigned save in both real instances, initializes the
+assigned companies, and independently matches covered update 644 with hash
+`dd5d5795a0c15caec0674e669afcc981e6916aa0ac488c0b00a499ff14013047`.
+Balances remain 20,450,240 / 0. Join receives `command_prepare`, then faults
+22 milliseconds later on request publication: `EPERM`, stage `replace`,
+operation `prepare`. The Start click guard sends nothing. No new action or
+checkpoint completion is claimed; unknown delivery cannot be retried.
+
+Both correlated native halt receipts confirm and both controllers restore.
+Adapter drain passes, receiver quiescence and full cleanup do not. Exact
+processes were retired, raw evidence preserved privately, installed baselines
+restored. Investigate unpublished-source verification under Sandboxie before
+another live attempt; no timeout or publication budget was extended.
+
+## 12 October: acknowledgment correction; fresh setup expires before actions
+
+The 5875 resumed-readback race correction passes an offline composed regression
+with actual records. A second composed check confirms both awaited click
+workers can start before world qualification and still require Stop agreement
+and clock alignment. These two checks pass; they do not establish live success.
+
+Fresh b2b9 expires at `HOST_SETUP_RENDEZVOUS_EXPIRED_NO_RETRY`. Independent
+review measures transport publication to Join binding at 335.700 seconds and
+Host failure at 480.066 seconds. Join bridge connection arrives 94.363 seconds
+after failure. No controller activation or action authorization began; the
+click guard returns `HOST_START_TERMINAL_NO_CLICK`. Host halt confirms; Join
+native halt and complete cleanup do not. Both exact processes were retired,
+private evidence preserved, and installed baselines restored. The next attempt
+must streamline preparation/loading without extending native or setup limits.
+
 ## 12 October: paired assigned-service Stop/Start and matching saved state; final acknowledgment fails
 
 Fresh pair 5875 independently confirms ordered Stop and Start in both TF3 games.

@@ -1,5 +1,24 @@
 # TalCo TF3 multiplayer — current delivery plan
 
+## Latest paired setup checkpoint — 12 October 2026
+
+Fresh 4b22 clears setup and independently matches both assigned-company games
+at covered update 644. It halts before Start on Join control-request publication:
+`ENGINE_DELIVERY_UNKNOWN`, operation `prepare`, `EPERM`, stage `replace`.
+Both native halts and controller restoration confirm; receiver quiescence
+does not. Processes are retired and installed baselines restored. Investigate
+the exact unpublished-source identity check under Sandboxie before another
+attempt; preserve this operation's unknown-delivery barrier. The acknowledgment
+correction still lacks a live run through its gate.
+
+The resumed-readback acknowledgment correction passes a composed regression
+using the actual 5875 records, including delivery while held. Fresh attempt
+b2b9 did not reach action authorization: Join loading exceeded the unchanged
+eight-minute setup rendezvous. No Stop/Start was sent. Both processes were
+retired and installed baselines restored; clean native teardown did not pass
+on Join. Prepare workers and Steam before setup and progress directly through
+Join loading, then qualify the corrected acknowledgment and final teardown.
+
 ## Latest paired control checkpoint — 12 October 2026
 
 Pair 5875 independently confirms Host-ordered Stop and Start in both games;
