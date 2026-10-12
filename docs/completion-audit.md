@@ -1,5 +1,39 @@
 # Completion audit against the build prompt
 
+## 12 October: paired service reaches the saved-action routing rejection
+
+Pair 0c5f92 clears the observed-menu acknowledgment, actual Host qualification
+at update 604 with four retained admissions, authenticated Join company binding
+to 28619 and matching paused source loading. Stock UI balances are Host
+20,450,240 and Join zero. Before binding, the existing history qualifier reaches
+its 256-journal capacity. Independent review supports preserving one exactly
+released, provably retired lifetime journal under a hash-bound retired name.
+All nine unknown records remain intact; the native limit is unchanged. The
+unchanged binder subsequently qualifies and completes, with game-side company
+readback.
+
+Initialization fails ENGINE_LEASE_ARM_TIMEOUT. Existing game logs establish
+that watchdog request 1 reaches the handler at tick 13925 and is rejected with
+ROLLOVER_UNCERTAIN_ACTION, receiptField=releasedRouting. The saved connector
+road.segment.build archive is routed to a qualifier requiring road.stop.place.
+This is an implementation connection gap; increasing the deadline would not
+correct it. No line or assignment executes. Both native halts and controller
+restorations confirm; receiver drain remains unconfirmed. Subsequent exact
+process retirement and hash-verified installed-baseline restoration pass.
+Next qualify connector released routing through the existing dispatcher.
+
+## 12 October: service attempt stops before the menu acknowledgment
+
+Pair 0eebf524 does not reach service execution. The Host's required
+main-menu-ready receipt was not published before UI save loading; the runner
+ends with MAIN_MENU_UI_CONFIRMATION_REQUIRED, before controller installation.
+Fresh engine observations at update 604 do not satisfy that earlier gate.
+Host native halt is correlated. Join propagates the Host fault; its native
+halt completion remains unconfirmed. Both exact test processes are subsequently
+retired and both installed baselines pass hash-verified restoration. No service
+mutation is dispatched. Correct the observed-menu receipt and wait for the
+runner's load permission before loading in the next fresh attempt.
+
 ## 12 October: fresh connector reload and covered comparison pass
 
 Fresh Host process a143713 loads the verified paired connector save at paused
