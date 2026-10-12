@@ -79,6 +79,8 @@ export function correlateRawServiceInterval(start,end){
     'tickCount','updateCount','gameTime',...rawKeys];
   if(rows.some(row=>textFields.some(key=>typeof row[key]!=='string')
     ||numericFields.some(key=>!Number.isSafeInteger(row[key]))))return null;
+  if(typeof start.nonce!=='string'||!/^[a-f0-9]{32}$/.test(start.nonce)
+    ||end.nonce!==start.nonce)return null;
   if(start.action!=='start'||start.outcome!=='raw_start_captured'||start.code!=='RAW_START_CAPTURED'
     ||end.action!=='end'||end.outcome!=='raw_end_captured'||end.code!=='RAW_END_CAPTURED'
     ||!entity(start.requestId)||!entity(end.requestId)||end.requestId<=start.requestId

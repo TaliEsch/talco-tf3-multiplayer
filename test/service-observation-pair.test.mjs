@@ -3,7 +3,7 @@ import test from 'node:test';
 import {correlateRawServiceInterval,serviceObservationRequest,serializeServiceObservationRequest,
   parseServiceObservationReceipt} from '../src/service-observation.mjs';
 
-const start={action:'start',outcome:'raw_start_captured',code:'RAW_START_CAPTURED',
+const start={nonce:'a'.repeat(32),action:'start',outcome:'raw_start_captured',code:'RAW_START_CAPTURED',
   requestId:8,originalCompany:10,targetCompany:20,vehicleEntity:32,lineEntity:37,
   tickCount:101,updateCount:80,gameTime:100,startGameTime:100,startUpdateCount:80,
   endGameTime:0,endUpdateCount:0,accountNetWindowStart:0,accountNetWindowEnd:100,
@@ -54,6 +54,7 @@ test('paired raw service reads establish an interval and route-state change with
 
 test('raw service interval rejects changed identity, missing fields, stale endpoints and copied start mismatch',()=>{
   for(const changed of [
+    {...end,nonce:'b'.repeat(32)},{...end,nonce:undefined},
     {...end,vehicleEntity:33},{...end,requestId:8},{...end,tickCount:101},
     {...end,updateCount:80},{...end,gameTime:100},{...end,startGameTime:99},
     {...end,startVisitedMask:1},{...end,accountNetWindowEnd:199},
