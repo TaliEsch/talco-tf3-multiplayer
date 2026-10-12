@@ -91,16 +91,17 @@ export function createPhase2SetupSession({bridge,saveReport,logger=()=>{},checkp
           if(typeof value==='string'&&/^[A-Za-z_]{1,64}$/.test(value))row[field]=value;
         }else if(Number.isSafeInteger(value))row[field]=value;
       }
+      const observationNonce=record.nonce;
       servicePersistence=servicePersistence.then(async()=>{
         if(phase!=='complete')return;
         if(serviceEvidence.length>=2)throw new Error('SERVICE_EVIDENCE_LIMIT');
-        serviceEvidence.push(row);
+        serviceEvidence.push({...row,nonce:observationNonce});
         const paired=serviceEvidence.length===2
           ?correlateRawServiceInterval(serviceEvidence[0],serviceEvidence[1]):null;
         await saveReport({...run.status,serviceObservation:{scope:'raw_endpoint_account_reads',
           pairedRawIntervalCorrelated:paired!==null,routeStateChanged:paired?.routeStateChanged??false,
           serviceAccountingVerified:false,continuousOwnershipVerified:false,completedTripVerified:false,
-          receipts:structuredClone(serviceEvidence)}});
+          receipts:serviceEvidence.map(({nonce,...receipt})=>structuredClone(receipt))}});
       }).catch(async()=>{await fail();emit('SERVICE_REPORT_WRITE_FAILED_STOP_HELPER');});
       return servicePersistence;
     },

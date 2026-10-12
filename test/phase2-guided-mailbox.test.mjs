@@ -14,7 +14,7 @@ const money=(before,after)=>({originalBefore:5000,originalBeforeNegative:0,origi
 const exists=async file=>{try{await readFile(file);return true;}catch{return false;}};
 async function until(check){for(let i=0;i<500;i++){if(await check())return;await new Promise(resolve=>setTimeout(resolve,5));}assert.fail('guided mailbox timeout');}
 
-test('guided setup confirms a ready flat plan then completes the six real mailbox stages without resuming',async()=>{
+for(const crossSession of [false,true])test(`guided setup completes mailbox stages and ${crossSession?'rejects cross-session':'correlates same-session'} service observations`,async()=>{
   const root=await mkdtemp(path.join(os.tmpdir(),'tf3mp-guided-mailbox-'));
   const directory=path.join(root,'tf3mp_status_1'),events=[];
   let session;
@@ -83,7 +83,7 @@ test('guided setup confirms a ready flat plan then completes the six real mailbo
       nonce:bridge.nonce,secret:'must_not_persist'};
     await session.onEvent(rawStart);
     await session.onEvent({...rawStart,action:'end',outcome:'raw_end_captured',code:'RAW_END_CAPTURED',
-      requestId:9,tickCount:121,updateCount:90,gameTime:200,endGameTime:200,endUpdateCount:90,
+      requestId:9,nonce:crossSession?'f'.repeat(32):bridge.nonce,tickCount:121,updateCount:90,gameTime:200,endGameTime:200,endUpdateCount:90,
       accountNetWindowEnd:200,accountNet:250,intervalNet:300,intervalMaintenanceVehicle:-50,
       endVisitedMask:3,endStopIndex:1,gameplayVerified:true});
     const observed=JSON.parse(await readFile(path.join(root,'reports',`local-batch-${session.status.run.batchId}`,'report.json'),'utf8'));
@@ -91,8 +91,8 @@ test('guided setup confirms a ready flat plan then completes the six real mailbo
     assert.equal(observed.outcome,'SETUP_VERIFIED_SERVICE_NOT_OBSERVED');
     assert.equal(observed.serviceObservation.receipts.length,2);
     assert.equal(observed.serviceObservation.receipts[0].accountNet,-100);
-    assert.equal(observed.serviceObservation.pairedRawIntervalCorrelated,true);
-    assert.equal(observed.serviceObservation.routeStateChanged,true);
+    assert.equal(observed.serviceObservation.pairedRawIntervalCorrelated,!crossSession);
+    assert.equal(observed.serviceObservation.routeStateChanged,!crossSession);
     assert.equal(observed.serviceObservation.serviceAccountingVerified,false);
     assert.equal(observed.serviceObservation.completedTripVerified,false);
     assert.equal(observed.serviceObservation.continuousOwnershipVerified,false);
