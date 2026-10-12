@@ -1417,6 +1417,8 @@ export async function startGameBridge({ directory, logger = () => {}, intervalMs
         serviceObservation={request,context:{originalCompany:sample.companyEntity,updateCount:sample.updateCount},deadline:Date.now()+companyTimeoutMs};
         await publish(directory,'phase2_service_observation_request.lua',request);
         logger({level:'info',event:'phase2_service_observation_started',action,gameplayVerified:false});
+        // Publication identity only; completion still requires its correlated receipt.
+        return request;
       });
       pending=operation.catch(()=>{});return operation;
     },

@@ -146,8 +146,11 @@ test('assigned-service observation starts from caller binding for Host and Join 
         /SERVICE_START_CONTEXT_CHANGED/);
       await assert.rejects(readFile(requestPath),{code:'ENOENT'});
 
-      await bridge.requestServiceObservation('start',{binding});
+      const publishedStart=await bridge.requestServiceObservation('start',{binding});
       const start=parseFlatDataFile(await readFile(requestPath,'utf8'));
+      assert.deepEqual(publishedStart,{...start});
+      assert.equal(Object.isFrozen(publishedStart),true);
+      assert.equal(bridge.serviceObservationState.phase,'pending');
       assert.equal(start.requestId,1);
       assert.equal(start.action,'start');
       assert.equal(start.originalCompany,selectedCompany);
@@ -167,8 +170,11 @@ test('assigned-service observation starts from caller binding for Host and Join 
 
       await writeFile(path.join(directory,'engine_observation.lua'),lua({...sample,counter:2,tickCount:120,updateCount:90}));
       await until(()=>bridge.engineObservation.sample?.updateCount===90);
-      await bridge.requestServiceObservation('end');
+      const publishedEnd=await bridge.requestServiceObservation('end');
       const end=parseFlatDataFile(await readFile(requestPath,'utf8'));
+      assert.deepEqual(publishedEnd,{...end});
+      assert.equal(Object.isFrozen(publishedEnd),true);
+      assert.equal(bridge.serviceObservationState.phase,'pending');
       assert.equal(end.requestId,2);
       assert.equal(end.action,'end');
       for(const key of ['nonce','originalCompany','targetCompany','vehicleEntity','lineEntity'])
