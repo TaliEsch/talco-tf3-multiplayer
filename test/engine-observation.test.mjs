@@ -12,6 +12,7 @@ test("observation source uses finance namespace and exposes isolated failures", 
 const lua = fields => `function data() return {${Object.entries(fields).map(([k,v]) => `${k}=${JSON.stringify(v)},`).join("")} } end`;
 const sample = overrides => lua({ schemaVersion: 1, kind: "engine_observation", nonce, counter: 1, tickCount: 100, updateCount: 50,
   speedup: 0, companyEntity: 7, balanceKnown: 1, balanceNegative: 0, balance: 300, ...overrides });
+const qualifiedSample = overrides => sample({ schemaVersion: 2, gameTime: 195000, ...overrides });
 function fixture() {
   let time = 0; const events = [];
   const monitor = new EngineObservationMonitor({ nonce, now: () => time, logger: e => events.push(e) });
@@ -24,6 +25,17 @@ test("engine observation uses strict session-bound non-executable schema", () =>
   }
   assert.throws(() => parseEngineObservation(sample({}) + ';os.execute("bad")', nonce));
   assert.equal(parseEngineObservation(sample({ balance: 0, balanceKnown: 0 }), nonce).balanceKnown, 0);
+});
+test("qualified game time is in the exact nonce-bound observation envelope", () => {
+  assert.equal(parseEngineObservation(qualifiedSample({}), nonce).gameTime, 195000);
+  assert.equal(parseEngineObservation(sample({}), nonce).gameTime, undefined);
+  for (const fields of [
+    { schemaVersion: 2, gameTime: -1 }, { schemaVersion: 2, gameTime: 1.5 },
+    { schemaVersion: 2, gameTime: Number.MAX_SAFE_INTEGER + 1 },
+    { schemaVersion: 1, gameTime: 195000 }, { schemaVersion: 2, gameTime: undefined },
+    { schemaVersion: 2, gameTime: 195000, extra: 1 },
+    { schemaVersion: 2, gameTime: 195000, nonce: "b".repeat(32) },
+  ]) assert.throws(() => parseEngineObservation(sample(fields), nonce));
 });
 test("pause observation requires fresh advancing ticks and stable updates; resume needs advancing updates", () => {
   const f = fixture(); f.monitor.accept(sample({})); f.setTime(1600);
@@ -50,6 +62,18 @@ test("company changes and clock reset invalidate observations until helper resta
     assert.equal(f.monitor.accept(sample({ counter: 3, tickCount: 300 })), false);
   }
 });
+test("qualified game time cannot regress or disappear while the producer advances", () => {
+  for (const next of [qualifiedSample({ counter: 2, tickCount: 101, updateCount: 51, gameTime: 194999 }),
+    sample({ counter: 2, tickCount: 101, updateCount: 51 })]) {
+    const f = fixture(); f.monitor.accept(qualifiedSample({}));
+    assert.equal(f.monitor.accept(next), false);
+    assert.equal(f.monitor.status.fault, "CLOCK_OR_COMPANY_CHANGED");
+    assert.equal(f.monitor.status.available, false);
+  }
+  const f = fixture(); f.monitor.accept(qualifiedSample({}));
+  assert.equal(f.monitor.accept(qualifiedSample({ counter: 2, tickCount: 101, updateCount: 51, gameTime: 195200 })), true);
+  assert.equal(f.monitor.status.sample.gameTime, 195200);
+});
 test("updates advancing across paused samples restart observation window", () => {
   const f = fixture(); f.monitor.accept(sample({})); f.setTime(1700);
   f.monitor.accept(sample({ counter: 2, tickCount: 200, updateCount: 51 }));
@@ -73,9 +97,21 @@ test("changed data under the same counter invalidates producer identity",()=>{
     assert.equal(f.monitor.status.available,false);
   }
 });
+test("a changed qualified game time under the same counter invalidates the sample",()=>{
+  const f=fixture(); f.monitor.accept(qualifiedSample({}));
+  assert.equal(f.monitor.accept(qualifiedSample({gameTime:195001})),false);
+  assert.equal(f.monitor.status.fault,"OBSERVATION_COUNTER_CONFLICT");
+  assert.equal(f.monitor.status.available,false);
+});
 test("identical duplicate read neither faults nor extends its freshness",()=>{
   const f=fixture(); f.monitor.accept(sample({})); f.setTime(4000);
   assert.equal(f.monitor.accept(sample({})),false);
+  assert.equal(f.monitor.status.fault,null); f.setTime(5000);
+  assert.equal(f.monitor.status.available,false);
+});
+test("identical qualified clock duplicate also cannot refresh freshness",()=>{
+  const f=fixture(); f.monitor.accept(qualifiedSample({})); f.setTime(4000);
+  assert.equal(f.monitor.accept(qualifiedSample({})),false);
   assert.equal(f.monitor.status.fault,null); f.setTime(5000);
   assert.equal(f.monitor.status.available,false);
 });

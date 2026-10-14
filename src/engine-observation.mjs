@@ -3,8 +3,13 @@ import { parseFlatDataFile } from "./userdata-ipc.mjs";
 const uint = n => Number.isSafeInteger(n) && n >= 0 && n <= 2147483647;
 export function parseEngineObservation(source, nonce) {
   const p = parseFlatDataFile(source);
-  if (Object.keys(p).sort().join(",") !== "balance,balanceKnown,balanceNegative,companyEntity,counter,kind,nonce,schemaVersion,speedup,tickCount,updateCount"
-      || p.schemaVersion !== 1 || p.kind !== "engine_observation" || p.nonce !== nonce || !/^[0-9a-f]{32}$/.test(p.nonce)
+  const keys = Object.keys(p).sort().join(",");
+  const schemaOne = p.schemaVersion === 1
+    && keys === "balance,balanceKnown,balanceNegative,companyEntity,counter,kind,nonce,schemaVersion,speedup,tickCount,updateCount";
+  const schemaTwo = p.schemaVersion === 2
+    && keys === "balance,balanceKnown,balanceNegative,companyEntity,counter,gameTime,kind,nonce,schemaVersion,speedup,tickCount,updateCount"
+    && Number.isSafeInteger(p.gameTime) && p.gameTime >= 0;
+  if ((!schemaOne && !schemaTwo) || p.kind !== "engine_observation" || p.nonce !== nonce || !/^[0-9a-f]{32}$/.test(p.nonce)
       || ![p.companyEntity, p.counter, p.tickCount, p.updateCount, p.speedup].every(uint)
       || ![0, 1].includes(p.balanceKnown) || ![0, 1].includes(p.balanceNegative) || !Number.isSafeInteger(p.balance) || p.balance < 0
       || (p.balance === 0 && p.balanceNegative !== 0)
@@ -45,7 +50,8 @@ export class EngineObservationMonitor {
       }
       return false;
     }
-    if (previous && (p.tickCount < previous.tickCount || p.updateCount < previous.updateCount || p.companyEntity !== previous.companyEntity)) {
+    if (previous && (p.tickCount < previous.tickCount || p.updateCount < previous.updateCount || p.companyEntity !== previous.companyEntity
+      || previous.schemaVersion === 2 && (p.schemaVersion !== 2 || p.gameTime < previous.gameTime))) {
       this.#fault = "CLOCK_OR_COMPANY_CHANGED"; this.#emit("engine_observation_invalidated", p, this.#fault); return false;
     }
     if (this.#received !== null && this.now() - this.#received >= this.staleMs) { this.#pause = null; this.#pausedObserved = false; }
