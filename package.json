@@ -6,14 +6,18 @@
   "description": "Experimental encrypted direct-connect lockstep foundation for Transport Fever 3",
   "license": "PolyForm-Noncommercial-1.0.0",
   "devDependencies": {
-    "fengari": "0.1.5"
+    "eslint": "10.12.0",
+    "fengari": "0.1.5",
+    "globals": "17.13.0"
   },
   "engines": {
     "node": ">=24.0.0"
   },
   "scripts": {
+    "lint": "eslint src tools test eslint.config.mjs",
+    "lint:files": "eslint",
     "test:local-session": "node tools/test-local-session.mjs",
-    "check": "node --check src/cli.mjs && node --test --test-isolation=none \"test/*.test.mjs\"",
+    "check": "npm run lint && node --check src/cli.mjs && node --test --test-isolation=none \"test/*.test.mjs\"",
     "test": "node --test --test-isolation=none \"test/*.test.mjs\"",
     "host": "node src/cli.mjs host",
     "join": "node src/cli.mjs join",

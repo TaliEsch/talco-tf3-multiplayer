@@ -108,6 +108,7 @@
 ## Commands and delivery
 
 - Node >=24. Focused tests: `node --test --test-isolation=none test/<file>.test.mjs`.
+  Run `npm run lint`; use `npm run lint:files -- <paths>` for private runners.
   Full regression: `npm test`; CLI syntax plus regression: `npm run check`.
   Run full regression at integration milestones against stable inputs, not
   after every small edit. Report failures and skipped/unperformed checks.
