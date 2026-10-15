@@ -184,6 +184,7 @@ test('assigned-service observation starts from caller binding for Host and Join 
         startGameTime:100,startUpdateCount:80,endGameTime:200,endUpdateCount:90,
         accountNetWindowStart:100,accountNetWindowEnd:200}));
       await until(()=>bridge.serviceObservationState.phase==='finished');
+      await until(()=>events.filter(e=>e.event==='phase2_service_observation_result').length===2);
       const results=events.filter(e=>e.event==='phase2_service_observation_result');
       assert.equal(results.length,2);
       assert.deepEqual(results.map(e=>e.outcome),['raw_start_captured','raw_end_captured']);
