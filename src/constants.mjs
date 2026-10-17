@@ -1,6 +1,6 @@
 export const PROTOCOL_VERSION = 2;
 export const MAX_PLAYERS = 4;
-export const MAX_FRAME_BYTES = 65_536;
+export const MAX_FRAME_BYTES = 131_072;
 export const MAX_STRING_LENGTH = 256;
 export const DEFAULT_PORT = 37_333;
 export const DEFAULT_SAVE_PORT = 37_334;
