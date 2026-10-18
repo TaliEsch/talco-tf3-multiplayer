@@ -46,9 +46,11 @@ function M.new(profile)
     checkDirectory(directory)
     local fileName = physicalName(name)
     -- These pure-data publications are atomically replaced by the helper.
-    -- A Windows open can briefly fail during replacement. Never retry action
-    -- requests, return cached data, or accept an empty read as evidence.
-    if profile ~= PREFIX_PROFILE or (name ~= "bridge" and name ~= "ack" and name ~= "bridge_inventory") then
+    -- A Windows open can briefly fail during replacement. The capture request
+    -- only renews lease metadata; unlike action requests, it is safe to reread.
+    -- Never return cached data or accept an empty read as evidence.
+    if profile ~= PREFIX_PROFILE or (name ~= "bridge" and name ~= "ack"
+      and name ~= "bridge_inventory" and name ~= "gameplay_capture_request") then
       return app.loadUserdata(physicalDirectory(), fileName)
     end
     for attempt = 1, 3 do

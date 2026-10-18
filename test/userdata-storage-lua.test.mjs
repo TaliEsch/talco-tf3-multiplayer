@@ -167,3 +167,50 @@ app.loadUserdata=function() reads=reads+1;return {} end
 local exists,reason=storage.exists('tf3mp_status_1','bridge')
 assert(exists==false and reason=='empty_unavailable' and reads==3)
 `,{qualifiedPrefix:true}));
+
+test('capture lease request retries transient open or empty reads, with bounded failures and no mutation retries',()=>runLua(`
+local storage=userdataStorageModule.new(userdataStorageModule.prefixProfile)
+local reads=0
+local path='C:/Users/olihf/Downloads/Temp/tf3-isolated/userdata/mod_presets/'
+app.loadUserdata=function(directory,name)
+ reads=reads+1
+ assert(directory=='mod_presets' and name=='.tf3mp_status_1__gameplay_capture_request')
+ if reads==1 then error('cannot open '..path..name..'.lua: Permission denied') end
+ if reads==2 then return {} end
+ return {schemaVersion=1,leaseNonce=string.rep('a',32)}
+end
+local request=storage.loadUserdata('tf3mp_status_1','gameplay_capture_request')
+assert(request.leaseNonce==string.rep('a',32) and reads==3,'capture request must be freshly reread')
+
+reads=0
+app.loadUserdata=function(directory,name)
+ reads=reads+1
+ if reads<3 then return {} end
+ return {leaseNonce='renewed'}
+end
+assert(storage.loadUserdata('tf3mp_status_1','gameplay_capture_request').leaseNonce=='renewed' and reads==3,
+ 'empty capture request must be retried')
+
+reads=0
+app.loadUserdata=function(directory,name)
+ reads=reads+1
+ error('cannot open '..path..name..'.lua: Permission denied')
+end
+local ok,err=pcall(storage.loadUserdata,'tf3mp_status_1','gameplay_capture_request')
+assert(not ok and string.find(err,'Permission denied',1,true) and reads==3,'transient exhaustion stays bounded')
+
+reads=0
+app.loadUserdata=function(directory,name)
+ reads=reads+1;error('invalid Lua payload')
+end
+assert(not pcall(storage.loadUserdata,'tf3mp_status_1','gameplay_capture_request') and reads==1,
+ 'nontransient error must not retry')
+
+reads=0
+app.loadUserdata=function(directory,name)
+ reads=reads+1
+ error('cannot open '..path..name..'.lua: Permission denied')
+end
+assert(not pcall(storage.loadUserdata,'tf3mp_status_1','vehicle_command') and reads==1,
+ 'mutation request must not retry')
+`,{qualifiedPrefix:true}));
